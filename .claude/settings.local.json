@@ -16,7 +16,20 @@
       "Bash(npm start)",
       "Bash(curl:*)",
       "Bash(taskkill //F //PID 54020)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$(cat <<''EOF''\nInitial commit: NBA DFS Lineup Optimizer\n\nFull-stack application for building and optimizing NBA DFS lineups for DraftKings.\n\nFeatures:\n- Advanced projection algorithm with multiple factors (defense, pace, position matchups, vegas, rest days)\n- RotoWire data integration with custom projections\n- Linear programming optimizer for generating optimal lineups\n- AI chat assistant powered by OpenAI/Azure OpenAI\n- Mobile-responsive UI with card/table views\n- Real-time player pool filtering and sorting\n- Lineup builder with DraftKings position constraints\n- SQLite database for data persistence\n\nTech Stack:\n- Backend: Node.js, Express, SQLite (better-sqlite3)\n- Frontend: React, Vite, Tailwind CSS\n- AI: OpenAI API / Azure OpenAI\n- Optimizer: javascript-lp-solver\n\nProject Structure:\n- /backend: Express API server with projection and optimization logic\n- /frontend: React SPA with responsive design\n- Mobile-optimized with hamburger navigation and touch-friendly UI\n\nGenerated with Claude Code\nhttps://claude.com/claude-code\nEOF\n)\")",
+      "Bash(gh repo create:*)",
+      "Bash(az logout:*)",
+      "Bash(az login:*)",
+      "Bash(az group create:*)",
+      "Bash(az appservice plan create:*)",
+      "Bash(az staticwebapp create:*)",
+      "Bash(git pull:*)",
+      "Bash(git commit:*)",
+      "Bash(git push)",
+      "Bash(az staticwebapp appsettings set:*)",
+      "Bash(az staticwebapp appsettings:*)",
+      "Bash(gh run:*)"
     ],
     "deny": [],
     "ask": []
