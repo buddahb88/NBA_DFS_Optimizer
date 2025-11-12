@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir:*)",
+      "Bash(npm create:*)",
+      "Bash(npm install)",
+      "Bash(npm run init-db:*)",
+      "Bash(node -e:*)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:bigishdata.com)",
+      "Bash(npm install:*)",
+      "Bash(sqlite3:*)",
+      "WebFetch(domain:www.espn.com)",
+      "WebFetch(domain:hashtagbasketball.com)",
+      "Bash(npm start)",
+      "Bash(curl:*)",
+      "Bash(taskkill //F //PID 54020)",
+      "Bash(git add:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

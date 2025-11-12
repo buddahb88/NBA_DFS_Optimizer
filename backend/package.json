@@ -1,0 +1,35 @@
+{
+  "name": "nba-dfs-optimizer-backend",
+  "version": "1.0.0",
+  "description": "Backend API for NBA DFS Optimizer",
+  "main": "src/server.js",
+  "type": "module",
+  "scripts": {
+    "dev": "nodemon src/server.js",
+    "start": "node src/server.js",
+    "init-db": "node src/config/initDb.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@azure/core-auth": "^1.10.1",
+    "@azure/openai": "^2.0.0",
+    "@langchain/community": "^1.0.2",
+    "@langchain/core": "^1.0.4",
+    "@langchain/openai": "^1.1.0",
+    "better-sqlite3": "^9.2.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "javascript-lp-solver": "^0.4.24",
+    "js-yaml": "^4.1.0",
+    "langchain": "^1.0.4",
+    "node-fetch": "^3.3.2",
+    "openai": "^6.8.1",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  }
+}

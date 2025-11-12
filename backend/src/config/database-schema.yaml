@@ -1,0 +1,392 @@
+# NBA DFS Database Schema
+# This file describes the complete database structure for the AI assistant
+
+tables:
+  slates:
+    description: "DFS contest slates (Main, Showdown, etc.)"
+    columns:
+      - name: id
+        type: INTEGER
+        description: "Auto-increment primary key"
+      - name: slate_id
+        type: TEXT
+        description: "RotoWire slate identifier (e.g., '26155')"
+      - name: name
+        type: TEXT
+        description: "Slate name (e.g., 'Main Slate', 'Showdown')"
+      - name: sport
+        type: TEXT
+        description: "Sport type"
+        default: "NBA"
+      - name: start_time
+        type: DATETIME
+        description: "Slate start time"
+      - name: created_at
+        type: DATETIME
+        description: "Record creation timestamp"
+      - name: updated_at
+        type: DATETIME
+        description: "Last update timestamp"
+
+    example_queries:
+      - "SELECT * FROM slates ORDER BY created_at DESC LIMIT 1"
+      - "SELECT slate_id, name FROM slates WHERE name LIKE '%Main%'"
+
+  players:
+    description: "NBA players with projections, stats, and DFS metrics"
+    columns:
+      # Identity
+      - name: id
+        type: INTEGER
+        description: "Auto-increment primary key"
+      - name: slate_id
+        type: TEXT
+        description: "Foreign key to slates.slate_id"
+      - name: player_id
+        type: TEXT
+        description: "RotoWire player identifier"
+      - name: name
+        type: TEXT
+        description: "Player full name (e.g., 'LeBron James')"
+      - name: team
+        type: TEXT
+        description: "Team abbreviation (e.g., 'LAL', 'BOS', 'GSW')"
+      - name: opponent
+        type: TEXT
+        description: "Opponent team abbreviation"
+      - name: position
+        type: TEXT
+        description: "Eligible positions, comma-separated (e.g., 'PG,SG', 'SF,PF')"
+        valid_values: ["PG", "SG", "SF", "PF", "C", "PG,SG", "SF,PF", etc.]
+
+      # DFS Core
+      - name: salary
+        type: INTEGER
+        description: "DraftKings salary (e.g., 10500 = $10,500)"
+        range: [3000, 12000]
+      - name: projected_points
+        type: REAL
+        description: "Projected fantasy points (weighted average of recent performance)"
+        range: [0, 80]
+      - name: projected_minutes
+        type: REAL
+        description: "Projected playing time in minutes"
+        range: [0, 48]
+      - name: value
+        type: REAL
+        description: "Cash game value metric (points per $1000 salary, with ownership adjustments)"
+        calculation: "(projected_points / salary) * 1000 * bonuses"
+      - name: value_gpp
+        type: REAL
+        description: "GPP/Tournament value metric (rewards low ownership for leverage)"
+        calculation: "value * ownership_multiplier (low_owned = 1.15x, high_owned = 0.92x)"
+
+      # Status & Game Info
+      - name: game_info
+        type: TEXT
+        description: "Game matchup string (e.g., 'LAL vs BOS')"
+      - name: injury_status
+        type: TEXT
+        description: "Injury designation from RotoWire"
+        valid_values: [null, "GTD", "Questionable", "Doubtful", "OUT", "Probable"]
+        notes: |
+          - NULL or empty = healthy/active player
+          - To find healthy players: WHERE injury_status IS NULL OR injury_status = ''
+          - To exclude injured: WHERE injury_status NOT IN ('OUT', 'Doubtful') OR injury_status IS NULL
+      - name: headshot
+        type: TEXT
+        description: "URL to player headshot image"
+        example: "https://content.rotowire.com/images/headshots/nba/imagn-796436.jpg"
+
+      # Recent Performance
+      - name: fpts_last3
+        type: REAL
+        description: "Average fantasy points over last 3 games"
+      - name: fpts_last5
+        type: REAL
+        description: "Average fantasy points over last 5 games"
+      - name: fpts_last7
+        type: REAL
+        description: "Average fantasy points over last 7 games"
+      - name: fpts_last14
+        type: REAL
+        description: "Average fantasy points over last 14 games"
+
+      # Advanced Stats
+      - name: per
+        type: REAL
+        description: "Player Efficiency Rating (higher = more efficient)"
+        range: [0, 35]
+        notes: "20+ is excellent, 15-20 is good, <10 is poor"
+      - name: usage
+        type: REAL
+        description: "Usage rate % (percentage of team plays used by player)"
+        range: [0, 45]
+        notes: "30+ is high usage, 20-25 is medium, <15 is low"
+
+      # Vegas Betting Data
+      - name: vegas_implied_total
+        type: REAL
+        description: "Team's implied total points from Vegas line"
+        range: [90, 140]
+        notes: "115+ is high-scoring game environment"
+      - name: vegas_spread
+        type: REAL
+        description: "Point spread (negative = favorite, positive = underdog)"
+        range: [-15, 15]
+        notes: "< -7 = big favorite, > +7 = big underdog"
+      - name: vegas_over_under
+        type: REAL
+        description: "Game total over/under line"
+        range: [200, 250]
+        notes: "230+ is very high pace, <215 is low pace"
+      - name: vegas_win_prob
+        type: REAL
+        description: "Implied win probability percentage"
+        range: [0, 100]
+
+      # DFS Tournament Data
+      - name: rostership
+        type: REAL
+        description: "Projected ownership percentage in GPP tournaments"
+        range: [0, 100]
+        notes: |
+          - <5% = very low owned (leverage play)
+          - 5-15% = medium-low owned
+          - 15-30% = popular play
+          - >30% = chalk (very high owned)
+
+      # Metadata
+      - name: raw_data
+        type: TEXT
+        description: "JSON string of original RotoWire data"
+      - name: created_at
+        type: DATETIME
+      - name: updated_at
+        type: DATETIME
+
+    indexes:
+      - "idx_players_slate_id ON players(slate_id)"
+      - "idx_players_position ON players(position)"
+      - "idx_players_salary ON players(salary)"
+
+    common_filters:
+      healthy_players: "WHERE (injury_status IS NULL OR injury_status = '')"
+      active_starters: "WHERE projected_minutes >= 25 AND (injury_status IS NULL OR injury_status = '')"
+      value_plays: "WHERE value >= 5.0 AND projected_points >= 20"
+      high_upside: "WHERE projected_points >= 40 AND usage >= 25"
+      punt_plays: "WHERE salary <= 4000 AND projected_minutes >= 15"
+      game_stack: "WHERE team = 'LAL' OR opponent = 'LAL'"
+      high_total_games: "WHERE vegas_over_under >= 230"
+      leverage_plays: "WHERE rostership <= 10 AND projected_points >= 30"
+      chalk_plays: "WHERE rostership >= 25"
+
+    example_queries:
+      basic:
+        - description: "Top 10 players by projection"
+          query: "SELECT name, team, salary, projected_points, position FROM players WHERE (injury_status IS NULL OR injury_status = '') ORDER BY projected_points DESC LIMIT 10"
+
+        - description: "Best value guards under $7k"
+          query: "SELECT name, salary, projected_points, value FROM players WHERE (position LIKE '%PG%' OR position LIKE '%SG%') AND salary <= 7000 AND (injury_status IS NULL OR injury_status = '') ORDER BY value DESC LIMIT 10"
+
+        - description: "High usage, low ownership plays"
+          query: "SELECT name, salary, usage, rostership, projected_points FROM players WHERE usage >= 28 AND rostership <= 15 AND (injury_status IS NULL OR injury_status = '') ORDER BY value_gpp DESC LIMIT 10"
+
+        - description: "Players in high-scoring games"
+          query: "SELECT name, team, opponent, vegas_implied_total, vegas_over_under, projected_points FROM players WHERE vegas_over_under >= 225 AND (injury_status IS NULL OR injury_status = '') ORDER BY projected_points DESC"
+
+        - description: "Punt plays with upside"
+          query: "SELECT name, salary, projected_points, projected_minutes, fpts_last3 FROM players WHERE salary <= 4500 AND projected_minutes >= 20 AND fpts_last3 >= 15 AND (injury_status IS NULL OR injury_status = '')"
+
+  lineups:
+    description: "Saved DFS lineups"
+    columns:
+      - name: id
+        type: INTEGER
+      - name: slate_id
+        type: TEXT
+      - name: name
+        type: TEXT
+      - name: total_salary
+        type: INTEGER
+        description: "Sum of all player salaries"
+        range: [40000, 50000]
+      - name: projected_points
+        type: REAL
+        description: "Sum of all player projected points"
+      - name: created_at
+        type: DATETIME
+      - name: updated_at
+        type: DATETIME
+
+  lineup_players:
+    description: "Junction table linking players to lineups"
+    columns:
+      - name: id
+        type: INTEGER
+      - name: lineup_id
+        type: INTEGER
+      - name: player_id
+        type: INTEGER
+      - name: position_slot
+        type: TEXT
+        description: "Which roster slot the player fills"
+        valid_values: ["PG", "SG", "SF", "PF", "C", "G", "F", "UTIL"]
+
+  chat_sessions:
+    description: "AI chat conversation sessions"
+    columns:
+      - name: id
+        type: INTEGER
+      - name: title
+        type: TEXT
+      - name: slate_id
+        type: TEXT
+      - name: created_at
+        type: DATETIME
+      - name: updated_at
+        type: DATETIME
+
+  chat_messages:
+    description: "Individual messages in chat conversations"
+    columns:
+      - name: id
+        type: INTEGER
+      - name: session_id
+        type: INTEGER
+      - name: role
+        type: TEXT
+        valid_values: ["user", "assistant", "system", "tool"]
+      - name: content
+        type: TEXT
+      - name: metadata
+        type: TEXT
+        description: "JSON string with additional data"
+      - name: created_at
+        type: DATETIME
+
+  team_defense_rankings:
+    description: "NBA team defensive efficiency and advanced stats (auto-updated from ESPN)"
+    columns:
+      - name: team
+        type: TEXT
+        description: "Team abbreviation (3-letter code: LAL, BOS, GSW, etc.)"
+        notes: "PRIMARY KEY"
+      - name: def_eff
+        type: REAL
+        description: "Defensive Efficiency - points allowed per 100 possessions"
+        range: [102, 124]
+        notes: "Lower is better. <106 = elite, 106-110 = good, 110-114 = average, 114-118 = below avg, >118 = poor"
+      - name: off_eff
+        type: REAL
+        description: "Offensive Efficiency - points scored per 100 possessions"
+        range: [102, 121]
+        notes: "Higher is better"
+      - name: pace
+        type: REAL
+        description: "Possessions per game"
+        range: [95, 104]
+        notes: "Higher pace = more fantasy opportunities. >102 = fast, 98-102 = average, <98 = slow"
+      - name: ast_ratio
+        type: REAL
+        description: "Assist ratio - percentage of possessions ending in assists"
+      - name: to_ratio
+        type: REAL
+        description: "Turnover ratio - percentage of possessions ending in turnovers"
+      - name: rebr
+        type: REAL
+        description: "Overall rebound rate"
+      - name: eff_fg_pct
+        type: REAL
+        description: "Effective field goal percentage"
+      - name: ts_pct
+        type: REAL
+        description: "True shooting percentage"
+      - name: updated_at
+        type: DATETIME
+        description: "Last update timestamp (auto-refreshed on slate sync)"
+
+    example_queries:
+      - description: "Teams with worst defense (easiest matchups)"
+        query: "SELECT team, def_eff FROM team_defense_rankings ORDER BY def_eff DESC LIMIT 5"
+
+      - description: "Teams with elite defense (toughest matchups)"
+        query: "SELECT team, def_eff FROM team_defense_rankings ORDER BY def_eff ASC LIMIT 5"
+
+      - description: "Fast-pace teams (more opportunities)"
+        query: "SELECT team, pace, off_eff FROM team_defense_rankings WHERE pace > 102 ORDER BY pace DESC"
+
+      - description: "Players facing weak defenses"
+        query: |
+          SELECT p.name, p.team, p.opponent, t.def_eff, p.projected_points
+          FROM players p
+          JOIN team_defense_rankings t ON p.opponent = t.team
+          WHERE t.def_eff > 118
+          ORDER BY p.projected_points DESC
+
+    notes: |
+      - Projections already factor in opponent defense automatically
+      - DEF EFF is the most important matchup metric
+      - Pace affects volume of fantasy production
+      - Data is refreshed from ESPN.com every time a slate is loaded
+
+# DFS Constraints (DraftKings)
+dfs_rules:
+  salary_cap: 50000
+  roster_size: 8
+  positions:
+    - name: PG
+      description: "Point Guard"
+      required: 1
+    - name: SG
+      description: "Shooting Guard"
+      required: 1
+    - name: SF
+      description: "Small Forward"
+      required: 1
+    - name: PF
+      description: "Power Forward"
+      required: 1
+    - name: C
+      description: "Center"
+      required: 1
+    - name: G
+      description: "Guard Flex (PG or SG)"
+      required: 1
+    - name: F
+      description: "Forward Flex (SF or PF)"
+      required: 1
+    - name: UTIL
+      description: "Utility (Any position)"
+      required: 1
+
+# Important Query Tips
+query_tips:
+  - "ALWAYS filter out injured players with: WHERE (injury_status IS NULL OR injury_status = '')"
+  - "There is NO 'ACTIVE' status - healthy players have NULL or empty injury_status"
+  - "For 'top tier' players, use salary >= 9000 or projected_points >= 45"
+  - "For 'value plays', look for value >= 5.5 or value_gpp >= 6.0"
+  - "Position filtering: use LIKE operator (e.g., WHERE position LIKE '%PG%')"
+  - "High ownership = rostership >= 25, Low ownership = rostership <= 10"
+  - "Team abbreviations: LAL, BOS, GSW, MIA, etc. (3-letter uppercase)"
+  - "Always order by projected_points DESC or value DESC for best results"
+
+# Strategy Insights
+dfs_strategy:
+  cash_games:
+    focus: "Safety, high floor, popular plays"
+    metrics: ["value", "projected_minutes >= 30", "rostership >= 15"]
+    sql_example: "WHERE value >= 5.5 AND projected_minutes >= 28 ORDER BY projected_points DESC"
+
+  gpp_tournaments:
+    focus: "Upside, ceiling, leverage, differentiation"
+    metrics: ["value_gpp", "usage >= 28", "rostership <= 15", "fpts_last3 variance"]
+    sql_example: "WHERE value_gpp >= 6.0 AND rostership <= 15 AND usage >= 25 ORDER BY projected_points DESC"
+
+  game_stacking:
+    description: "Select multiple players from same game for correlated upside"
+    sql_example: "WHERE (team = 'LAL' OR opponent = 'LAL') AND vegas_over_under >= 225"
+
+  leverage_plays:
+    description: "Contrarian plays with low ownership but high upside"
+    sql_example: "WHERE rostership <= 10 AND projected_points >= 35 AND usage >= 25"
