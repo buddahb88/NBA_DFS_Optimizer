@@ -29,7 +29,10 @@
       "Bash(git push)",
       "Bash(az staticwebapp appsettings set:*)",
       "Bash(az staticwebapp appsettings:*)",
-      "Bash(gh run:*)"
+      "Bash(gh run:*)",
+      "Bash(az webapp:*)",
+      "Bash(publish-profile.xml)",
+      "Bash(cat:*)"
     ],
     "deny": [],
     "ask": []
