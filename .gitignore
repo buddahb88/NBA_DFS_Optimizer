@@ -10,7 +10,10 @@ yarn.lock
 .env
 .env.local
 .env.*.local
-*.env
+
+# Allow production env (no secrets, just public URLs)
+!.env.production
+!frontend/.env.production
 
 # Database files
 *.db
