@@ -170,15 +170,31 @@ function PlayerPoolPage() {
                       </div>
                       <div>
                         <span className="text-gray-500">Proj:</span>
-                        <span className="ml-1 font-semibold text-gray-900">{player.projected_points?.toFixed(1)}</span>
+                        <span className={`ml-1 font-semibold ${
+                          player.projected_points >= 40 ? 'text-green-600' :
+                          player.projected_points <= 25 ? 'text-red-600' :
+                          'text-gray-900'
+                        }`}>
+                          {player.projected_points?.toFixed(1)}
+                        </span>
                       </div>
                       <div>
                         <span className="text-gray-500">Value:</span>
-                        <span className="ml-1 font-semibold text-green-600">{player.value?.toFixed(2)}</span>
+                        <span className={`ml-1 font-semibold ${
+                          player.value >= 5.5 ? 'text-green-600' :
+                          player.value <= 4.0 ? 'text-red-600' :
+                          'text-gray-900'
+                        }`}>
+                          {player.value?.toFixed(2)}
+                        </span>
                       </div>
                       <div>
                         <span className="text-gray-500">Min:</span>
-                        <span className="ml-1 font-semibold text-gray-900">
+                        <span className={`ml-1 font-semibold ${
+                          player.projected_minutes >= 32 ? 'text-green-600' :
+                          player.projected_minutes <= 20 ? 'text-red-600' :
+                          'text-gray-900'
+                        }`}>
                           {player.projected_minutes ? player.projected_minutes.toFixed(0) : '-'}
                         </span>
                       </div>
@@ -317,14 +333,36 @@ function PlayerPoolPage() {
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                       ${player.salary?.toLocaleString()}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {player.projected_points?.toFixed(1)}
+                    <td className="px-6 py-4 whitespace-nowrap text-sm">
+                      <span className={`font-semibold ${
+                        player.projected_points >= 40 ? 'text-green-600' :  // High projection
+                        player.projected_points <= 25 ? 'text-red-600' :    // Low projection
+                        'text-gray-700'
+                      }`}>
+                        {player.projected_points?.toFixed(1)}
+                      </span>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-green-600">
-                      {player.value?.toFixed(2)}
+                    <td className="px-6 py-4 whitespace-nowrap text-sm">
+                      <span className={`font-semibold ${
+                        player.value >= 5.5 ? 'text-green-600' :  // Great value
+                        player.value <= 4.0 ? 'text-red-600' :    // Poor value
+                        'text-gray-700'
+                      }`}>
+                        {player.value?.toFixed(2)}
+                      </span>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {player.projected_minutes ? player.projected_minutes.toFixed(0) : '-'}
+                    <td className="px-6 py-4 whitespace-nowrap text-sm">
+                      {player.projected_minutes ? (
+                        <span className={`font-semibold ${
+                          player.projected_minutes >= 32 ? 'text-green-600' :  // Starter minutes
+                          player.projected_minutes <= 20 ? 'text-red-600' :    // Bench minutes
+                          'text-gray-700'
+                        }`}>
+                          {player.projected_minutes.toFixed(0)}
+                        </span>
+                      ) : (
+                        <span className="text-gray-400">-</span>
+                      )}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm">
                       {player.dvp_pts_allowed ? (

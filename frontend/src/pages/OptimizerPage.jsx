@@ -163,12 +163,24 @@ function OptimizerPage() {
                         <div className="text-xs text-gray-500">
                           {player.position} • {player.team}
                         </div>
-                        <div className="text-xs text-gray-600 mt-1">
-                          ${player.salary?.toLocaleString()} • {player.projected_points?.toFixed(1)} pts
+                        <div className="text-xs mt-1">
+                          <span className="text-gray-600">${player.salary?.toLocaleString()}</span>
+                          <span className="text-gray-600"> • </span>
+                          <span className={`font-medium ${
+                            player.projected_points >= 40 ? 'text-green-600' :
+                            player.projected_points <= 25 ? 'text-red-600' :
+                            'text-gray-600'
+                          }`}>
+                            {player.projected_points?.toFixed(1)} pts
+                          </span>
                         </div>
                         <div className="flex gap-2 mt-1 text-xs">
                           {player.projected_minutes && (
-                            <span className="text-gray-600">
+                            <span className={`font-medium ${
+                              player.projected_minutes >= 32 ? 'text-green-600' :
+                              player.projected_minutes <= 20 ? 'text-red-600' :
+                              'text-gray-600'
+                            }`}>
                               {player.projected_minutes.toFixed(0)}m
                             </span>
                           )}
@@ -558,14 +570,32 @@ function OptimizerPage() {
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                           ${slot.player?.salary?.toLocaleString()}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {slot.player?.projected_points?.toFixed(1)}
+                        <td className="px-6 py-4 whitespace-nowrap text-sm">
+                          <span className={`font-semibold ${
+                            slot.player?.projected_points >= 40 ? 'text-green-600' :
+                            slot.player?.projected_points <= 25 ? 'text-red-600' :
+                            'text-gray-700'
+                          }`}>
+                            {slot.player?.projected_points?.toFixed(1)}
+                          </span>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                          {slot.player?.projected_minutes?.toFixed(0)}
+                        <td className="px-6 py-4 whitespace-nowrap text-sm">
+                          <span className={`font-semibold ${
+                            slot.player?.projected_minutes >= 32 ? 'text-green-600' :
+                            slot.player?.projected_minutes <= 20 ? 'text-red-600' :
+                            'text-gray-700'
+                          }`}>
+                            {slot.player?.projected_minutes?.toFixed(0)}
+                          </span>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-green-600">
-                          {mode === 'gpp' ? slot.player?.value_gpp?.toFixed(2) : slot.player?.value?.toFixed(2)}
+                        <td className="px-6 py-4 whitespace-nowrap text-sm">
+                          <span className={`font-semibold ${
+                            (mode === 'gpp' ? slot.player?.value_gpp : slot.player?.value) >= 5.5 ? 'text-green-600' :
+                            (mode === 'gpp' ? slot.player?.value_gpp : slot.player?.value) <= 4.0 ? 'text-red-600' :
+                            'text-gray-700'
+                          }`}>
+                            {mode === 'gpp' ? slot.player?.value_gpp?.toFixed(2) : slot.player?.value?.toFixed(2)}
+                          </span>
                         </td>
                       </tr>
                     ))}
