@@ -82,9 +82,9 @@ class PlayerModel {
         salary, projected_points, projected_minutes, value, value_gpp, game_info, injury_status,
         per, usage, rest_days, fpts_last3, fpts_last5, fpts_last7, fpts_last14,
         vegas_implied_total, vegas_spread, vegas_over_under, vegas_win_prob, rostership, headshot,
-        dvp_rank, opp_def_eff, raw_data
+        dvp_pts_allowed, opp_def_eff, raw_data
       )
-      VALUES (@slateId, @playerId, @name, @team, @opponent, @position, @salary, @projectedPoints, @projectedMinutes, @value, @valueGpp, @gameInfo, @injuryStatus, @per, @usage, @restDays, @fptsLast3, @fptsLast5, @fptsLast7, @fptsLast14, @vegasImpliedTotal, @vegasSpread, @vegasOverUnder, @vegasWinProb, @rostership, @headshot, @dvpRank, @oppDefEff, @rawData)
+      VALUES (@slateId, @playerId, @name, @team, @opponent, @position, @salary, @projectedPoints, @projectedMinutes, @value, @valueGpp, @gameInfo, @injuryStatus, @per, @usage, @restDays, @fptsLast3, @fptsLast5, @fptsLast7, @fptsLast14, @vegasImpliedTotal, @vegasSpread, @vegasOverUnder, @vegasWinProb, @rostership, @headshot, @dvpPtsAllowed, @oppDefEff, @rawData)
       ON CONFLICT(slate_id, player_id) DO UPDATE SET
         name = excluded.name,
         team = excluded.team,
@@ -110,7 +110,7 @@ class PlayerModel {
         vegas_win_prob = excluded.vegas_win_prob,
         rostership = excluded.rostership,
         headshot = excluded.headshot,
-        dvp_rank = excluded.dvp_rank,
+        dvp_pts_allowed = excluded.dvp_pts_allowed,
         opp_def_eff = excluded.opp_def_eff,
         raw_data = excluded.raw_data,
         updated_at = CURRENT_TIMESTAMP
@@ -149,7 +149,7 @@ class PlayerModel {
           vegasWinProb: player.vegasWinProb || 0,
           rostership: player.rostership || 0,
           headshot: player.headshot || null,
-          dvpRank: player.dvpRank || null,
+          dvpPtsAllowed: player.dvpPtsAllowed || null,
           oppDefEff: player.oppDefEff || null,
           injuryStatus: player.injuryStatus,
           rawData: player.rawData

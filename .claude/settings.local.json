@@ -41,7 +41,10 @@
       "Bash(npm run snapshot:*)",
       "Bash(npm run dev:*)",
       "Bash(node test-defense-data.js:*)",
-      "Bash(node scripts/backfill-defense-data.js:*)"
+      "Bash(node scripts/backfill-defense-data.js:*)",
+      "Bash(node scripts/investigate-team-names.js:*)",
+      "Bash(node scripts/backfill-pts-allowed.js:*)",
+      "Bash(node scripts/check-defense-tables.js:*)"
     ],
     "deny": [],
     "ask": []

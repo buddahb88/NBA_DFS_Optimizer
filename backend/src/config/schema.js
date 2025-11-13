@@ -86,7 +86,7 @@ export const createTables = (db) => {
     { name: 'rostership', type: 'REAL' },
     { name: 'value_gpp', type: 'REAL' },
     { name: 'headshot', type: 'TEXT' },
-    { name: 'dvp_rank', type: 'INTEGER' },
+    { name: 'dvp_pts_allowed', type: 'REAL' },
     { name: 'opp_def_eff', type: 'REAL' }
   ];
 

@@ -1,6 +1,7 @@
 import fetch from 'node-fetch';
 import teamDefenseModel from '../models/teamDefenseModel.js';
 import teamDefenseVsPositionModel from '../models/teamDefenseVsPositionModel.js';
+import { normalizeForRankings, normalizeForVsPosition } from '../utils/teamMapping.js';
 
 class RotowireService {
   constructor() {
@@ -45,7 +46,8 @@ class RotowireService {
   getDefenseAdjustment(opponentTeam) {
     // ADDITIVE MODEL: Returns fantasy point adjustment (not multiplier)
     const rankings = this.loadDefenseRankings();
-    const oppDefense = rankings[opponentTeam];
+    const normalizedTeam = normalizeForRankings(opponentTeam);
+    const oppDefense = rankings[normalizedTeam];
 
     if (!oppDefense) {
       return 0; // No data, no adjustment
@@ -67,7 +69,8 @@ class RotowireService {
   getPaceAdjustment(opponentTeam) {
     // ADDITIVE MODEL: Returns fantasy point adjustment (not multiplier)
     const rankings = this.loadDefenseRankings();
-    const oppStats = rankings[opponentTeam];
+    const normalizedTeam = normalizeForRankings(opponentTeam);
+    const oppStats = rankings[normalizedTeam];
 
     if (!oppStats || !oppStats.pace) {
       return 0;
@@ -92,8 +95,9 @@ class RotowireService {
       return 0; // No position data
     }
 
+    const normalizedTeam = normalizeForVsPosition(opponentTeam);
     const positionData = this.loadPositionDefenseData();
-    const key = `${opponentTeam}_${primaryPosition}`;
+    const key = `${normalizedTeam}_${primaryPosition}`;
     const defenseVsPos = positionData[key];
 
     if (!defenseVsPos) {
@@ -504,20 +508,22 @@ class RotowireService {
                        null;
 
       // Get opponent defense data for display
-      let dvpRank = null;
+      let dvpPtsAllowed = null;
       let oppDefEff = null;
 
       if (opponent) {
-        // Get DVP rank for this player's position vs opponent
+        // Get DVP points allowed for this player's position vs opponent
         // Use primary position (first one) since defense table stores single positions
         const primaryPosition = position.split(',')[0].trim();
-        const defenseVsPos = teamDefenseVsPositionModel.getByTeamAndPosition(opponent, primaryPosition);
+        const normalizedVsPos = normalizeForVsPosition(opponent);
+        const defenseVsPos = teamDefenseVsPositionModel.getByTeamAndPosition(normalizedVsPos, primaryPosition);
         if (defenseVsPos) {
-          dvpRank = defenseVsPos.rank;
+          dvpPtsAllowed = defenseVsPos.pts_allowed;
         }
 
         // Get opponent's overall defensive efficiency
-        const oppDefense = teamDefenseModel.getByTeam(opponent);
+        const normalizedRankings = normalizeForRankings(opponent);
+        const oppDefense = teamDefenseModel.getByTeam(normalizedRankings);
         if (oppDefense) {
           oppDefEff = oppDefense.def_eff;
         }
@@ -549,7 +555,7 @@ class RotowireService {
         vegasWinProb,
         rostership,
         headshot,
-        dvpRank,
+        dvpPtsAllowed,
         oppDefEff,
         rawData: JSON.stringify(player)
       };

@@ -172,13 +172,13 @@ function OptimizerPage() {
                               {player.projected_minutes.toFixed(0)}m
                             </span>
                           )}
-                          {player.dvp_rank && (
+                          {player.dvp_pts_allowed && (
                             <span className={`font-medium ${
-                              player.dvp_rank <= 40 ? 'text-red-600' :    // Top 40 = tough matchup
-                              player.dvp_rank >= 110 ? 'text-green-600' :  // Bottom 40 = great matchup
+                              player.dvp_pts_allowed >= 45 ? 'text-green-600' :  // High pts allowed = easier matchup
+                              player.dvp_pts_allowed <= 35 ? 'text-red-600' :    // Low pts allowed = tough matchup
                               'text-gray-600'
                             }`}>
-                              DVP: {player.dvp_rank}
+                              DVP: {player.dvp_pts_allowed.toFixed(1)}
                             </span>
                           )}
                           {player.opp_def_eff && (

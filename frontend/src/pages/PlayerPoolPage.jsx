@@ -182,15 +182,15 @@ function PlayerPoolPage() {
                           {player.projected_minutes ? player.projected_minutes.toFixed(0) : '-'}
                         </span>
                       </div>
-                      {player.dvp_rank && (
+                      {player.dvp_pts_allowed && (
                         <div>
                           <span className="text-gray-500">DVP:</span>
                           <span className={`ml-1 font-semibold ${
-                            player.dvp_rank <= 40 ? 'text-red-600' :
-                            player.dvp_rank >= 110 ? 'text-green-600' :
+                            player.dvp_pts_allowed >= 45 ? 'text-green-600' :  // High pts = easier
+                            player.dvp_pts_allowed <= 35 ? 'text-red-600' :    // Low pts = tough
                             'text-gray-900'
                           }`}>
-                            #{player.dvp_rank}
+                            {player.dvp_pts_allowed.toFixed(1)}
                           </span>
                         </div>
                       )}
@@ -265,10 +265,10 @@ function PlayerPoolPage() {
                     Min {sortField === 'projected_minutes' && (sortDirection === 'asc' ? '↑' : '↓')}
                   </th>
                   <th
-                    onClick={() => handleSort('dvp_rank')}
+                    onClick={() => handleSort('dvp_pts_allowed')}
                     className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
                   >
-                    DVP {sortField === 'dvp_rank' && (sortDirection === 'asc' ? '↑' : '↓')}
+                    DVP {sortField === 'dvp_pts_allowed' && (sortDirection === 'asc' ? '↑' : '↓')}
                   </th>
                   <th
                     onClick={() => handleSort('opp_def_eff')}
@@ -327,13 +327,13 @@ function PlayerPoolPage() {
                       {player.projected_minutes ? player.projected_minutes.toFixed(0) : '-'}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm">
-                      {player.dvp_rank ? (
+                      {player.dvp_pts_allowed ? (
                         <span className={`font-semibold ${
-                          player.dvp_rank <= 40 ? 'text-red-600' :     // Top 40 = tough (red)
-                          player.dvp_rank >= 110 ? 'text-green-600' :  // Bottom 40 = great (green)
-                          'text-gray-700'                               // Middle = neutral
+                          player.dvp_pts_allowed >= 45 ? 'text-green-600' :  // High pts = great (green)
+                          player.dvp_pts_allowed <= 35 ? 'text-red-600' :    // Low pts = tough (red)
+                          'text-gray-700'                                     // Middle = neutral
                         }`}>
-                          #{player.dvp_rank}
+                          {player.dvp_pts_allowed.toFixed(1)}
                         </span>
                       ) : (
                         <span className="text-gray-400">-</span>
