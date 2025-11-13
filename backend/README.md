@@ -1,1 +1,1 @@
-# Backend is ready for Azure deployment
+# Backend deployment with refreshed credentials
