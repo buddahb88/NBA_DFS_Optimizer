@@ -53,6 +53,11 @@ function PlayerPoolPage() {
       let aVal = a[sortField];
       let bVal = b[sortField];
 
+      // Handle null/undefined values - push them to the end
+      if (aVal == null && bVal == null) return 0;
+      if (aVal == null) return 1;
+      if (bVal == null) return -1;
+
       if (sortField === 'name' || sortField === 'team') {
         aVal = aVal.toLowerCase();
         bVal = bVal.toLowerCase();
@@ -259,11 +264,17 @@ function PlayerPoolPage() {
                   >
                     Min {sortField === 'projected_minutes' && (sortDirection === 'asc' ? '↑' : '↓')}
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    DVP
+                  <th
+                    onClick={() => handleSort('dvp_rank')}
+                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                  >
+                    DVP {sortField === 'dvp_rank' && (sortDirection === 'asc' ? '↑' : '↓')}
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    DEF Eff
+                  <th
+                    onClick={() => handleSort('opp_def_eff')}
+                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                  >
+                    DEF Eff {sortField === 'opp_def_eff' && (sortDirection === 'asc' ? '↑' : '↓')}
                   </th>
                 </tr>
               </thead>
