@@ -509,7 +509,9 @@ class RotowireService {
 
       if (opponent) {
         // Get DVP rank for this player's position vs opponent
-        const defenseVsPos = teamDefenseVsPositionModel.getByTeamAndPosition(opponent, position);
+        // Use primary position (first one) since defense table stores single positions
+        const primaryPosition = position.split(',')[0].trim();
+        const defenseVsPos = teamDefenseVsPositionModel.getByTeamAndPosition(opponent, primaryPosition);
         if (defenseVsPos) {
           dvpRank = defenseVsPos.rank;
         }

@@ -38,7 +38,10 @@
       "Bash(npm run build:*)",
       "Bash(gh secret set:*)",
       "Bash(unzip:*)",
-      "Bash(npm run snapshot:*)"
+      "Bash(npm run snapshot:*)",
+      "Bash(npm run dev:*)",
+      "Bash(node test-defense-data.js:*)",
+      "Bash(node scripts/backfill-defense-data.js:*)"
     ],
     "deny": [],
     "ask": []
