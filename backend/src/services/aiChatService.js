@@ -106,6 +106,17 @@ class AIChatService {
 
 **CRITICAL: Read this schema carefully before writing ANY SQL queries!**
 
+### AVAILABLE TABLES:
+You have access to the following tables:
+1. **players** - Core player data with projections, stats, salaries, and matchup metrics (PRIMARY TABLE)
+2. **slates** - DFS contest slate information
+3. **team_defense_rankings** - Team defensive efficiency, pace, and advanced stats (from ESPN)
+4. **team_defense_vs_position** - Position-specific defensive rankings (DVP) (from HashtagBasketball)
+5. **lineups** - Saved DFS lineups
+6. **lineup_players** - Junction table linking players to lineups
+7. **chat_sessions** - AI chat conversation sessions
+8. **chat_messages** - Individual chat messages
+
 ### Players Table (Primary table for queries)
 
 **Important Columns:**
@@ -117,6 +128,32 @@ ${Object.entries(schema.tables.players.common_filters).map(([name, sql]) => `- $
 ### Example Queries:
 ${schema.tables.players.example_queries.basic.map(ex => `**${ex.description}:**\n\`\`\`sql\n${ex.query}\n\`\`\`\n`).join('\n')}
 
+### Team Defense Rankings Table
+
+**Description:** ${schema.tables.team_defense_rankings.description}
+
+**Important Columns:**
+${schema.tables.team_defense_rankings.columns.map(col => `- **${col.name}** (${col.type}): ${col.description}${col.range ? ` (Range: ${col.range.join('-')})` : ''}${col.notes ? `\n  Notes: ${col.notes}` : ''}`).join('\n')}
+
+**Example Queries:**
+${schema.tables.team_defense_rankings.example_queries.map(ex => typeof ex === 'string' ? `\`\`\`sql\n${ex}\n\`\`\`` : `**${ex.description}:**\n\`\`\`sql\n${ex.query}\n\`\`\``).join('\n\n')}
+
+### Team Defense vs Position Table (DVP)
+
+**Description:** ${schema.tables.team_defense_vs_position.description}
+
+**Important Columns:**
+${schema.tables.team_defense_vs_position.columns.map(col => `- **${col.name}** (${col.type}): ${col.description}${col.range ? ` (Range: ${col.range.join('-')})` : ''}${col.notes ? `\n  Notes: ${col.notes}` : ''}`).join('\n')}
+
+**Example Queries:**
+${schema.tables.team_defense_vs_position.example_queries.map(ex => typeof ex === 'string' ? `\`\`\`sql\n${ex}\n\`\`\`` : `**${ex.description}:**\n\`\`\`sql\n${ex.query}\n\`\`\``).join('\n\n')}
+
+### Slates Table
+
+**Description:** ${schema.tables.slates.description}
+
+**Columns:** ${schema.tables.slates.columns.map(col => col.name).join(', ')}
+
 ### CRITICAL QUERY TIPS:
 ${schema.query_tips.map(tip => `- ${tip}`).join('\n')}
 
@@ -126,6 +163,12 @@ ${schema.query_tips.map(tip => `- ${tip}`).join('\n')}
 - To find healthy players: \`WHERE (injury_status IS NULL OR injury_status = '')\`
 - Valid injury statuses: GTD, Questionable, Doubtful, OUT, Probable
 - To exclude injured: \`WHERE (injury_status IS NULL OR injury_status = '' OR injury_status NOT IN ('OUT', 'Doubtful'))\`
+
+**IMPORTANT MATCHUP DATA:**
+- The players table has PRE-JOINED matchup data: dvp_pts_allowed and opp_def_eff
+- Use team_defense_rankings for pace and overall defensive efficiency analysis
+- Use team_defense_vs_position for detailed position-specific matchup analysis
+- All defensive data is auto-populated when slates are loaded!
 `;
     }
 
@@ -176,15 +219,26 @@ ${schemaDoc}
 - Format lineup results clearly with positions, salaries, and projections
 - Include strategic rationale: WHY you made certain selections
 
-**Response Format for Lineups:**
-When presenting lineups, use this format:
-\`\`\`
-Position | Player | Team | Salary | Proj
----------|---------|------|---------|------
-PG       | Name   | LAL  | $8,500  | 45.2
-...
-TOTAL: $49,800 / $50,000 | Projected: 285.5 pts
-\`\`\`
+**Response Format for Tables and Lineups:**
+⚠️ **CRITICAL TABLE FORMATTING RULES:**
+- NEVER wrap tables in code blocks (no triple-backtick fences around tables)
+- ALWAYS use raw markdown table syntax directly in your response
+- Tables MUST use this exact format:
+
+| Position | Player | Team | Salary | Proj |
+|----------|--------|------|--------|------|
+| PG       | Name   | LAL  | $8,500 | 45.2 |
+| SG       | Name   | BOS  | $7,200 | 38.1 |
+
+**Example of CORRECT table formatting (copy this pattern):**
+
+| Player | Team | Salary | Projected Points | Value |
+|--------|------|--------|------------------|-------|
+| Luka Doncic | DAL | $11,000 | 58.5 | 5.32 |
+| LeBron James | LAL | $9,500 | 48.2 | 5.07 |
+
+**WRONG - Do NOT wrap the table in code block fences!**
+The table must be in plain text, NOT inside code block markers!
 
 **Important Notes:**
 - ALWAYS use tools to get actual data - never make up stats or player names
