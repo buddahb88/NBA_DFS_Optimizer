@@ -20,18 +20,11 @@ jobs:
         with:
           node-version: '18'
 
-      - name: Install dependencies and prepare deployment
-        working-directory: ./backend
-        run: |
-          npm install --production --legacy-peer-deps
-          # Remove unnecessary files to reduce package size
-          rm -rf node_modules/.cache
-
       - name: Create deployment package
         working-directory: ./backend
         run: |
-          # Create a zip file with the backend code
-          zip -r ../backend-deploy.zip . -x "*.git*" "*.env"
+          # Create a zip file with source code only (Azure will run npm install)
+          zip -r ../backend-deploy.zip . -x "*.git*" "*.env" "node_modules/*"
 
       - name: Deploy to Azure Web App
         uses: azure/webapps-deploy@v2
