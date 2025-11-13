@@ -20,13 +20,22 @@ jobs:
         with:
           node-version: '18'
 
-      - name: Install dependencies
+      - name: Install dependencies and prepare deployment
         working-directory: ./backend
-        run: npm install --production --legacy-peer-deps
+        run: |
+          npm install --production --legacy-peer-deps
+          # Remove unnecessary files to reduce package size
+          rm -rf node_modules/.cache
+
+      - name: Create deployment package
+        working-directory: ./backend
+        run: |
+          # Create a zip file with the backend code
+          zip -r ../backend-deploy.zip . -x "*.git*" "*.env"
 
       - name: Deploy to Azure Web App
         uses: azure/webapps-deploy@v2
         with:
           app-name: 'nba-dfs-backend'
           publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
-          package: ./backend
+          package: ./backend-deploy.zip
