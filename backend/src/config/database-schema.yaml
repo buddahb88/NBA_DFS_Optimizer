@@ -123,6 +123,23 @@ tables:
         description: "Usage rate % (percentage of team plays used by player)"
         range: [0, 45]
         notes: "30+ is high usage, 20-25 is medium, <15 is low"
+      - name: rest_days
+        type: INTEGER
+        description: "Number of days since last game (0 = back-to-back)"
+        range: [0, 7]
+        notes: "0 = B2B (more fatigue), 1 = normal rest, 2+ = extra rest"
+
+      # Defensive Matchup Data
+      - name: dvp_pts_allowed
+        type: REAL
+        description: "Defense vs Position - fantasy points allowed to this position by opponent"
+        range: [30, 65]
+        notes: "Higher = easier matchup. ≥45 = great, 35-45 = average, ≤35 = tough"
+      - name: opp_def_eff
+        type: REAL
+        description: "Opponent's overall defensive efficiency (from team_defense_rankings)"
+        range: [102, 124]
+        notes: "Higher = weaker defense. >118 = great matchup, 108-118 = average, <108 = tough"
 
       # Vegas Betting Data
       - name: vegas_implied_total
@@ -180,6 +197,9 @@ tables:
       high_total_games: "WHERE vegas_over_under >= 230"
       leverage_plays: "WHERE rostership <= 10 AND projected_points >= 30"
       chalk_plays: "WHERE rostership >= 25"
+      great_matchups: "WHERE dvp_pts_allowed >= 45 AND opp_def_eff > 118"
+      tough_matchups: "WHERE dvp_pts_allowed <= 35 OR opp_def_eff < 108"
+      matchup_upside: "WHERE dvp_pts_allowed >= 45 AND usage >= 25 AND projected_points >= 35"
 
     example_queries:
       basic:
@@ -197,6 +217,15 @@ tables:
 
         - description: "Punt plays with upside"
           query: "SELECT name, salary, projected_points, projected_minutes, fpts_last3 FROM players WHERE salary <= 4500 AND projected_minutes >= 20 AND fpts_last3 >= 15 AND (injury_status IS NULL OR injury_status = '')"
+
+        - description: "Players with elite matchups (high DVP and weak defense)"
+          query: "SELECT name, position, opponent, dvp_pts_allowed, opp_def_eff, projected_points, usage FROM players WHERE dvp_pts_allowed >= 45 AND opp_def_eff > 118 AND (injury_status IS NULL OR injury_status = '') ORDER BY projected_points DESC LIMIT 10"
+
+        - description: "High usage players with great positional matchups"
+          query: "SELECT name, salary, usage, dvp_pts_allowed, projected_points, value FROM players WHERE usage >= 27 AND dvp_pts_allowed >= 45 AND (injury_status IS NULL OR injury_status = '') ORDER BY value_gpp DESC"
+
+        - description: "Value plays exploiting weak defenses"
+          query: "SELECT name, salary, value, projected_points, opp_def_eff, dvp_pts_allowed FROM players WHERE value >= 5.5 AND (opp_def_eff > 118 OR dvp_pts_allowed >= 45) AND (injury_status IS NULL OR injury_status = '') ORDER BY value DESC"
 
   lineups:
     description: "Saved DFS lineups"
@@ -330,6 +359,80 @@ tables:
       - Pace affects volume of fantasy production
       - Data is refreshed from ESPN.com every time a slate is loaded
 
+  team_defense_vs_position:
+    description: "Position-specific defensive rankings (DVP) - how well teams defend each position"
+    columns:
+      - name: id
+        type: INTEGER
+        description: "Auto-increment primary key"
+      - name: team
+        type: TEXT
+        description: "Team abbreviation (3-letter code)"
+      - name: position
+        type: TEXT
+        description: "Position defended against"
+        valid_values: ["PG", "SG", "SF", "PF", "C"]
+      - name: rank
+        type: INTEGER
+        description: "Positional defensive rank (1-150, lower is better defense)"
+        range: [1, 150]
+        notes: "150 positions total (30 teams × 5 positions). ≤40 = elite, 110-150 = weak"
+      - name: pts_allowed
+        type: REAL
+        description: "Fantasy points allowed to this position per game"
+        range: [30, 65]
+        notes: "Higher = easier matchup for offensive players. ≥45 = great, 35-45 = average, ≤35 = tough"
+      - name: fg_pct_allowed
+        type: REAL
+        description: "Field goal percentage allowed to this position"
+      - name: tpm_allowed
+        type: REAL
+        description: "Three-pointers made allowed per game"
+      - name: reb_allowed
+        type: REAL
+        description: "Rebounds allowed per game"
+      - name: ast_allowed
+        type: REAL
+        description: "Assists allowed per game"
+      - name: stl_allowed
+        type: REAL
+        description: "Steals allowed per game"
+      - name: blk_allowed
+        type: REAL
+        description: "Blocks allowed per game"
+      - name: to_allowed
+        type: REAL
+        description: "Turnovers forced per game"
+      - name: updated_at
+        type: DATETIME
+        description: "Last update timestamp"
+
+    example_queries:
+      - description: "Find weakest positional defenses (best matchups)"
+        query: "SELECT team, position, pts_allowed FROM team_defense_vs_position ORDER BY pts_allowed DESC LIMIT 10"
+
+      - description: "Find toughest matchups for point guards"
+        query: "SELECT team, position, pts_allowed, rank FROM team_defense_vs_position WHERE position = 'PG' ORDER BY pts_allowed ASC LIMIT 5"
+
+      - description: "Players with great DVP matchups"
+        query: |
+          SELECT p.name, p.position, p.opponent, t.pts_allowed, p.projected_points
+          FROM players p
+          JOIN team_defense_vs_position t ON p.opponent = t.team
+          WHERE t.position = SUBSTR(p.position, 1, 2)
+          AND t.pts_allowed >= 45
+          ORDER BY p.projected_points DESC
+
+      - description: "All defensive matchups for a specific team"
+        query: "SELECT position, pts_allowed, rank FROM team_defense_vs_position WHERE team = 'LAL' ORDER BY position"
+
+    notes: |
+      - DVP (Defense vs Position) shows position-specific matchup quality
+      - pts_allowed is the key metric for DFS - higher is better for offense
+      - Multi-position players (e.g., PG,SG) use their PRIMARY position (first listed)
+      - Data is auto-populated from HashtagBasketball.com on slate load
+      - Combined with team_defense_rankings.def_eff for complete matchup analysis
+
 # DFS Constraints (DraftKings)
 dfs_rules:
   salary_cap: 50000
@@ -370,6 +473,11 @@ query_tips:
   - "High ownership = rostership >= 25, Low ownership = rostership <= 10"
   - "Team abbreviations: LAL, BOS, GSW, MIA, etc. (3-letter uppercase)"
   - "Always order by projected_points DESC or value DESC for best results"
+  - "Great matchups: dvp_pts_allowed >= 45 (high) AND opp_def_eff > 118 (weak defense)"
+  - "Tough matchups: dvp_pts_allowed <= 35 (low) OR opp_def_eff < 108 (elite defense)"
+  - "DVP pts_allowed: Higher is better for offense (easier matchup)"
+  - "opp_def_eff: Higher is better for offense (weaker defense to face)"
+  - "For complete matchup analysis, check BOTH dvp_pts_allowed AND opp_def_eff"
 
 # Strategy Insights
 dfs_strategy:
