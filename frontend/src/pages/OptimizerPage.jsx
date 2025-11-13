@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { optimizerAPI, lineupsAPI, slatesAPI } from '../services/api';
+import { optimizerAPI, lineupsAPI, slatesAPI, playersAPI } from '../services/api';
 
 function OptimizerPage() {
   const [activeSlate, setActiveSlate] = useState(null);
@@ -16,6 +16,9 @@ function OptimizerPage() {
   const [results, setResults] = useState(null);
   const [selectedLineupIndex, setSelectedLineupIndex] = useState(0);
   const [message, setMessage] = useState('');
+  const [players, setPlayers] = useState([]);
+  const [lockedPlayers, setLockedPlayers] = useState([]);
+  const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
     loadActiveSlate();
@@ -25,9 +28,29 @@ function OptimizerPage() {
     try {
       const response = await slatesAPI.getActiveSlate();
       setActiveSlate(response.data);
+      if (response.data) {
+        loadPlayers(response.data.slate_id);
+      }
     } catch (error) {
       console.error('Error loading active slate:', error);
     }
+  };
+
+  const loadPlayers = async (slateId) => {
+    try {
+      const response = await playersAPI.getBySlateId(slateId);
+      setPlayers(response.data);
+    } catch (error) {
+      console.error('Error loading players:', error);
+    }
+  };
+
+  const togglePlayerLock = (playerId) => {
+    setLockedPlayers(prev =>
+      prev.includes(playerId)
+        ? prev.filter(id => id !== playerId)
+        : [...prev, playerId]
+    );
   };
 
   const handleOptimize = async () => {
@@ -51,7 +74,8 @@ function OptimizerPage() {
         minMinutes,
         minProjection,
         useValueFilter,
-        useProjections: true
+        useProjections: true,
+        lockedPlayers
       });
 
       if (response.data.success) {
@@ -92,17 +116,98 @@ function OptimizerPage() {
 
   const currentLineup = results?.lineups?.[selectedLineupIndex];
 
+  const filteredPlayers = players.filter(player =>
+    player.name.toLowerCase().includes(searchTerm.toLowerCase())
+  ).sort((a, b) => (b.projected_points || 0) - (a.projected_points || 0));
+
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold text-gray-900">Lineup Optimizer</h1>
-        <p className="text-gray-600 mt-2">Generate optimal DFS lineups using advanced algorithms</p>
-        {activeSlate && (
-          <p className="text-sm text-gray-600 mt-1">
-            Active Slate: <span className="font-medium">{activeSlate.name}</span>
-          </p>
-        )}
+    <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+      {/* Player Pool Sidebar */}
+      <div className="lg:col-span-1">
+        <div className="bg-white rounded-lg shadow p-4 sticky top-4">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold">Player Pool</h2>
+            {lockedPlayers.length > 0 && (
+              <span className="px-2 py-1 text-xs bg-green-100 text-green-800 rounded-full font-medium">
+                {lockedPlayers.length} locked
+              </span>
+            )}
+          </div>
+
+          <input
+            type="text"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder="Search players..."
+            className="w-full px-3 py-2 mb-3 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+          />
+
+          <div className="space-y-2 max-h-[calc(100vh-250px)] overflow-y-auto">
+            {loading ? (
+              <div className="text-center py-8 text-gray-500 text-sm">Loading...</div>
+            ) : filteredPlayers.length > 0 ? (
+              filteredPlayers.map(player => {
+                const isLocked = lockedPlayers.includes(player.id);
+                return (
+                  <div
+                    key={player.id}
+                    className={`p-2 border rounded-md ${
+                      isLocked
+                        ? 'bg-green-50 border-green-300'
+                        : 'border-gray-200 hover:bg-gray-50'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium text-sm truncate">{player.name}</div>
+                        <div className="text-xs text-gray-500">
+                          {player.position} • {player.team}
+                        </div>
+                        <div className="text-xs text-gray-600 mt-1">
+                          ${player.salary?.toLocaleString()} • {player.projected_points?.toFixed(1)} pts
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => togglePlayerLock(player.id)}
+                        className={`flex-shrink-0 p-1.5 rounded ${
+                          isLocked
+                            ? 'bg-green-600 text-white hover:bg-green-700'
+                            : 'bg-gray-200 text-gray-600 hover:bg-gray-300'
+                        }`}
+                        title={isLocked ? 'Locked - Will be in every lineup' : 'Click to lock this player'}
+                      >
+                        {isLocked ? (
+                          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
+                          </svg>
+                        ) : (
+                          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M10 2a5 5 0 00-5 5v2a2 2 0 00-2 2v5a2 2 0 002 2h10a2 2 0 002-2v-5a2 2 0 00-2-2H7V7a3 3 0 015.905-.75 1 1 0 001.937-.5A5.002 5.002 0 0010 2z" />
+                          </svg>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
+            ) : (
+              <div className="text-center py-8 text-gray-500 text-sm">No players found</div>
+            )}
+          </div>
+        </div>
       </div>
+
+      {/* Main Content */}
+      <div className="lg:col-span-3 space-y-6">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900">Lineup Optimizer</h1>
+          <p className="text-gray-600 mt-2">Generate optimal DFS lineups using advanced algorithms</p>
+          {activeSlate && (
+            <p className="text-sm text-gray-600 mt-1">
+              Active Slate: <span className="font-medium">{activeSlate.name}</span>
+            </p>
+          )}
+        </div>
 
       {/* Settings Panel */}
       <div className="bg-white rounded-lg shadow p-6">
@@ -255,13 +360,22 @@ function OptimizerPage() {
         </div>
 
         {/* Optimize Button */}
-        <button
-          onClick={handleOptimize}
-          disabled={loading || !activeSlate}
-          className="mt-6 w-full bg-green-600 text-white py-3 px-6 rounded-md hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed font-semibold text-lg"
-        >
-          {loading ? '🔄 Optimizing...' : '🚀 Generate Optimal Lineups'}
-        </button>
+        <div className="mt-6">
+          {lockedPlayers.length > 0 && (
+            <div className="mb-3 p-3 bg-green-50 border border-green-200 rounded-md">
+              <p className="text-sm text-green-800">
+                🔒 <strong>{lockedPlayers.length} player(s) locked</strong> - Will be included in every lineup
+              </p>
+            </div>
+          )}
+          <button
+            onClick={handleOptimize}
+            disabled={loading || !activeSlate}
+            className="w-full bg-green-600 text-white py-3 px-6 rounded-md hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed font-semibold text-lg"
+          >
+            {loading ? '🔄 Optimizing...' : '🚀 Generate Optimal Lineups'}
+          </button>
+        </div>
 
         {message && (
           <div className={`mt-4 p-4 rounded-md ${message.startsWith('✅') ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'}`}>
@@ -458,6 +572,7 @@ function OptimizerPage() {
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }
