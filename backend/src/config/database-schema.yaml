@@ -1,6 +1,24 @@
 # NBA DFS Database Schema
 # This file describes the complete database structure for the AI assistant
 
+# AVAILABLE TABLES OVERVIEW:
+# 1. players - Core player data with projections, stats, salaries, and matchup metrics
+# 2. slates - DFS contest slate information
+# 3. lineups - Saved DFS lineups
+# 4. lineup_players - Junction table linking players to lineups
+# 5. chat_sessions - AI chat conversation sessions
+# 6. chat_messages - Individual chat messages
+# 7. team_defense_rankings - Team defensive efficiency, pace, and advanced stats (from ESPN)
+# 8. team_defense_vs_position - Position-specific defensive rankings (DVP) (from HashtagBasketball)
+#
+# KEY MATCHUP ANALYSIS TABLES:
+# - team_defense_rankings: Overall team defense quality (def_eff), pace, offensive efficiency
+# - team_defense_vs_position: How each team defends each position (pts_allowed per position)
+# - players.dvp_pts_allowed: Pre-joined DVP data for each player's matchup
+# - players.opp_def_eff: Pre-joined defensive efficiency for each player's opponent
+#
+# IMPORTANT: All defensive data is auto-populated on slate load and pre-joined to players table!
+
 tables:
   slates:
     description: "DFS contest slates (Main, Showdown, etc.)"
@@ -353,6 +371,23 @@ tables:
           WHERE t.def_eff > 118
           ORDER BY p.projected_points DESC
 
+      - description: "Players in high-pace games (more fantasy opportunities)"
+        query: |
+          SELECT p.name, p.team, p.opponent, t.pace, t.off_eff, p.projected_points, p.usage
+          FROM players p
+          JOIN team_defense_rankings t ON p.opponent = t.team
+          WHERE t.pace > 102
+          ORDER BY p.projected_points DESC
+
+      - description: "Players on fast-paced teams facing weak defenses"
+        query: |
+          SELECT p.name, p.team, p.opponent, team_pace.pace as team_pace, opp_def.def_eff, p.projected_points
+          FROM players p
+          JOIN team_defense_rankings team_pace ON p.team = team_pace.team
+          JOIN team_defense_rankings opp_def ON p.opponent = opp_def.team
+          WHERE team_pace.pace > 102 AND opp_def.def_eff > 118
+          ORDER BY p.projected_points DESC
+
     notes: |
       - Projections already factor in opponent defense automatically
       - DEF EFF is the most important matchup metric
@@ -498,3 +533,22 @@ dfs_strategy:
   leverage_plays:
     description: "Contrarian plays with low ownership but high upside"
     sql_example: "WHERE rostership <= 10 AND projected_points >= 35 AND usage >= 25"
+
+  pace_upside:
+    description: "Target high-pace games for increased volume and fantasy opportunities"
+    explanation: "Faster pace = more possessions = more stats = higher fantasy points"
+    sql_example: |
+      SELECT p.name, p.projected_points, t.pace
+      FROM players p
+      JOIN team_defense_rankings t ON p.opponent = t.team
+      WHERE t.pace > 102 AND p.projected_minutes >= 28
+      ORDER BY t.pace DESC, p.projected_points DESC
+
+  matchup_stacking:
+    description: "Combine DVP, defensive efficiency, and pace for elite matchup spots"
+    sql_example: |
+      SELECT p.name, p.salary, p.dvp_pts_allowed, p.opp_def_eff, t.pace, p.projected_points
+      FROM players p
+      JOIN team_defense_rankings t ON p.opponent = t.team
+      WHERE p.dvp_pts_allowed >= 45 AND p.opp_def_eff > 118 AND t.pace > 100
+      ORDER BY p.value_gpp DESC
