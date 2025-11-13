@@ -44,7 +44,9 @@
       "Bash(node scripts/backfill-defense-data.js:*)",
       "Bash(node scripts/investigate-team-names.js:*)",
       "Bash(node scripts/backfill-pts-allowed.js:*)",
-      "Bash(node scripts/check-defense-tables.js:*)"
+      "Bash(node scripts/check-defense-tables.js:*)",
+      "Bash(node scripts/test-defense-data.js:*)",
+      "Bash(node scripts/check-houston-players.js:*)"
     ],
     "deny": [],
     "ask": []

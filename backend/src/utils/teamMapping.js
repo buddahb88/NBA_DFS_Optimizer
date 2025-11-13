@@ -11,7 +11,7 @@ const RANKINGS_MAP = {
   'PHX': 'PHO',   // Phoenix Suns
   'WAS': 'WSH',   // Washington Wizards
   'UTAH': 'UTAH', // Utah Jazz (no change needed)
-  // HOU is missing from rankings table - will return null
+  // HOU, and other teams use standard abbreviations
 };
 
 // Mapping for team_defense_vs_position table
