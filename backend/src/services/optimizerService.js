@@ -209,9 +209,16 @@ class OptimizerService {
       model.constraints[`slot_${slot}`] = { equal: 1 };
     });
 
-    // Add player uniqueness constraints (each player used at most once)
+    // Add player uniqueness constraints
+    // For locked players: must use exactly once (equal: 1)
+    // For others: use at most once (max: 1)
     players.forEach(player => {
-      model.constraints[`player_${player.id}`] = { max: 1 };
+      if (lockedPlayerIds.includes(player.id)) {
+        model.constraints[`player_${player.id}`] = { equal: 1 };
+        console.log(`🔒 Locking: ${player.name} (${player.position})`);
+      } else {
+        model.constraints[`player_${player.id}`] = { max: 1 };
+      }
     });
 
     // Create decision variables for each player-slot combination
@@ -235,13 +242,6 @@ class OptimizerService {
           [`slot_${slot}`]: 1,
           [`player_${player.id}`]: 1
         };
-
-        // Force locked players to be selected
-        if (lockedPlayerIds.includes(player.id)) {
-          // Find the best slot for this locked player
-          model.constraints[varName] = { min: 1 };
-          console.log(`🔒 Locked: ${player.name} (${player.position})`);
-        }
 
         // Binary constraint
         model.ints[varName] = 1;
