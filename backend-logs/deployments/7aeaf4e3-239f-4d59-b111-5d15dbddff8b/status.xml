@@ -1,0 +1,19 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<deployment>
+  <id>7aeaf4e3-239f-4d59-b111-5d15dbddff8b</id>
+  <author>N/A</author>
+  <deployer>GITHUB_ZIP_DEPLOY</deployer>
+  <authorEmail>N/A</authorEmail>
+  <message>{"type":"deployment","sha":"2c73465a3a8dcd58649736c67b3dcf9811a6fd29","repoName":"buddahb88/NBA_DFS_Optimizer","actor":"buddahb88","slotName":"production","commitMessage":"Add Azure App Service backend deployment with CI/CD"}</message>
+  <progress></progress>
+  <status>Success</status>
+  <statusText></statusText>
+  <lastSuccessEndTime>2025-11-12T23:06:27.8948659Z</lastSuccessEndTime>
+  <receivedTime>2025-11-12T23:06:22.9299358Z</receivedTime>
+  <startTime>2025-11-12T23:06:24.3161256Z</startTime>
+  <endTime>2025-11-12T23:06:27.8948659Z</endTime>
+  <complete>True</complete>
+  <is_temp>False</is_temp>
+  <is_readonly>True</is_readonly>
+  <buildSummary />
+</deployment>

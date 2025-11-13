@@ -32,7 +32,13 @@
       "Bash(gh run:*)",
       "Bash(az webapp:*)",
       "Bash(publish-profile.xml)",
-      "Bash(cat:*)"
+      "Bash(cat:*)",
+      "Bash(az staticwebapp show:*)",
+      "WebFetch(domain:yellow-glacier-01477690f.3.azurestaticapps.net)",
+      "Bash(npm run build:*)",
+      "Bash(gh secret set:*)",
+      "Bash(unzip:*)",
+      "Bash(npm run snapshot:*)"
     ],
     "deny": [],
     "ask": []

@@ -215,6 +215,7 @@ class RotowireService {
   async fetchPlayers(slateId) {
     try {
       const url = `${this.baseUrl}/players.php?slateID=${slateId}`;
+      console.log(`🌐 Fetching from RotoWire: ${url}`);
 
       const response = await fetch(url, {
         headers: {
@@ -233,7 +234,12 @@ class RotowireService {
         method: 'GET'
       });
 
+      console.log(`📡 RotoWire Response: ${response.status} ${response.statusText}`);
+
       if (!response.ok) {
+        // Get response body for debugging
+        const errorBody = await response.text();
+        console.error(`❌ RotoWire Error Body:`, errorBody.substring(0, 500));
         throw new Error(`RotoWire API error: ${response.status} ${response.statusText}`);
       }
 

@@ -1,0 +1,19 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<deployment>
+  <id>46174fe2-148d-45f9-a494-bb1aff310827</id>
+  <author>N/A</author>
+  <deployer>GITHUB_ZIP_DEPLOY</deployer>
+  <authorEmail>N/A</authorEmail>
+  <message>{"type":"deployment","sha":"f1b59dccf1dbc01c044d9a1db93357db81ef4318","repoName":"buddahb88/NBA_DFS_Optimizer","actor":"buddahb88","slotName":"production","commitMessage":"Trigger backend deployment with refreshed credentials"}</message>
+  <progress></progress>
+  <status>Success</status>
+  <statusText></statusText>
+  <lastSuccessEndTime>2025-11-13T03:11:34.0616421Z</lastSuccessEndTime>
+  <receivedTime>2025-11-13T03:11:30.6764346Z</receivedTime>
+  <startTime>2025-11-13T03:11:32.1660485Z</startTime>
+  <endTime>2025-11-13T03:11:34.0616421Z</endTime>
+  <complete>True</complete>
+  <is_temp>False</is_temp>
+  <is_readonly>True</is_readonly>
+  <buildSummary />
+</deployment>

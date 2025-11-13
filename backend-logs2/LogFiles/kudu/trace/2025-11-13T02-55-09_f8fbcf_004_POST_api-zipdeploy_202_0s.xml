@@ -1,0 +1,17 @@
+<step title="Incoming Request" date="2025-11-13T02:55:09.659" instance="f8fbcf" url="/api/zipdeploy?isAsync=true&amp;deployer=GITHUB_ZIP_DEPLOY&amp;message=%7B%22type%22%3A%22deployment%22%2C%22sha%22%3A%2232abc7557530b8584d6449c48cbf73f9d98540bf%22%2C%22repoName%22%3A%22buddahb88%2FNBA_DFS_Optimizer%22%2C%22actor%22%3A%22buddahb88%22%2C%22slotName%22%3A%22production%22%2C%22commitMessage%22%3A%22Fix%20backend%20deployment%3A%20include%20node_modules%20in%20deployment%20package%22%7D" method="POST" type="request" pid="768,1,14" Host="nba-dfs-backend.scm.azurewebsites.net" User-Agent="GITHUBACTIONS_DeployWebAppToAzure_6667faadbbbaf4c3775c9dcdc7325b783a5128be9b8865b1466a5098632ae6c6" Authorization="Bas..." Content-Type="application/octet-stream" Cookie="ARRAffinity=f8fbcf99450e046c2079a77db9f9c8aa2993d7e97351295d6c23d1b42f6eaa43;Path=/;HttpOnly;Secure;Domain=nba-dfs-backend.scm.azurewebsites.net; ARRAffinitySameSite=f8fbcf99450e046c2079a77db9f9c8aa2993d7e97351295d6c23d1b42f6eaa43;Path=/;HttpOnly;SameSite=None;Secure;Domain=nba-dfs-backend.scm.azurewebsites.net" Transfer-Encoding="chunked" X-ARR-LOG-ID="057d35aa-b7e3-4189-80dd-5cd46b6a8572" CLIENT-IP="57.151.137.144:50112" X-SITE-DEPLOYMENT-ID="nba-dfs-backend" WAS-DEFAULT-HOSTNAME="nba-dfs-backend.scm.azurewebsites.net" X-Forwarded-Proto="https" X-AppService-Proto="https" X-Forwarded-TlsVersion="1.3" X-WAWS-Unencoded-URL="/api/zipdeploy?isAsync=true&amp;deployer=GITHUB_ZIP_DEPLOY&amp;message=%7B%22type%22%3A%22deployment%22%2C%22sha%22%3A%2232abc7557530b8584d6449c48cbf73f9d98540bf%22%2C%22repoName%22%3A%22buddahb88%2FNBA_DFS_Optimizer%22%2C%22actor%22%3A%22buddahb88%22%2C%22slotName%22%3A%22production%22%2C%22commitMessage%22%3A%22Fix%20backend%20deployment%3A%20include%20node_modules%20in%20deployment%20package%22%7D" X-Client-IP="57.151.137.144" X-Client-Port="50112" >
+  <step title="ZipPushDeploy" date="2025-11-13T02:55:09.711" >
+    <step title="ZipDeploy. Extract zip. Remote build." date="2025-11-13T02:55:09.719" /><!-- duration: 4ms -->
+    <step title="None repository commit" date="2025-11-13T02:55:09.729" >
+      <step title="Commit id: 939c8a89-2a9d-43aa-b041-63109037112e" date="2025-11-13T02:55:09.733" Message="N/A" AuthorName="N/A" AuthorEmail="N/A" /><!-- duration: 4ms -->
+    </step><!-- duration: 10ms -->
+    <step title="Starting PushDeployAsync" date="2025-11-13T02:55:09.746" /><!-- duration: 3ms -->
+    <step title="Writing artifact to /tmp/zipdeploy/b47aa65a-68be-49de-ba42-40c7284e3b76.zip" date="2025-11-13T02:55:09.763" >
+      <step title="Writing multipart request body to /tmp/zipdeploy/b47aa65a-68be-49de-ba42-40c7284e3b76.zip" date="2025-11-13T02:55:09.768" /><!-- duration: 5ms -->
+    </step><!-- duration: 27ms -->
+    <step title="Start deployment in the background" date="2025-11-13T02:55:09.803" >
+      <step title="Acquiring Deployment Lock" date="2025-11-13T02:55:09.819" /><!-- duration: 8ms -->
+      <step title="Acquired Deployment Lock" date="2025-11-13T02:55:09.869" /><!-- duration: 3ms -->
+    </step><!-- duration: 139ms -->
+  </step><!-- duration: 238ms -->
+  <step title="Outgoing response" date="2025-11-13T02:55:09.955" type="response" statusCode="202" statusText="Accepted" /><!-- duration: 3ms -->
+</step><!-- duration: 305ms -->

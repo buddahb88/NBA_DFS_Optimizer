@@ -1,0 +1,19 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<deployment>
+  <id>a6e62348-d1a0-4094-8cdc-d8883d674d26</id>
+  <author>N/A</author>
+  <deployer>GITHUB_ZIP_DEPLOY</deployer>
+  <authorEmail>N/A</authorEmail>
+  <message>{"type":"deployment","sha":"ae06f4de856e5ef5706d143fe2495c6693fbe033","repoName":"buddahb88/NBA_DFS_Optimizer","actor":"buddahb88","slotName":"production","commitMessage":"Let Azure handle npm install automatically"}</message>
+  <progress></progress>
+  <status>Success</status>
+  <statusText></statusText>
+  <lastSuccessEndTime>2025-11-13T03:17:04.5815362Z</lastSuccessEndTime>
+  <receivedTime>2025-11-13T03:16:58.1639673Z</receivedTime>
+  <startTime>2025-11-13T03:16:59.5577486Z</startTime>
+  <endTime>2025-11-13T03:17:04.5815362Z</endTime>
+  <complete>True</complete>
+  <is_temp>False</is_temp>
+  <is_readonly>True</is_readonly>
+  <buildSummary />
+</deployment>
