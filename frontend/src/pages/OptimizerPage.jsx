@@ -184,6 +184,15 @@ function OptimizerPage() {
                               {player.projected_minutes.toFixed(0)}m
                             </span>
                           )}
+                          {player.usage && (
+                            <span className={`font-medium ${
+                              player.usage >= 27 ? 'text-green-600' :
+                              player.usage <= 20 ? 'text-red-600' :
+                              'text-gray-600'
+                            }`}>
+                              Usg: {player.usage.toFixed(1)}%
+                            </span>
+                          )}
                           {player.dvp_pts_allowed && (
                             <span className={`font-medium ${
                               player.dvp_pts_allowed >= 45 ? 'text-green-600' :  // High pts allowed = easier matchup

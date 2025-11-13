@@ -198,6 +198,18 @@ function PlayerPoolPage() {
                           {player.projected_minutes ? player.projected_minutes.toFixed(0) : '-'}
                         </span>
                       </div>
+                      {player.usage && (
+                        <div>
+                          <span className="text-gray-500">Usg:</span>
+                          <span className={`ml-1 font-semibold ${
+                            player.usage >= 27 ? 'text-green-600' :
+                            player.usage <= 20 ? 'text-red-600' :
+                            'text-gray-900'
+                          }`}>
+                            {player.usage.toFixed(1)}%
+                          </span>
+                        </div>
+                      )}
                       {player.dvp_pts_allowed && (
                         <div>
                           <span className="text-gray-500">DVP:</span>
@@ -281,6 +293,12 @@ function PlayerPoolPage() {
                     Min {sortField === 'projected_minutes' && (sortDirection === 'asc' ? '↑' : '↓')}
                   </th>
                   <th
+                    onClick={() => handleSort('usage')}
+                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                  >
+                    Usage {sortField === 'usage' && (sortDirection === 'asc' ? '↑' : '↓')}
+                  </th>
+                  <th
                     onClick={() => handleSort('dvp_pts_allowed')}
                     className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
                   >
@@ -359,6 +377,19 @@ function PlayerPoolPage() {
                           'text-gray-700'
                         }`}>
                           {player.projected_minutes.toFixed(0)}
+                        </span>
+                      ) : (
+                        <span className="text-gray-400">-</span>
+                      )}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm">
+                      {player.usage ? (
+                        <span className={`font-semibold ${
+                          player.usage >= 27 ? 'text-green-600' :  // High usage
+                          player.usage <= 20 ? 'text-red-600' :    // Low usage
+                          'text-gray-700'
+                        }`}>
+                          {player.usage.toFixed(1)}%
                         </span>
                       ) : (
                         <span className="text-gray-400">-</span>
