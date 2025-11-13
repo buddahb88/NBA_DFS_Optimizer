@@ -503,6 +503,24 @@ class RotowireService {
                        player.photo ??
                        null;
 
+      // Get opponent defense data for display
+      let dvpRank = null;
+      let oppDefEff = null;
+
+      if (opponent) {
+        // Get DVP rank for this player's position vs opponent
+        const defenseVsPos = teamDefenseVsPositionModel.getByTeamAndPosition(opponent, position);
+        if (defenseVsPos) {
+          dvpRank = defenseVsPos.rank;
+        }
+
+        // Get opponent's overall defensive efficiency
+        const oppDefense = teamDefenseModel.getByTeam(opponent);
+        if (oppDefense) {
+          oppDefEff = oppDefense.def_eff;
+        }
+      }
+
       return {
         playerId,
         name,
@@ -529,6 +547,8 @@ class RotowireService {
         vegasWinProb,
         rostership,
         headshot,
+        dvpRank,
+        oppDefEff,
         rawData: JSON.stringify(player)
       };
     })

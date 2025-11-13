@@ -149,14 +149,7 @@ function PlayerPoolPage() {
                   )}
 
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between mb-2">
-                      <h3 className="text-lg font-semibold text-gray-900 truncate">{player.name}</h3>
-                      {player.injury_status && (
-                        <span className="ml-2 px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800 flex-shrink-0">
-                          {player.injury_status}
-                        </span>
-                      )}
-                    </div>
+                    <h3 className="text-lg font-semibold text-gray-900 truncate mb-2">{player.name}</h3>
 
                     <div className="flex items-center space-x-2 mb-3">
                       <span className="px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
@@ -178,6 +171,36 @@ function PlayerPoolPage() {
                         <span className="text-gray-500">Value:</span>
                         <span className="ml-1 font-semibold text-green-600">{player.value?.toFixed(2)}</span>
                       </div>
+                      <div>
+                        <span className="text-gray-500">Min:</span>
+                        <span className="ml-1 font-semibold text-gray-900">
+                          {player.projected_minutes ? player.projected_minutes.toFixed(0) : '-'}
+                        </span>
+                      </div>
+                      {player.dvp_rank && (
+                        <div>
+                          <span className="text-gray-500">DVP:</span>
+                          <span className={`ml-1 font-semibold ${
+                            player.dvp_rank <= 40 ? 'text-red-600' :
+                            player.dvp_rank >= 110 ? 'text-green-600' :
+                            'text-gray-900'
+                          }`}>
+                            #{player.dvp_rank}
+                          </span>
+                        </div>
+                      )}
+                      {player.opp_def_eff && (
+                        <div>
+                          <span className="text-gray-500">DEF:</span>
+                          <span className={`ml-1 font-semibold ${
+                            player.opp_def_eff < 108 ? 'text-red-600' :
+                            player.opp_def_eff > 118 ? 'text-green-600' :
+                            'text-gray-900'
+                          }`}>
+                            {player.opp_def_eff.toFixed(1)}
+                          </span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -230,8 +253,17 @@ function PlayerPoolPage() {
                   >
                     Value {sortField === 'value' && (sortDirection === 'asc' ? '↑' : '↓')}
                   </th>
+                  <th
+                    onClick={() => handleSort('projected_minutes')}
+                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                  >
+                    Min {sortField === 'projected_minutes' && (sortDirection === 'asc' ? '↑' : '↓')}
+                  </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Status
+                    DVP
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    DEF Eff
                   </th>
                 </tr>
               </thead>
@@ -280,13 +312,33 @@ function PlayerPoolPage() {
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-green-600">
                       {player.value?.toFixed(2)}
                     </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      {player.projected_minutes ? player.projected_minutes.toFixed(0) : '-'}
+                    </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm">
-                      {player.injury_status ? (
-                        <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">
-                          {player.injury_status}
+                      {player.dvp_rank ? (
+                        <span className={`font-semibold ${
+                          player.dvp_rank <= 40 ? 'text-red-600' :     // Top 40 = tough (red)
+                          player.dvp_rank >= 110 ? 'text-green-600' :  // Bottom 40 = great (green)
+                          'text-gray-700'                               // Middle = neutral
+                        }`}>
+                          #{player.dvp_rank}
                         </span>
                       ) : (
-                        <span className="text-gray-500">-</span>
+                        <span className="text-gray-400">-</span>
+                      )}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm">
+                      {player.opp_def_eff ? (
+                        <span className={`font-semibold ${
+                          player.opp_def_eff < 108 ? 'text-red-600' :     // Elite defense (red)
+                          player.opp_def_eff > 118 ? 'text-green-600' :   // Weak defense (green)
+                          'text-gray-700'                                   // Average (neutral)
+                        }`}>
+                          {player.opp_def_eff.toFixed(1)}
+                        </span>
+                      ) : (
+                        <span className="text-gray-400">-</span>
                       )}
                     </td>
                   </tr>

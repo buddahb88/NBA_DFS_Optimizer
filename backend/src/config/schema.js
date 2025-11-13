@@ -85,7 +85,9 @@ export const createTables = (db) => {
     { name: 'vegas_win_prob', type: 'REAL' },
     { name: 'rostership', type: 'REAL' },
     { name: 'value_gpp', type: 'REAL' },
-    { name: 'headshot', type: 'TEXT' }
+    { name: 'headshot', type: 'TEXT' },
+    { name: 'dvp_rank', type: 'INTEGER' },
+    { name: 'opp_def_eff', type: 'REAL' }
   ];
 
   columnsToAdd.forEach(({ name, type }) => {

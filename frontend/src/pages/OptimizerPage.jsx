@@ -166,6 +166,31 @@ function OptimizerPage() {
                         <div className="text-xs text-gray-600 mt-1">
                           ${player.salary?.toLocaleString()} • {player.projected_points?.toFixed(1)} pts
                         </div>
+                        <div className="flex gap-2 mt-1 text-xs">
+                          {player.projected_minutes && (
+                            <span className="text-gray-600">
+                              {player.projected_minutes.toFixed(0)}m
+                            </span>
+                          )}
+                          {player.dvp_rank && (
+                            <span className={`font-medium ${
+                              player.dvp_rank <= 40 ? 'text-red-600' :    // Top 40 = tough matchup
+                              player.dvp_rank >= 110 ? 'text-green-600' :  // Bottom 40 = great matchup
+                              'text-gray-600'
+                            }`}>
+                              DVP: {player.dvp_rank}
+                            </span>
+                          )}
+                          {player.opp_def_eff && (
+                            <span className={`font-medium ${
+                              player.opp_def_eff < 108 ? 'text-red-600' :    // Elite defense
+                              player.opp_def_eff > 118 ? 'text-green-600' :  // Weak defense
+                              'text-gray-600'
+                            }`}>
+                              DEF: {player.opp_def_eff.toFixed(1)}
+                            </span>
+                          )}
+                        </div>
                       </div>
                       <button
                         onClick={() => togglePlayerLock(player.id)}
