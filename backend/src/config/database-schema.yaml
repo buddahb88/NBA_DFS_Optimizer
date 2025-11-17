@@ -191,6 +191,62 @@ tables:
           - 15-30% = popular play
           - >30% = chalk (very high owned)
 
+      # Advanced Projection Metrics (Variance & Risk Analysis)
+      - name: floor
+        type: REAL
+        description: "25th percentile projection (worst-case reasonable outcome)"
+        calculation: "projection - standard_deviation + blowout_floor_impact"
+        notes: "Use for cash game safety analysis. Higher floor = safer play"
+      - name: ceiling
+        type: REAL
+        description: "75th percentile projection (best-case reasonable outcome)"
+        calculation: "projection + standard_deviation + blowout_ceiling_impact"
+        notes: "Use for GPP tournament upside analysis. Higher ceiling = more boom potential"
+      - name: volatility
+        type: REAL
+        description: "Coefficient of variation (std_dev / mean)"
+        range: [0, 1]
+        notes: |
+          - <0.15 = consistent/safe (good for cash)
+          - 0.15-0.30 = moderate variance
+          - >0.30 = high variance/boom-bust (good for GPP with low ownership)
+      - name: boom_probability
+        type: REAL
+        description: "Percentage chance of exceeding value threshold by 10+ fantasy points"
+        range: [0, 100]
+        notes: |
+          - ≥30% = high boom potential (great for GPP)
+          - 10-30% = moderate boom chance
+          - <10% = low upside
+      - name: bust_probability
+        type: REAL
+        description: "Percentage chance of failing to meet value threshold"
+        range: [0, 100]
+        notes: |
+          - <20% = safe play (good for cash)
+          - 20-40% = moderate bust risk
+          - >40% = high bust risk (avoid in cash, use sparingly in GPP)
+      - name: fppm
+        type: REAL
+        description: "Weighted fantasy points per minute (40% L3, 30% L5, 30% season)"
+        notes: "Measures current efficiency better than season averages"
+      - name: leverage_score
+        type: REAL
+        description: "GPP leverage score: (boom_probability × 100) / (ownership + 1)"
+        notes: |
+          - ≥3.0 = high leverage (great GPP play - low owned with boom potential)
+          - 1.0-3.0 = moderate leverage
+          - <1.0 = low leverage (chalky or low upside)
+          - Best GPP strategy: target players with leverage ≥ 3.0
+      - name: blowout_risk
+        type: REAL
+        description: "Blowout risk magnitude based on spread"
+        notes: "Triggers when |spread| > 10. Favorites risk early pulls, underdogs get garbage time"
+      - name: std_dev
+        type: REAL
+        description: "Standard deviation of recent fantasy point performance"
+        notes: "Higher std_dev = more variance (boom/bust potential)"
+
       # Metadata
       - name: raw_data
         type: TEXT
@@ -218,6 +274,12 @@ tables:
       great_matchups: "WHERE dvp_pts_allowed >= 45 AND opp_def_eff > 118"
       tough_matchups: "WHERE dvp_pts_allowed <= 35 OR opp_def_eff < 108"
       matchup_upside: "WHERE dvp_pts_allowed >= 45 AND usage >= 25 AND projected_points >= 35"
+      # Advanced metric filters
+      safe_cash_plays: "WHERE floor >= 30 AND volatility < 0.20 AND bust_probability < 25"
+      high_ceiling_gpp: "WHERE ceiling >= 50 AND boom_probability >= 25"
+      elite_leverage: "WHERE leverage_score >= 3.0 AND boom_probability >= 20"
+      consistent_producers: "WHERE volatility < 0.15 AND floor >= 25"
+      boom_bust_candidates: "WHERE volatility >= 0.30 AND ceiling >= 45"
 
     example_queries:
       basic:
@@ -244,6 +306,34 @@ tables:
 
         - description: "Value plays exploiting weak defenses"
           query: "SELECT name, salary, value, projected_points, opp_def_eff, dvp_pts_allowed FROM players WHERE value >= 5.5 AND (opp_def_eff > 118 OR dvp_pts_allowed >= 45) AND (injury_status IS NULL OR injury_status = '') ORDER BY value DESC"
+
+      advanced_metrics:
+        - description: "Safe cash game plays (high floor, low volatility, low bust risk)"
+          query: "SELECT name, salary, projected_points, floor, ceiling, volatility, bust_probability FROM players WHERE floor >= 30 AND volatility < 0.20 AND bust_probability < 25 AND (injury_status IS NULL OR injury_status = '') ORDER BY floor DESC LIMIT 15"
+
+        - description: "Elite GPP leverage plays (low owned + high boom potential)"
+          query: "SELECT name, salary, projected_points, leverage_score, boom_probability, rostership, ceiling FROM players WHERE leverage_score >= 3.0 AND boom_probability >= 20 AND (injury_status IS NULL OR injury_status = '') ORDER BY leverage_score DESC LIMIT 15"
+
+        - description: "High ceiling tournament plays"
+          query: "SELECT name, salary, projected_points, ceiling, boom_probability, volatility, rostership FROM players WHERE ceiling >= 50 AND boom_probability >= 25 AND (injury_status IS NULL OR injury_status = '') ORDER BY ceiling DESC LIMIT 10"
+
+        - description: "Consistent producers (low variance, high floor)"
+          query: "SELECT name, salary, floor, ceiling, volatility, projected_points FROM players WHERE volatility < 0.15 AND floor >= 25 AND projected_minutes >= 28 AND (injury_status IS NULL OR injury_status = '') ORDER BY floor DESC"
+
+        - description: "Boom/bust candidates with upside"
+          query: "SELECT name, salary, floor, ceiling, volatility, boom_probability, leverage_score FROM players WHERE volatility >= 0.30 AND ceiling >= 45 AND leverage_score >= 2.0 AND (injury_status IS NULL OR injury_status = '') ORDER BY leverage_score DESC"
+
+        - description: "Compare floor vs ceiling spread for risk assessment"
+          query: "SELECT name, salary, projected_points, floor, ceiling, (ceiling - floor) as spread, volatility, boom_probability FROM players WHERE projected_minutes >= 25 AND (injury_status IS NULL OR injury_status = '') ORDER BY spread DESC LIMIT 15"
+
+        - description: "Low-owned high-ceiling plays for GPP differentiation"
+          query: "SELECT name, salary, ceiling, boom_probability, leverage_score, rostership, volatility FROM players WHERE ceiling >= 45 AND rostership <= 10 AND boom_probability >= 15 AND (injury_status IS NULL OR injury_status = '') ORDER BY leverage_score DESC LIMIT 20"
+
+        - description: "Value plays with safe floors (cash game)"
+          query: "SELECT name, salary, value, floor, volatility, bust_probability, projected_points FROM players WHERE value >= 5.5 AND floor >= 28 AND volatility < 0.25 AND (injury_status IS NULL OR injury_status = '') ORDER BY value DESC"
+
+        - description: "Players in blowout risk situations"
+          query: "SELECT name, team, opponent, vegas_spread, blowout_risk, projected_points, floor, ceiling FROM players WHERE blowout_risk > 0 AND (injury_status IS NULL OR injury_status = '') ORDER BY blowout_risk DESC"
 
   lineups:
     description: "Saved DFS lineups"
@@ -513,26 +603,41 @@ query_tips:
   - "DVP pts_allowed: Higher is better for offense (easier matchup)"
   - "opp_def_eff: Higher is better for offense (weaker defense to face)"
   - "For complete matchup analysis, check BOTH dvp_pts_allowed AND opp_def_eff"
+  # Advanced metrics tips
+  - "CASH GAMES: Filter by floor >= 30 AND volatility < 0.20 AND bust_probability < 25"
+  - "GPP TOURNAMENTS: Sort by leverage_score DESC for maximum differentiation"
+  - "Elite leverage plays: leverage_score >= 3.0 (low owned + high boom potential)"
+  - "Safe plays: floor >= 30 AND volatility < 0.15"
+  - "High ceiling plays: ceiling >= 50 AND boom_probability >= 25"
+  - "Consistent producers: volatility < 0.15 (low variance)"
+  - "Boom/bust candidates: volatility >= 0.30 (high variance, good for GPP if low owned)"
+  - "Low bust risk: bust_probability < 20 (safe for cash)"
+  - "High boom potential: boom_probability >= 30 (great for GPP)"
+  - "leverage_score is THE PRIMARY metric for GPP optimization"
+  - "Blowout risk > 0 means spread is >10 points (starters may get pulled early)"
 
 # Strategy Insights
 dfs_strategy:
   cash_games:
-    focus: "Safety, high floor, popular plays"
-    metrics: ["value", "projected_minutes >= 30", "rostership >= 15"]
-    sql_example: "WHERE value >= 5.5 AND projected_minutes >= 28 ORDER BY projected_points DESC"
+    focus: "Safety, high floor, low volatility, low bust risk"
+    metrics: ["floor >= 30", "volatility < 0.20", "bust_probability < 25", "value >= 5.5"]
+    sql_example: "WHERE floor >= 30 AND volatility < 0.20 AND bust_probability < 25 AND projected_minutes >= 28 ORDER BY floor DESC"
+    explanation: "Cash games reward consistency. Prioritize high floors and low variance to minimize downside risk."
 
   gpp_tournaments:
-    focus: "Upside, ceiling, leverage, differentiation"
-    metrics: ["value_gpp", "usage >= 28", "rostership <= 15", "fpts_last3 variance"]
-    sql_example: "WHERE value_gpp >= 6.0 AND rostership <= 15 AND usage >= 25 ORDER BY projected_points DESC"
+    focus: "Upside, ceiling, leverage, differentiation, boom potential"
+    metrics: ["leverage_score >= 3.0", "ceiling >= 50", "boom_probability >= 25", "rostership <= 15"]
+    sql_example: "WHERE leverage_score >= 3.0 AND ceiling >= 50 AND boom_probability >= 25 ORDER BY leverage_score DESC"
+    explanation: "GPPs reward differentiation. Target low-owned players with high boom probability for maximum leverage."
 
   game_stacking:
     description: "Select multiple players from same game for correlated upside"
     sql_example: "WHERE (team = 'LAL' OR opponent = 'LAL') AND vegas_over_under >= 225"
 
   leverage_plays:
-    description: "Contrarian plays with low ownership but high upside"
-    sql_example: "WHERE rostership <= 10 AND projected_points >= 35 AND usage >= 25"
+    description: "Contrarian plays with low ownership but high upside - USE leverage_score!"
+    sql_example: "WHERE leverage_score >= 3.0 AND boom_probability >= 20 AND rostership <= 10 ORDER BY leverage_score DESC"
+    explanation: "leverage_score is calculated as (boom_probability × 100) / (ownership + 1). Higher = better GPP value."
 
   pace_upside:
     description: "Target high-pace games for increased volume and fantasy opportunities"

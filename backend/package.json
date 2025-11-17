@@ -10,7 +10,8 @@
     "start": "node src/server.js",
     "start:backtest": "BACKTESTING_MODE=true node src/server.js",
     "init-db": "node src/config/initDb.js",
-    "snapshot": "node scripts/snapshot-db.js"
+    "snapshot": "node scripts/snapshot-db.js",
+    "backfill": "node scripts/backfill-advanced-metrics.js"
   },
   "keywords": [],
   "author": "",

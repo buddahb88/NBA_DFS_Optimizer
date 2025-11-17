@@ -82,9 +82,11 @@ class PlayerModel {
         salary, projected_points, projected_minutes, value, value_gpp, game_info, injury_status,
         per, usage, rest_days, fpts_last3, fpts_last5, fpts_last7, fpts_last14,
         vegas_implied_total, vegas_spread, vegas_over_under, vegas_win_prob, rostership, headshot,
-        dvp_pts_allowed, opp_def_eff, raw_data
+        dvp_pts_allowed, opp_def_eff,
+        floor, ceiling, volatility, boom_probability, bust_probability, fppm, leverage_score, blowout_risk, std_dev,
+        raw_data
       )
-      VALUES (@slateId, @playerId, @name, @team, @opponent, @position, @salary, @projectedPoints, @projectedMinutes, @value, @valueGpp, @gameInfo, @injuryStatus, @per, @usage, @restDays, @fptsLast3, @fptsLast5, @fptsLast7, @fptsLast14, @vegasImpliedTotal, @vegasSpread, @vegasOverUnder, @vegasWinProb, @rostership, @headshot, @dvpPtsAllowed, @oppDefEff, @rawData)
+      VALUES (@slateId, @playerId, @name, @team, @opponent, @position, @salary, @projectedPoints, @projectedMinutes, @value, @valueGpp, @gameInfo, @injuryStatus, @per, @usage, @restDays, @fptsLast3, @fptsLast5, @fptsLast7, @fptsLast14, @vegasImpliedTotal, @vegasSpread, @vegasOverUnder, @vegasWinProb, @rostership, @headshot, @dvpPtsAllowed, @oppDefEff, @floor, @ceiling, @volatility, @boomProbability, @bustProbability, @fppm, @leverageScore, @blowoutRisk, @stdDev, @rawData)
       ON CONFLICT(slate_id, player_id) DO UPDATE SET
         name = excluded.name,
         team = excluded.team,
@@ -112,6 +114,15 @@ class PlayerModel {
         headshot = excluded.headshot,
         dvp_pts_allowed = excluded.dvp_pts_allowed,
         opp_def_eff = excluded.opp_def_eff,
+        floor = excluded.floor,
+        ceiling = excluded.ceiling,
+        volatility = excluded.volatility,
+        boom_probability = excluded.boom_probability,
+        bust_probability = excluded.bust_probability,
+        fppm = excluded.fppm,
+        leverage_score = excluded.leverage_score,
+        blowout_risk = excluded.blowout_risk,
+        std_dev = excluded.std_dev,
         raw_data = excluded.raw_data,
         updated_at = CURRENT_TIMESTAMP
     `);
@@ -151,6 +162,16 @@ class PlayerModel {
           headshot: player.headshot || null,
           dvpPtsAllowed: player.dvpPtsAllowed || null,
           oppDefEff: player.oppDefEff || null,
+          // Advanced projection metrics
+          floor: player.floor || 0,
+          ceiling: player.ceiling || 0,
+          volatility: player.volatility || 0,
+          boomProbability: player.boomProbability || 0,
+          bustProbability: player.bustProbability || 0,
+          fppm: player.fppm || 0,
+          leverageScore: player.leverageScore || 0,
+          blowoutRisk: player.blowoutRisk || 0,
+          stdDev: player.stdDev || 0,
           injuryStatus: player.injuryStatus,
           rawData: player.rawData
         });

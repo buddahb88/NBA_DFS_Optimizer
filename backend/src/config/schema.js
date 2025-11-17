@@ -87,7 +87,17 @@ export const createTables = (db) => {
     { name: 'value_gpp', type: 'REAL' },
     { name: 'headshot', type: 'TEXT' },
     { name: 'dvp_pts_allowed', type: 'REAL' },
-    { name: 'opp_def_eff', type: 'REAL' }
+    { name: 'opp_def_eff', type: 'REAL' },
+    // Advanced projection metrics
+    { name: 'floor', type: 'REAL' },                    // 25th percentile projection
+    { name: 'ceiling', type: 'REAL' },                  // 75th percentile projection
+    { name: 'volatility', type: 'REAL' },               // Standard deviation / mean
+    { name: 'boom_probability', type: 'REAL' },         // % chance of exceeding value by 10+ pts
+    { name: 'bust_probability', type: 'REAL' },         // % chance of failing to meet value
+    { name: 'fppm', type: 'REAL' },                     // Weighted fantasy points per minute
+    { name: 'leverage_score', type: 'REAL' },           // GPP leverage (boom prob / ownership)
+    { name: 'blowout_risk', type: 'REAL' },             // Blowout risk adjustment
+    { name: 'std_dev', type: 'REAL' }                   // Standard deviation of recent games
   ];
 
   columnsToAdd.forEach(({ name, type }) => {

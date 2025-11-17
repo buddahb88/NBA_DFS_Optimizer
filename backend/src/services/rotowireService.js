@@ -216,6 +216,318 @@ class RotowireService {
     return minutesAdj;
   }
 
+  // ═══════════════════════════════════════════════════════════════
+  // ADVANCED PROJECTION METHODS
+  // ═══════════════════════════════════════════════════════════════
+
+  calculateWeightedFPPM(fptsLast3, minutesLast3, fptsLast5, minutesLast5, fptsSeason, seasonMinutes) {
+    // Calculate weighted fantasy points per minute
+    // Weight recent games more heavily for current efficiency
+
+    if (!seasonMinutes || seasonMinutes === 0) {
+      return 0;
+    }
+
+    // Calculate FPPM for each time period
+    const fppmLast3 = (minutesLast3 && minutesLast3 > 0) ? fptsLast3 / minutesLast3 : 0;
+    const fppmLast5 = (minutesLast5 && minutesLast5 > 0) ? fptsLast5 / minutesLast5 : 0;
+    const fppmSeason = fptsSeason / seasonMinutes;
+
+    // Weight recent efficiency more (40% L3, 30% L5, 30% season)
+    let weightedFPPM = 0;
+    let totalWeight = 0;
+
+    if (fppmLast3 > 0) {
+      weightedFPPM += fppmLast3 * 0.40;
+      totalWeight += 0.40;
+    }
+    if (fppmLast5 > 0) {
+      weightedFPPM += fppmLast5 * 0.30;
+      totalWeight += 0.30;
+    }
+    if (fppmSeason > 0) {
+      weightedFPPM += fppmSeason * 0.30;
+      totalWeight += 0.30;
+    }
+
+    // Normalize if we don't have all data
+    if (totalWeight > 0) {
+      weightedFPPM = weightedFPPM / totalWeight;
+    }
+
+    return weightedFPPM;
+  }
+
+  calculatePlayerVariance(recentGames) {
+    // Calculate standard deviation from recent games
+    // recentGames should be an array of fantasy point values
+
+    if (!recentGames || recentGames.length < 3) {
+      return {
+        stdDev: 0,
+        floor: 0,
+        ceiling: 0,
+        volatility: 0
+      };
+    }
+
+    // Calculate mean
+    const mean = recentGames.reduce((sum, val) => sum + val, 0) / recentGames.length;
+
+    // Calculate variance
+    const squaredDiffs = recentGames.map(val => Math.pow(val - mean, 2));
+    const variance = squaredDiffs.reduce((sum, val) => sum + val, 0) / recentGames.length;
+    const stdDev = Math.sqrt(variance);
+
+    // Calculate floor (25th percentile) and ceiling (75th percentile)
+    // Using standard deviation: 68% of values fall within ±1 stdDev
+    const floor = mean - stdDev;
+    const ceiling = mean + stdDev;
+
+    // Volatility ratio (coefficient of variation)
+    const volatility = mean > 0 ? stdDev / mean : 0;
+
+    return {
+      stdDev,
+      floor: Math.max(0, floor), // Don't allow negative floor
+      ceiling,
+      volatility
+    };
+  }
+
+  getBlowoutRisk(vegasSpread, vegasTotal) {
+    // Advanced blowout risk model
+    // Returns object with projection, floor, and ceiling impacts
+
+    if (!vegasSpread || vegasSpread === 0) {
+      return {
+        projectionAdjustment: 0,
+        floorImpact: 0,
+        ceilingImpact: 0,
+        risk: 0
+      };
+    }
+
+    const absSpread = Math.abs(vegasSpread);
+
+    // Blowout risk kicks in above 10 point spreads
+    if (absSpread <= 10) {
+      return {
+        projectionAdjustment: 0,
+        floorImpact: 0,
+        ceilingImpact: 0,
+        risk: 0
+      };
+    }
+
+    const blowoutMagnitude = absSpread - 10;
+
+    // Big favorites: Risk of early pulls (negative spread = favorite)
+    if (vegasSpread < -10) {
+      return {
+        projectionAdjustment: -blowoutMagnitude * 0.3,  // Reduce projection
+        floorImpact: -blowoutMagnitude * 0.5,            // Floor drops significantly
+        ceilingImpact: -blowoutMagnitude * 0.2,          // Ceiling also drops (no opportunity for big game)
+        risk: blowoutMagnitude * 0.1
+      };
+    }
+
+    // Big underdogs: Garbage time uncertainty (positive spread = underdog)
+    if (vegasSpread > 10) {
+      return {
+        projectionAdjustment: -blowoutMagnitude * 0.2,  // Slight reduction (less playing time in competitive minutes)
+        floorImpact: -blowoutMagnitude * 0.4,            // Floor drops (may get pulled)
+        ceilingImpact: blowoutMagnitude * 0.3,           // Ceiling increases (garbage time potential)
+        risk: blowoutMagnitude * 0.1
+      };
+    }
+
+    return {
+      projectionAdjustment: 0,
+      floorImpact: 0,
+      ceilingImpact: 0,
+      risk: 0
+    };
+  }
+
+  calculateBoomBustProbabilities(projection, stdDev, salary) {
+    // Calculate boom (10+ pts above value) and bust (fail to meet value) probabilities
+
+    if (!projection || !salary || stdDev === 0) {
+      return {
+        boomProb: 0,
+        bustProb: 0
+      };
+    }
+
+    // Calculate expected value threshold (points needed to hit value)
+    // Typical value threshold is 5x salary (e.g., $10k salary needs 50 FP)
+    const valueThreshold = (salary / 1000) * 5;
+
+    // Boom threshold: 10 points above value
+    const boomThreshold = valueThreshold + 10;
+
+    // Calculate z-scores
+    const zScoreBoom = (boomThreshold - projection) / stdDev;
+    const zScoreBust = (valueThreshold - projection) / stdDev;
+
+    // Use normal distribution approximation for probabilities
+    // Simplified calculation using error function approximation
+    const normalCDF = (z) => {
+      // Approximation of cumulative distribution function
+      const t = 1 / (1 + 0.2316419 * Math.abs(z));
+      const d = 0.3989423 * Math.exp(-z * z / 2);
+      const prob = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
+      return z > 0 ? 1 - prob : prob;
+    };
+
+    // Boom probability: P(X > boomThreshold)
+    const boomProb = 1 - normalCDF(zScoreBoom);
+
+    // Bust probability: P(X < valueThreshold)
+    const bustProb = normalCDF(zScoreBust);
+
+    return {
+      boomProb: Math.max(0, Math.min(1, boomProb)) * 100,  // Convert to percentage
+      bustProb: Math.max(0, Math.min(1, bustProb)) * 100   // Convert to percentage
+    };
+  }
+
+  getEnhancedPositionDefenseAdjustment(opponentTeam, playerPosition) {
+    // ENHANCED: Use all available defensive stats for position-specific adjustments
+    const primaryPosition = this.getPrimaryPosition(playerPosition);
+    if (!primaryPosition) {
+      return 0;
+    }
+
+    const normalizedTeam = normalizeForVsPosition(opponentTeam);
+    const positionData = this.loadPositionDefenseData();
+    const key = `${normalizedTeam}_${primaryPosition}`;
+    const defenseVsPos = positionData[key];
+
+    if (!defenseVsPos) {
+      return 0;
+    }
+
+    let totalAdjustment = 0;
+
+    // Base rank adjustment (existing logic)
+    const rank = defenseVsPos.rank;
+    const avgRank = 75;
+    const rankDiff = rank - avgRank;
+    totalAdjustment += rankDiff * 0.04;
+
+    // Category-specific adjustments based on position
+    const ptsAllowed = defenseVsPos.pts_allowed || 0;
+    const fgPctAllowed = defenseVsPos.fg_pct_allowed || 0;
+    const tpmAllowed = defenseVsPos.tpm_allowed || 0;
+    const rebAllowed = defenseVsPos.reb_allowed || 0;
+    const astAllowed = defenseVsPos.ast_allowed || 0;
+    const stlAllowed = defenseVsPos.stl_allowed || 0;
+    const blkAllowed = defenseVsPos.blk_allowed || 0;
+
+    // Position-specific stat emphasis
+    if (primaryPosition === 'PG' || primaryPosition === 'SG') {
+      // Guards: Emphasize assists, steals, 3PM
+      if (astAllowed > 5.0) totalAdjustment += 0.5;  // High assists allowed
+      if (stlAllowed > 1.0) totalAdjustment += 0.3;  // High steals allowed
+      if (tpmAllowed > 2.5) totalAdjustment += 0.4;  // High 3PM allowed
+    } else if (primaryPosition === 'SF') {
+      // Wings: Balanced - all categories matter
+      if (ptsAllowed > 20) totalAdjustment += 0.4;
+      if (rebAllowed > 6.0) totalAdjustment += 0.3;
+      if (tpmAllowed > 2.0) totalAdjustment += 0.3;
+    } else if (primaryPosition === 'PF' || primaryPosition === 'C') {
+      // Bigs: Emphasize rebounds, blocks, FG%
+      if (rebAllowed > 10.0) totalAdjustment += 0.6;  // High rebounds allowed
+      if (blkAllowed > 1.2) totalAdjustment += 0.4;   // High blocks allowed
+      if (fgPctAllowed > 0.50) totalAdjustment += 0.3; // High FG% allowed
+    }
+
+    return totalAdjustment;
+  }
+
+  getImprovedPaceAdjustment(opponentTeam, playerTeam) {
+    // IMPROVED: Use deviation method for pace projection
+    // Account for when fast/slow teams play each other
+
+    const leagueAvgPace = 100.0;
+    const rankings = this.loadDefenseRankings();
+
+    const normalizedOpp = normalizeForRankings(opponentTeam);
+    const normalizedPlayer = normalizeForRankings(playerTeam);
+
+    const oppStats = rankings[normalizedOpp];
+    const playerStats = rankings[normalizedPlayer];
+
+    if (!oppStats || !oppStats.pace || !playerStats || !playerStats.pace) {
+      return 0;
+    }
+
+    // Calculate each team's deviation from league average
+    const oppDeviation = oppStats.pace - leagueAvgPace;
+    const playerDeviation = playerStats.pace - leagueAvgPace;
+
+    // Projected pace = league average + both deviations
+    const projectedPace = leagueAvgPace + oppDeviation + playerDeviation;
+    const paceDiff = projectedPace - leagueAvgPace;
+
+    // 0.25 FP per pace point from league average
+    return paceDiff * 0.25;
+  }
+
+  getTeamTendencyAdjustment(playerTeam) {
+    // NEW: Use team tendency stats (ast_ratio, to_ratio, rebr, etc.)
+    const rankings = this.loadDefenseRankings();
+    const normalizedTeam = normalizeForRankings(playerTeam);
+    const teamStats = rankings[normalizedTeam];
+
+    if (!teamStats) {
+      return 0;
+    }
+
+    let tendencyAdj = 0;
+
+    // Assist Ratio: Pass-heavy teams boost wing scorers
+    if (teamStats.ast_ratio && teamStats.ast_ratio > 17.0) {
+      tendencyAdj += 0.3; // High ball movement = more opportunities
+    }
+
+    // Turnover Ratio: Turnover-prone teams create more possessions
+    if (teamStats.to_ratio && teamStats.to_ratio > 15.0) {
+      tendencyAdj -= 0.2; // But negative for efficiency
+    }
+
+    // Rebound Rate: Offensive rebounding creates extra shots
+    if (teamStats.rebr && teamStats.rebr > 52.0) {
+      tendencyAdj += 0.4; // More possessions from offensive boards
+    }
+
+    // Offensive Efficiency: High-powered offenses
+    if (teamStats.off_eff && teamStats.off_eff > 115.0) {
+      tendencyAdj += 0.5; // Elite offense
+    }
+
+    // True Shooting %: Efficient scoring teams
+    if (teamStats.ts_pct && teamStats.ts_pct > 0.58) {
+      tendencyAdj += 0.3; // High efficiency
+    }
+
+    return tendencyAdj;
+  }
+
+  calculateLeverageScore(boomProbability, ownership) {
+    // GPP Leverage: High boom probability + low ownership = leverage
+    if (!ownership || ownership === 0) {
+      ownership = 1; // Avoid division by zero
+    }
+
+    // Leverage = (Boom Probability × 100) / (Ownership % + 1)
+    const leverage = (boomProbability * 100) / (ownership + 1);
+
+    return leverage;
+  }
+
   async fetchPlayers(slateId) {
     try {
       const url = `${this.baseUrl}/players.php?slateID=${slateId}`;
@@ -347,60 +659,110 @@ class RotowireService {
       }
 
       // ═══════════════════════════════════════════════════════════════
-      // PROJECTION ALGORITHM
+      // ENHANCED PROJECTION ALGORITHM
       // ═══════════════════════════════════════════════════════════════
       let projectedPoints = 0;
+      let floor = 0;
+      let ceiling = 0;
+      let volatility = 0;
+      let stdDev = 0;
+      let boomProbability = 0;
+      let bustProbability = 0;
+      let fppm = 0;
+      let leverageScore = 0;
+      let blowoutRisk = 0;
 
       // Check if player is actually playing - must have projected minutes
       const isPlaying = minutes > 0 && projectedMinutes > 0;
 
       if (isPlaying && (fptsLast3 > 0 || fptsLast5 > 0 || fptsSeason > 0)) {
-        
+
         // ───────────────────────────────────────────────────────────
         // STEP 1: Calculate Recent Form Baseline
         // ───────────────────────────────────────────────────────────
-        // Weight recent games more heavily to capture hot/cold streaks
-        // This baseline ALREADY includes the player's efficiency, usage, and role
         const recentFormBase = (fptsLast3 * 0.40) + (fptsLast5 * 0.30) + (fptsLast7 * 0.20) + (fptsSeason * 0.10);
 
         // ───────────────────────────────────────────────────────────
-        // STEP 2: Minutes Adjustment
+        // STEP 2: Calculate Variance Metrics
         // ───────────────────────────────────────────────────────────
-        // Only adjust if minutes change significantly (3+ minutes)
-        // This accounts for role changes (starter out, etc.)
+        // Estimate variance from available data points
+        // We approximate individual games using the spread between averages
+        const recentGames = [];
+        if (fptsLast3 > 0) recentGames.push(fptsLast3);
+        if (fptsLast5 > 0) recentGames.push(fptsLast5);
+        if (fptsLast7 > 0) recentGames.push(fptsLast7);
+        if (fptsSeason > 0) recentGames.push(fptsSeason);
+
+        const varianceData = this.calculatePlayerVariance(recentGames);
+        stdDev = varianceData.stdDev;
+        volatility = varianceData.volatility;
+
+        // ───────────────────────────────────────────────────────────
+        // STEP 3: Calculate Weighted FPPM
+        // ───────────────────────────────────────────────────────────
+        const minutesLast3 = seasonMinutes * 0.9; // Approximate (assume slight variation)
+        const minutesLast5 = seasonMinutes * 0.95;
+        fppm = this.calculateWeightedFPPM(fptsLast3, minutesLast3, fptsLast5, minutesLast5, fptsSeason, seasonMinutes);
+
+        // ───────────────────────────────────────────────────────────
+        // STEP 4: Minutes Adjustment
+        // ───────────────────────────────────────────────────────────
         const minutesAdj = this.getMinutesAdjustment(projectedMinutes, seasonMinutes, recentFormBase);
 
         // ───────────────────────────────────────────────────────────
-        // STEP 3: Base Projection (Before Matchup)
+        // STEP 5: Base Projection (Before Matchup)
         // ───────────────────────────────────────────────────────────
         const baseProjection = recentFormBase + minutesAdj;
 
         // ───────────────────────────────────────────────────────────
-        // STEP 4: Matchup Adjustments
+        // STEP 6: Enhanced Matchup Adjustments
         // ───────────────────────────────────────────────────────────
         const defenseAdj = this.getDefenseAdjustment(opponent);
-        const paceAdj = this.getPaceAdjustment(opponent);
-        const positionDefenseAdj = this.getPositionDefenseAdjustment(opponent, position);
+        const paceAdj = this.getImprovedPaceAdjustment(opponent, team); // IMPROVED
+        const positionDefenseAdj = this.getEnhancedPositionDefenseAdjustment(opponent, position); // ENHANCED
         const vegasAdj = this.getVegasAdjustment(vegasImpliedTotal);
-        const favoriteAdj = this.getFavoriteAdjustment(vegasSpread);
+        const teamTendencyAdj = this.getTeamTendencyAdjustment(team); // NEW
         const restAdj = this.getRestAdjustment(restDays);
 
+        // Blowout risk analysis
+        const blowoutData = this.getBlowoutRisk(vegasSpread, vegasOverUnder);
+        blowoutRisk = blowoutData.risk;
+
         // ───────────────────────────────────────────────────────────
-        // STEP 5: Final Projection
+        // STEP 7: Final Projection
         // ───────────────────────────────────────────────────────────
-        const totalMatchupAdjustment = defenseAdj + paceAdj + positionDefenseAdj + vegasAdj + favoriteAdj + restAdj;
+        const totalMatchupAdjustment = defenseAdj + paceAdj + positionDefenseAdj + vegasAdj + teamTendencyAdj + restAdj + blowoutData.projectionAdjustment;
         projectedPoints = baseProjection + totalMatchupAdjustment;
 
         // ───────────────────────────────────────────────────────────
-        // LOGGING: Show projection breakdown
+        // STEP 8: Calculate Floor & Ceiling with Blowout Impact
+        // ───────────────────────────────────────────────────────────
+        floor = Math.max(0, projectedPoints - stdDev + blowoutData.floorImpact);
+        ceiling = projectedPoints + stdDev + blowoutData.ceilingImpact;
+
+        // ───────────────────────────────────────────────────────────
+        // STEP 9: Calculate Boom/Bust Probabilities
+        // ───────────────────────────────────────────────────────────
+        const probabilities = this.calculateBoomBustProbabilities(projectedPoints, stdDev, salary);
+        boomProbability = probabilities.boomProb;
+        bustProbability = probabilities.bustProb;
+
+        // ───────────────────────────────────────────────────────────
+        // STEP 10: Calculate GPP Leverage Score
+        // ───────────────────────────────────────────────────────────
+        leverageScore = this.calculateLeverageScore(boomProbability, rostership);
+
+        // ───────────────────────────────────────────────────────────
+        // LOGGING: Show enhanced projection breakdown
         // ───────────────────────────────────────────────────────────
         const shouldLog = Math.abs(totalMatchupAdjustment) > 0.5 || Math.abs(minutesAdj) > 1.0;
 
         if (shouldLog) {
           console.log(`  📊 ${name} (${position}) vs ${opponent}:`);
           console.log(`     Recent Form Base: ${recentFormBase.toFixed(1)} FP`);
+          console.log(`     Weighted FPPM: ${fppm.toFixed(2)}`);
+          console.log(`     Variance: σ=${stdDev.toFixed(1)}, Volatility=${(volatility * 100).toFixed(0)}%`);
 
-          // Only show minutes adjustment if significant
           if (Math.abs(minutesAdj) > 0.1) {
             const minChange = projectedMinutes - seasonMinutes;
             console.log(`     Minutes Adj: ${minutesAdj > 0 ? '+' : ''}${minutesAdj.toFixed(1)} FP (${minChange > 0 ? '+' : ''}${minChange.toFixed(0)} min: ${seasonMinutes.toFixed(0)} → ${projectedMinutes.toFixed(0)})`);
@@ -408,8 +770,15 @@ class RotowireService {
 
           console.log(`     Base Projection: ${baseProjection.toFixed(1)} FP`);
           console.log(`     Matchup Adjustments: ${totalMatchupAdjustment > 0 ? '+' : ''}${totalMatchupAdjustment.toFixed(1)} FP`);
-          console.log(`       └─ Defense: ${defenseAdj > 0 ? '+' : ''}${defenseAdj.toFixed(1)} | Pace: ${paceAdj > 0 ? '+' : ''}${paceAdj.toFixed(1)} | Position: ${positionDefenseAdj > 0 ? '+' : ''}${positionDefenseAdj.toFixed(1)} | Vegas: ${vegasAdj > 0 ? '+' : ''}${vegasAdj.toFixed(1)} | Favorite: ${favoriteAdj > 0 ? '+' : ''}${favoriteAdj.toFixed(1)} | Rest: ${restAdj > 0 ? '+' : ''}${restAdj.toFixed(1)} (${restDays}d)`);
-          console.log(`     Final Projection: ${projectedPoints.toFixed(1)} FP`);
+          console.log(`       └─ Defense: ${defenseAdj > 0 ? '+' : ''}${defenseAdj.toFixed(1)} | Pace: ${paceAdj > 0 ? '+' : ''}${paceAdj.toFixed(1)} | Position: ${positionDefenseAdj > 0 ? '+' : ''}${positionDefenseAdj.toFixed(1)}`);
+          console.log(`       └─ Vegas: ${vegasAdj > 0 ? '+' : ''}${vegasAdj.toFixed(1)} | Team: ${teamTendencyAdj > 0 ? '+' : ''}${teamTendencyAdj.toFixed(1)} | Rest: ${restAdj > 0 ? '+' : ''}${restAdj.toFixed(1)} (${restDays}d)`);
+
+          if (blowoutRisk > 0) {
+            console.log(`       └─ Blowout Risk: -${blowoutRisk.toFixed(1)} (spread: ${vegasSpread > 0 ? '+' : ''}${vegasSpread})`);
+          }
+
+          console.log(`     Final: ${projectedPoints.toFixed(1)} FP | Floor: ${floor.toFixed(1)} | Ceiling: ${ceiling.toFixed(1)}`);
+          console.log(`     Boom: ${boomProbability.toFixed(0)}% | Bust: ${bustProbability.toFixed(0)}% | Leverage: ${leverageScore.toFixed(1)}`);
         }
       }
 
@@ -557,6 +926,16 @@ class RotowireService {
         headshot,
         dvpPtsAllowed,
         oppDefEff,
+        // Advanced projection metrics
+        floor,
+        ceiling,
+        volatility,
+        boomProbability,
+        bustProbability,
+        fppm,
+        leverageScore,
+        blowoutRisk,
+        stdDev,
         rawData: JSON.stringify(player)
       };
     })

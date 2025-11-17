@@ -700,9 +700,9 @@ export default function ChatPage() {
         </div>
 
         {/* Messages Area */}
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto px-4">
           {messages.length === 0 ? (
-            <div className="max-w-3xl mx-auto px-6 py-12">
+            <div className="max-w-3xl mx-auto py-12">
               {/* Welcome Section */}
               <div className="text-center mb-12">
                 <div className="text-6xl mb-4">🏀</div>
@@ -738,7 +738,7 @@ export default function ChatPage() {
               </div>
             </div>
           ) : (
-            <>
+            <div className="max-w-3xl mx-auto py-4">
               {messages.map((msg, idx) => (
                 <Message
                   key={`${msg.created_at}-${idx}`}
@@ -748,15 +748,15 @@ export default function ChatPage() {
               ))}
 
               {isLoading && <TypingIndicator />}
-            </>
+              
+              <div ref={messagesEndRef} />
+            </div>
           )}
-
-          <div ref={messagesEndRef} />
         </div>
 
         {/* Input Area */}
         <div className="border-t border-gray-200 bg-white">
-          <div className="max-w-3xl mx-auto px-6 py-4">
+          <div className="max-w-3xl mx-auto px-4 py-3">
             <form onSubmit={handleSendMessage} className="relative">
               <input
                 ref={inputRef}

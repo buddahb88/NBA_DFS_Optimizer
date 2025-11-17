@@ -74,7 +74,7 @@ function PlayerPoolPage() {
     });
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Player Pool</h1>
@@ -234,6 +234,50 @@ function PlayerPoolPage() {
                           </span>
                         </div>
                       )}
+                      {player.floor != null && player.ceiling != null && (
+                        <div>
+                          <span className="text-gray-500">Range:</span>
+                          <span className="ml-1 font-semibold text-gray-900">
+                            {player.floor.toFixed(0)}-{player.ceiling.toFixed(0)}
+                          </span>
+                        </div>
+                      )}
+                      {player.boom_probability != null && (
+                        <div>
+                          <span className="text-gray-500">Boom:</span>
+                          <span className={`ml-1 font-semibold ${
+                            player.boom_probability >= 30 ? 'text-green-600' :
+                            player.boom_probability <= 10 ? 'text-red-600' :
+                            'text-gray-900'
+                          }`}>
+                            {player.boom_probability.toFixed(0)}%
+                          </span>
+                        </div>
+                      )}
+                      {player.leverage_score != null && (
+                        <div>
+                          <span className="text-gray-500">Lev:</span>
+                          <span className={`ml-1 font-semibold ${
+                            player.leverage_score >= 3.0 ? 'text-green-600' :
+                            player.leverage_score <= 1.0 ? 'text-red-600' :
+                            'text-gray-900'
+                          }`}>
+                            {player.leverage_score.toFixed(1)}
+                          </span>
+                        </div>
+                      )}
+                      {player.volatility != null && (
+                        <div>
+                          <span className="text-gray-500">Vol:</span>
+                          <span className={`ml-1 font-semibold ${
+                            player.volatility >= 0.30 ? 'text-orange-600' :  // High variance
+                            player.volatility <= 0.15 ? 'text-blue-600' :    // Consistent
+                            'text-gray-900'
+                          }`}>
+                            {(player.volatility * 100).toFixed(0)}%
+                          </span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -243,137 +287,155 @@ function PlayerPoolPage() {
 
           {/* Desktop Table View */}
           <div className="hidden md:block bg-white rounded-lg shadow overflow-hidden">
-            <div className="overflow-x-auto max-h-[calc(100vh-250px)] overflow-y-auto">
-              <table className="min-w-full divide-y divide-gray-200">
+            <div className="max-h-[calc(100vh-250px)] overflow-y-auto">
+              <table className="w-full divide-y divide-gray-200 table-fixed">
               <thead className="bg-gray-50 sticky top-0 z-10">
                 <tr>
                   <th
                     onClick={() => handleSort('name')}
-                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                    className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100 w-40"
                   >
                     Name {sortField === 'name' && (sortDirection === 'asc' ? '↑' : '↓')}
                   </th>
                   <th
                     onClick={() => handleSort('position')}
-                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                    className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100 w-20"
                   >
-                    Position {sortField === 'position' && (sortDirection === 'asc' ? '↑' : '↓')}
+                    Pos {sortField === 'position' && (sortDirection === 'asc' ? '↑' : '↓')}
                   </th>
                   <th
                     onClick={() => handleSort('team')}
-                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                    className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100 w-16"
                   >
                     Team {sortField === 'team' && (sortDirection === 'asc' ? '↑' : '↓')}
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Opponent
+                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase w-16">
+                    Opp
                   </th>
                   <th
                     onClick={() => handleSort('salary')}
-                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                    className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100 w-20"
                   >
-                    Salary {sortField === 'salary' && (sortDirection === 'asc' ? '↑' : '↓')}
+                    Sal {sortField === 'salary' && (sortDirection === 'asc' ? '↑' : '↓')}
                   </th>
                   <th
                     onClick={() => handleSort('projected_points')}
-                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                    className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100 w-16"
                   >
                     Proj {sortField === 'projected_points' && (sortDirection === 'asc' ? '↑' : '↓')}
                   </th>
                   <th
                     onClick={() => handleSort('value')}
-                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                    className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100 w-16"
                   >
-                    Value {sortField === 'value' && (sortDirection === 'asc' ? '↑' : '↓')}
+                    Val {sortField === 'value' && (sortDirection === 'asc' ? '↑' : '↓')}
                   </th>
                   <th
                     onClick={() => handleSort('projected_minutes')}
-                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                    className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100 w-14"
                   >
                     Min {sortField === 'projected_minutes' && (sortDirection === 'asc' ? '↑' : '↓')}
                   </th>
                   <th
                     onClick={() => handleSort('usage')}
-                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                    className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100 w-16"
                   >
-                    Usage {sortField === 'usage' && (sortDirection === 'asc' ? '↑' : '↓')}
+                    Usg {sortField === 'usage' && (sortDirection === 'asc' ? '↑' : '↓')}
                   </th>
                   <th
-                    onClick={() => handleSort('dvp_pts_allowed')}
-                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                    onClick={() => handleSort('floor')}
+                    className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100 w-16"
                   >
-                    DVP {sortField === 'dvp_pts_allowed' && (sortDirection === 'asc' ? '↑' : '↓')}
+                    Flr {sortField === 'floor' && (sortDirection === 'asc' ? '↑' : '↓')}
                   </th>
                   <th
-                    onClick={() => handleSort('opp_def_eff')}
-                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                    onClick={() => handleSort('ceiling')}
+                    className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100 w-16"
                   >
-                    DEF Eff {sortField === 'opp_def_eff' && (sortDirection === 'asc' ? '↑' : '↓')}
+                    Ceil {sortField === 'ceiling' && (sortDirection === 'asc' ? '↑' : '↓')}
+                  </th>
+                  <th
+                    onClick={() => handleSort('boom_probability')}
+                    className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100 w-16"
+                  >
+                    Boom {sortField === 'boom_probability' && (sortDirection === 'asc' ? '↑' : '↓')}
+                  </th>
+                  <th
+                    onClick={() => handleSort('volatility')}
+                    className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100 w-14"
+                  >
+                    Vol {sortField === 'volatility' && (sortDirection === 'asc' ? '↑' : '↓')}
+                  </th>
+                  <th
+                    onClick={() => handleSort('leverage_score')}
+                    className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100 w-16"
+                  >
+                    Lev {sortField === 'leverage_score' && (sortDirection === 'asc' ? '↑' : '↓')}
                   </th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
                 {filteredPlayers.map((player) => (
                   <tr key={player.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 whitespace-nowrap">
+                    <td className="px-3 py-2 whitespace-nowrap">
                       <div className="flex items-center">
                         {player.headshot ? (
                           <img
                             src={player.headshot}
                             alt={player.name}
-                            className="h-10 w-10 rounded-full object-cover mr-3"
+                            className="h-8 w-8 rounded-full object-cover mr-2"
                             onError={(e) => {
                               e.target.onerror = null;
                               e.target.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="gray"%3E%3Cpath d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"/%3E%3C/svg%3E';
                             }}
                           />
                         ) : (
-                          <div className="h-10 w-10 rounded-full bg-gray-300 flex items-center justify-center mr-3">
-                            <span className="text-gray-600 font-bold text-lg">
+                          <div className="h-8 w-8 rounded-full bg-gray-300 flex items-center justify-center mr-2">
+                            <span className="text-gray-600 font-bold text-sm">
                               {player.name.charAt(0)}
                             </span>
                           </div>
                         )}
-                        <div className="text-sm font-medium text-gray-900">{player.name}</div>
+                        <div className="text-sm font-medium text-gray-900 truncate">{player.name}</div>
                       </div>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">
-                        {player.position}
+                    <td className="px-2 py-2 whitespace-nowrap">
+                      <span className="px-1 inline-flex text-xs leading-5 font-semibold rounded bg-blue-100 text-blue-800">
+                        {player.position.split(',')[0]}
                       </span>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                    <td className="px-2 py-2 whitespace-nowrap text-sm text-gray-900">
                       {player.team}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    <td className="px-2 py-2 whitespace-nowrap text-sm text-gray-500">
                       {player.opponent}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      ${player.salary?.toLocaleString()}
+                    <td className="px-2 py-2 whitespace-nowrap text-sm text-gray-900">
+                      {(player.salary / 1000).toFixed(1)}k
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm">
+                    <td className="px-2 py-2 whitespace-nowrap text-sm">
                       <span className={`font-semibold ${
-                        player.projected_points >= 40 ? 'text-green-600' :  // High projection
-                        player.projected_points <= 25 ? 'text-red-600' :    // Low projection
+                        player.projected_points >= 40 ? 'text-green-600' :
+                        player.projected_points <= 25 ? 'text-red-600' :
                         'text-gray-700'
                       }`}>
                         {player.projected_points?.toFixed(1)}
                       </span>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm">
+                    <td className="px-2 py-2 whitespace-nowrap text-sm">
                       <span className={`font-semibold ${
-                        player.value >= 5.5 ? 'text-green-600' :  // Great value
-                        player.value <= 4.0 ? 'text-red-600' :    // Poor value
+                        player.value >= 5.5 ? 'text-green-600' :
+                        player.value <= 4.0 ? 'text-red-600' :
                         'text-gray-700'
                       }`}>
-                        {player.value?.toFixed(2)}
+                        {player.value?.toFixed(1)}
                       </span>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm">
+                    <td className="px-2 py-2 whitespace-nowrap text-sm">
                       {player.projected_minutes ? (
                         <span className={`font-semibold ${
-                          player.projected_minutes >= 32 ? 'text-green-600' :  // Starter minutes
-                          player.projected_minutes <= 20 ? 'text-red-600' :    // Bench minutes
+                          player.projected_minutes >= 32 ? 'text-green-600' :
+                          player.projected_minutes <= 20 ? 'text-red-600' :
                           'text-gray-700'
                         }`}>
                           {player.projected_minutes.toFixed(0)}
@@ -382,40 +444,71 @@ function PlayerPoolPage() {
                         <span className="text-gray-400">-</span>
                       )}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm">
+                    <td className="px-2 py-2 whitespace-nowrap text-sm">
                       {player.usage ? (
                         <span className={`font-semibold ${
-                          player.usage >= 27 ? 'text-green-600' :  // High usage
-                          player.usage <= 20 ? 'text-red-600' :    // Low usage
+                          player.usage >= 27 ? 'text-green-600' :
+                          player.usage <= 20 ? 'text-red-600' :
                           'text-gray-700'
                         }`}>
-                          {player.usage.toFixed(1)}%
+                          {player.usage.toFixed(0)}
                         </span>
                       ) : (
                         <span className="text-gray-400">-</span>
                       )}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm">
-                      {player.dvp_pts_allowed ? (
-                        <span className={`font-semibold ${
-                          player.dvp_pts_allowed >= 45 ? 'text-green-600' :  // High pts = great (green)
-                          player.dvp_pts_allowed <= 35 ? 'text-red-600' :    // Low pts = tough (red)
-                          'text-gray-700'                                     // Middle = neutral
-                        }`}>
-                          {player.dvp_pts_allowed.toFixed(1)}
+                    <td className="px-2 py-2 whitespace-nowrap text-sm">
+                      {player.floor != null ? (
+                        <span className="font-semibold text-gray-700">
+                          {player.floor.toFixed(0)}
                         </span>
                       ) : (
                         <span className="text-gray-400">-</span>
                       )}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm">
-                      {player.opp_def_eff ? (
+                    <td className="px-2 py-2 whitespace-nowrap text-sm">
+                      {player.ceiling != null ? (
+                        <span className="font-semibold text-gray-700">
+                          {player.ceiling.toFixed(0)}
+                        </span>
+                      ) : (
+                        <span className="text-gray-400">-</span>
+                      )}
+                    </td>
+                    <td className="px-2 py-2 whitespace-nowrap text-sm">
+                      {player.boom_probability != null ? (
                         <span className={`font-semibold ${
-                          player.opp_def_eff < 108 ? 'text-red-600' :     // Elite defense (red)
-                          player.opp_def_eff > 118 ? 'text-green-600' :   // Weak defense (green)
-                          'text-gray-700'                                   // Average (neutral)
+                          player.boom_probability >= 30 ? 'text-green-600' :
+                          player.boom_probability <= 10 ? 'text-red-600' :
+                          'text-gray-700'
                         }`}>
-                          {player.opp_def_eff.toFixed(1)}
+                          {player.boom_probability.toFixed(0)}
+                        </span>
+                      ) : (
+                        <span className="text-gray-400">-</span>
+                      )}
+                    </td>
+                    <td className="px-2 py-2 whitespace-nowrap text-sm">
+                      {player.volatility != null ? (
+                        <span className={`font-semibold ${
+                          player.volatility >= 0.30 ? 'text-orange-600' :
+                          player.volatility <= 0.15 ? 'text-blue-600' :
+                          'text-gray-700'
+                        }`}>
+                          {(player.volatility * 100).toFixed(0)}
+                        </span>
+                      ) : (
+                        <span className="text-gray-400">-</span>
+                      )}
+                    </td>
+                    <td className="px-2 py-2 whitespace-nowrap text-sm">
+                      {player.leverage_score != null ? (
+                        <span className={`font-semibold ${
+                          player.leverage_score >= 3.0 ? 'text-green-600' :
+                          player.leverage_score <= 1.0 ? 'text-red-600' :
+                          'text-gray-700'
+                        }`}>
+                          {player.leverage_score.toFixed(1)}
                         </span>
                       ) : (
                         <span className="text-gray-400">-</span>

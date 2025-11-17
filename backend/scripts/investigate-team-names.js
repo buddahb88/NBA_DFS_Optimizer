@@ -8,57 +8,66 @@ const __dirname = path.dirname(__filename);
 const dbPath = path.join(__dirname, '../data/nba_dfs.db');
 const db = new Database(dbPath);
 
-console.log('🔍 Investigating team name mismatches...\n');
+console.log('🔍 Investigating Phoenix and Utah team name issues...\n');
 
-// Get unique opponent names from players
-console.log('📋 OPPONENTS IN PLAYERS TABLE:');
-const playerOpponents = db.prepare(`
+// Check what opponent names players have for Phoenix
+console.log('📋 PLAYERS FACING PHOENIX:');
+const phxPlayers = db.prepare(`
   SELECT DISTINCT opponent
   FROM players
-  WHERE opponent IS NOT NULL
-  ORDER BY opponent
+  WHERE opponent LIKE '%PHO%' OR opponent LIKE '%PHX%' OR opponent LIKE '%Phoenix%'
 `).all();
-console.log(playerOpponents.map(r => r.opponent).join(', '));
-console.log(`Total: ${playerOpponents.length}\n`);
+console.log('Opponent values:', phxPlayers.map(r => r.opponent).join(', ') || 'NONE');
 
-// Get team names from defense rankings
-console.log('📋 TEAMS IN TEAM_DEFENSE_RANKINGS:');
-const defenseTeams = db.prepare(`
-  SELECT DISTINCT team
-  FROM team_defense_rankings
-  ORDER BY team
+// Check what opponent names players have for Utah
+console.log('\n📋 PLAYERS FACING UTAH:');
+const utahPlayers = db.prepare(`
+  SELECT DISTINCT opponent
+  FROM players
+  WHERE opponent LIKE '%UTA%' OR opponent LIKE '%UTAH%' OR opponent LIKE '%Utah%'
 `).all();
-console.log(defenseTeams.map(r => r.team).join(', '));
-console.log(`Total: ${defenseTeams.length}\n`);
+console.log('Opponent values:', utahPlayers.map(r => r.opponent).join(', ') || 'NONE');
 
-// Get team names from defense vs position
-console.log('📋 TEAMS IN TEAM_DEFENSE_VS_POSITION:');
-const dvpTeams = db.prepare(`
-  SELECT DISTINCT team
-  FROM team_defense_vs_position
-  ORDER BY team
+// Check all defense table teams
+console.log('\n📋 DEFENSE RANKINGS TEAMS:');
+const rankingsTeams = db.prepare('SELECT team FROM team_defense_rankings ORDER BY team').all();
+const phxInRankings = rankingsTeams.filter(t => t.team.includes('PHO') || t.team.includes('PHX') || t.team.toLowerCase().includes('phoenix'));
+const utahInRankings = rankingsTeams.filter(t => t.team.includes('UTA') || t.team.includes('UTAH') || t.team.toLowerCase().includes('utah'));
+console.log('Phoenix:', phxInRankings.map(t => t.team).join(', ') || 'NOT FOUND');
+console.log('Utah:', utahInRankings.map(t => t.team).join(', ') || 'NOT FOUND');
+
+console.log('\n📋 DEFENSE VS POSITION TEAMS:');
+const vsPositionTeams = db.prepare('SELECT DISTINCT team FROM team_defense_vs_position ORDER BY team').all();
+const phxInVsPos = vsPositionTeams.filter(t => t.team.includes('PHO') || t.team.includes('PHX') || t.team.toLowerCase().includes('phoenix'));
+const utahInVsPos = vsPositionTeams.filter(t => t.team.includes('UTA') || t.team.includes('UTAH') || t.team.toLowerCase().includes('utah'));
+console.log('Phoenix:', phxInVsPos.map(t => t.team).join(', ') || 'NOT FOUND');
+console.log('Utah:', utahInVsPos.map(t => t.team).join(', ') || 'NOT FOUND');
+
+// Check sample players facing these teams
+console.log('\n📊 SAMPLE PLAYERS FACING PHOENIX:');
+const samplePhx = db.prepare(`
+  SELECT name, opponent, dvp_pts_allowed, opp_def_eff
+  FROM players
+  WHERE opponent LIKE '%PHO%' OR opponent LIKE '%PHX%' OR opponent LIKE '%Phoenix%'
+  LIMIT 3
 `).all();
-console.log(dvpTeams.map(r => r.team).join(', '));
-console.log(`Total: ${dvpTeams.length}\n`);
-
-// Find mismatches
-console.log('❌ OPPONENTS NOT IN DEFENSE TABLES:');
-const defenseTeamSet = new Set(defenseTeams.map(r => r.team));
-const mismatches = playerOpponents.filter(r => !defenseTeamSet.has(r.opponent));
-if (mismatches.length > 0) {
-  mismatches.forEach(m => console.log(`  - ${m.opponent}`));
+if (samplePhx.length > 0) {
+  console.table(samplePhx);
 } else {
-  console.log('  (None - all match!)');
+  console.log('NO PLAYERS FOUND');
 }
 
-console.log('\n📊 SAMPLE DVP DATA (with pts_allowed):');
-const sampleDvp = db.prepare(`
-  SELECT team, position, rank, pts_allowed
-  FROM team_defense_vs_position
-  WHERE position = 'PG'
-  ORDER BY pts_allowed DESC
-  LIMIT 5
+console.log('\n📊 SAMPLE PLAYERS FACING UTAH:');
+const sampleUtah = db.prepare(`
+  SELECT name, opponent, dvp_pts_allowed, opp_def_eff
+  FROM players
+  WHERE opponent LIKE '%UTA%' OR opponent LIKE '%UTAH%' OR opponent LIKE '%Utah%'
+  LIMIT 3
 `).all();
-console.table(sampleDvp);
+if (sampleUtah.length > 0) {
+  console.table(sampleUtah);
+} else {
+  console.log('NO PLAYERS FOUND');
+}
 
 db.close();
