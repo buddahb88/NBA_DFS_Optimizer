@@ -647,25 +647,25 @@ function OptimizerPage() {
                   <div className="bg-white rounded-lg p-4 border border-purple-200 shadow-sm">
                     <div className="text-xs text-gray-600 font-medium uppercase tracking-wide">Avg Projection</div>
                     <div className="text-2xl font-bold text-purple-600 mt-1">
-                      {slateBreakdown.stats.avgProjection?.toFixed(1)}
+                      {(slateBreakdown.stats.avgProjection || 0).toFixed(1)}
                     </div>
                   </div>
                   <div className="bg-white rounded-lg p-4 border border-pink-200 shadow-sm">
                     <div className="text-xs text-gray-600 font-medium uppercase tracking-wide">Avg Ownership</div>
                     <div className="text-2xl font-bold text-pink-600 mt-1">
-                      {slateBreakdown.stats.avgOwnership?.toFixed(1)}%
+                      {(slateBreakdown.stats.avgOwnership || 0).toFixed(1)}%
                     </div>
                   </div>
                   <div className="bg-white rounded-lg p-4 border border-green-200 shadow-sm">
                     <div className="text-xs text-gray-600 font-medium uppercase tracking-wide">Leverage Plays</div>
                     <div className="text-2xl font-bold text-green-600 mt-1">
-                      {slateBreakdown.stats.leveragePlayCount}
+                      {slateBreakdown.stats.leveragePlayCount || 0}
                     </div>
                   </div>
                   <div className="bg-white rounded-lg p-4 border border-red-200 shadow-sm">
                     <div className="text-xs text-gray-600 font-medium uppercase tracking-wide">Chalk Plays</div>
                     <div className="text-2xl font-bold text-red-600 mt-1">
-                      {slateBreakdown.stats.highOwnershipCount}
+                      {slateBreakdown.stats.highOwnershipCount || 0}
                     </div>
                   </div>
                 </div>
@@ -683,12 +683,12 @@ function OptimizerPage() {
                         <div className="flex-1 min-w-0">
                           <div className="font-medium truncate">{p.name}</div>
                           <div className="text-xs text-gray-500">
-                            ${(p.salary / 1000).toFixed(1)}k • {p.projection?.toFixed(1)} pts
+                            ${((p.salary || 0) / 1000).toFixed(1)}k • {(p.projection || 0).toFixed(1)} pts
                           </div>
                         </div>
                         <div className="ml-2 text-xs">
-                          <span className={`font-bold ${p.leverage >= 2.0 ? 'text-green-600' : 'text-gray-600'}`}>
-                            L: {p.leverage?.toFixed(1)}
+                          <span className={`font-bold ${(p.leverage || 0) >= 2.0 ? 'text-green-600' : 'text-gray-600'}`}>
+                            L: {(p.leverage || 0).toFixed(1)}
                           </span>
                         </div>
                       </div>
@@ -707,12 +707,12 @@ function OptimizerPage() {
                         <div className="flex-1 min-w-0">
                           <div className="font-medium truncate">{p.name}</div>
                           <div className="text-xs text-gray-500">
-                            ${(p.salary / 1000).toFixed(1)}k • {p.projection?.toFixed(1)} pts
+                            ${((p.salary || 0) / 1000).toFixed(1)}k • {(p.projection || 0).toFixed(1)} pts
                           </div>
                         </div>
                         <div className="ml-2 text-xs">
-                          <span className={`font-bold ${p.leverage >= 3.0 ? 'text-green-600' : 'text-gray-600'}`}>
-                            L: {p.leverage?.toFixed(1)}
+                          <span className={`font-bold ${(p.leverage || 0) >= 3.0 ? 'text-green-600' : 'text-gray-600'}`}>
+                            L: {(p.leverage || 0).toFixed(1)}
                           </span>
                         </div>
                       </div>
@@ -731,12 +731,12 @@ function OptimizerPage() {
                         <div className="flex-1 min-w-0">
                           <div className="font-medium truncate">{p.name}</div>
                           <div className="text-xs text-gray-500">
-                            ${(p.salary / 1000).toFixed(1)}k • {p.projection?.toFixed(1)} pts
+                            ${((p.salary || 0) / 1000).toFixed(1)}k • {(p.projection || 0).toFixed(1)} pts
                           </div>
                         </div>
                         <div className="ml-2 text-xs">
-                          <span className={`font-bold ${p.leverage >= 4.0 ? 'text-green-600 font-extrabold' : 'text-gray-600'}`}>
-                            L: {p.leverage?.toFixed(1)} {p.leverage >= 4.0 && '⭐'}
+                          <span className={`font-bold ${(p.leverage || 0) >= 4.0 ? 'text-green-600 font-extrabold' : 'text-gray-600'}`}>
+                            L: {(p.leverage || 0).toFixed(1)} {(p.leverage || 0) >= 4.0 && '⭐'}
                           </span>
                         </div>
                       </div>
@@ -756,7 +756,7 @@ function OptimizerPage() {
                       <div key={i} className="flex items-center justify-between text-green-900">
                         <span className="font-medium">{p.name}</span>
                         <span className="text-xs">
-                          Lev: <span className="font-bold">{p.leverage?.toFixed(1)}</span> ({p.ownership?.toFixed(0)}% own)
+                          Lev: <span className="font-bold">{(p.leverage || 0).toFixed(1)}</span> ({(p.ownership || 0).toFixed(0)}% own)
                         </span>
                       </div>
                     ))}
@@ -772,7 +772,7 @@ function OptimizerPage() {
                       <div key={i} className="flex items-center justify-between text-red-900">
                         <span className="font-medium">{p.name}</span>
                         <span className="text-xs">
-                          <span className="font-bold">{p.ownership?.toFixed(0)}%</span> owned
+                          <span className="font-bold">{(p.ownership || 0).toFixed(0)}%</span> owned
                         </span>
                       </div>
                     ))}
