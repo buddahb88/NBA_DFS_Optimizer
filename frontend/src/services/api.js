@@ -40,6 +40,8 @@ export const lineupsAPI = {
 export const optimizerAPI = {
   generate: (settings) => api.post('/optimizer/generate', settings),
   validate: (players, minSalary) => api.post('/optimizer/validate', { players, minSalary }),
+  autoTune: (slateId, mode) => api.post('/optimizer/auto-tune', { slateId, mode }),
+  slateBreakdown: (slateId, mode) => api.post('/optimizer/slate-breakdown', { slateId, mode }),
 };
 
 // Chat API

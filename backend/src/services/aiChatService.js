@@ -191,12 +191,59 @@ ${schemaDoc}
 - Salary cap: $50,000
 - Each player can only be used once per lineup
 
+**Advanced Projection Metrics (NEW):**
+You now have access to advanced variance and risk analysis metrics for sophisticated DFS strategy:
+
+1. **floor** - 25th percentile projection (worst-case reasonable outcome)
+   - Use for CASH GAMES to find safe plays
+   - Target: floor >= 30 for cash game cores
+
+2. **ceiling** - 75th percentile projection (best-case reasonable outcome)
+   - Use for GPP TOURNAMENTS to identify boom potential
+   - Target: ceiling >= 50 for tournament upside
+
+3. **volatility** - Coefficient of variation (std_dev / mean)
+   - <0.15 = Consistent/safe (CASH)
+   - 0.15-0.30 = Moderate variance
+   - >0.30 = High variance boom/bust (GPP with low ownership)
+
+4. **boom_probability** - % chance of exceeding value by 10+ fantasy points
+   - ≥30% = High boom potential (great for GPP)
+   - 10-30% = Moderate
+   - <10% = Low upside
+
+5. **bust_probability** - % chance of failing to meet value threshold
+   - <20% = Safe (good for cash)
+   - >40% = High bust risk (avoid in cash)
+
+6. **leverage_score** - GPP leverage: (boom_probability × 100) / (ownership + 1)
+   - ≥3.0 = HIGH LEVERAGE (ideal GPP play - low owned + high boom)
+   - 1.0-3.0 = Moderate leverage
+   - <1.0 = Low leverage (chalky)
+   - **PRIMARY GPP METRIC**: Sort by leverage_score DESC for best tournament plays
+
+7. **fppm** - Weighted fantasy points per minute (40% L3, 30% L5, 30% season)
+   - Captures current efficiency better than season averages
+
+8. **blowout_risk** - Risk magnitude when spreads > 10 points
+   - Favorites: early pull risk
+   - Underdogs: garbage time variance
+
 **Key DFS Strategies:**
-1. **Cash Games**: Prioritize safety, high floors, chalk plays, use 'value' metric
-2. **GPP/Tournaments**: Prioritize ceiling, leverage, contrarian plays, use 'value_gpp' metric
-3. **Stacking**: Pair players from same team in high-scoring games (use vegas_implied_total)
-4. **Correlation**: Consider game environments (both teams from same matchup)
-5. **Leverage**: Fade high-owned players in tournaments for differentiation
+1. **Cash Games**:
+   - Prioritize: high floor, low volatility, low bust_probability
+   - SQL: WHERE floor >= 30 AND volatility < 0.20 AND bust_probability < 25
+
+2. **GPP/Tournaments**:
+   - Prioritize: high leverage_score, high ceiling, high boom_probability
+   - SQL: WHERE leverage_score >= 3.0 AND ceiling >= 50 AND boom_probability >= 25
+
+3. **Elite Leverage Plays**:
+   - Low ownership + high boom = maximum leverage
+   - SQL: WHERE leverage_score >= 3.0 AND rostership <= 10
+
+4. **Stacking**: Pair players from same team in high-scoring games (use vegas_implied_total)
+5. **Correlation**: Consider game environments (both teams from same matchup)
 6. **Punt Plays**: Use minimum salary players to afford studs
 7. **News Reactions**: Injury replacements often underpriced with low ownership
 

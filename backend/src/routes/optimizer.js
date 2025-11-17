@@ -1,6 +1,8 @@
 import express from 'express';
 import playerModel from '../models/playerModel.js';
 import optimizerService from '../services/optimizerService.js';
+import { autoTuneSettings } from '../utils/autoTuneSettings.js';
+import { generateSlateBreakdown } from '../utils/slateAnalyzer.js';
 
 const router = express.Router();
 
@@ -38,45 +40,104 @@ router.post('/generate', async (req, res) => {
 
     console.log(`📊 Found ${players.length} active players`);
 
-    // Run optimization
-    const lineups = optimizerService.optimize(players, {
-      mode,
-      numLineups,
-      lockedPlayers,
-      excludedPlayers,
-      minSalary,
-      maxExposure,
-      teamStacks,
-      randomness,
-      useProjections
-    });
+    // Run optimization with all settings from request body
+    const result = optimizerService.optimize(players, req.body);
 
-    console.log(`✅ Generated ${lineups.length} valid lineup(s)`);
-
-    // Get exposure stats if multiple lineups
-    let exposureStats = null;
-    if (numLineups > 1) {
-      exposureStats = optimizerService.getExposureStats(lineups);
-    }
+    console.log(`✅ Generated ${result.lineups?.length || 0} valid lineup(s)`);
 
     res.json({
       success: true,
-      lineups,
-      count: lineups.length,
-      exposureStats,
-      settings: {
-        mode,
-        numLineups,
-        lockedPlayers: lockedPlayers.length,
-        excludedPlayers: excludedPlayers.length,
-        minSalary,
-        maxExposure
-      }
+      lineups: result.lineups || [],
+      count: result.lineups?.length || 0,
+      exposureStats: result.exposureStats,
+      settings: result.settings
     });
   } catch (error) {
     console.error('Optimizer error:', error);
     res.status(500).json({
       error: 'Optimization failed',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * POST /api/optimizer/auto-tune
+ * Analyze player pool and recommend optimal settings
+ */
+router.post('/auto-tune', async (req, res) => {
+  try {
+    const { slateId, mode = 'gpp' } = req.body;
+
+    if (!slateId) {
+      return res.status(400).json({ error: 'slateId is required' });
+    }
+
+    console.log(`🤖 Auto-tuning settings for slate ${slateId} (${mode} mode)`);
+
+    // Get all players for the slate
+    const players = playerModel.getBySlateId(slateId);
+
+    if (!players || players.length === 0) {
+      return res.status(404).json({ error: 'No players found for this slate' });
+    }
+
+    // Analyze and generate recommendations
+    const result = autoTuneSettings(players, mode);
+
+    if (result.error) {
+      return res.status(400).json(result);
+    }
+
+    console.log(`✅ Auto-tune complete: ${result.recommendations.estimatedPlayersPass}/${result.totalPlayers} players will pass`);
+
+    res.json({
+      success: true,
+      ...result
+    });
+  } catch (error) {
+    console.error('Auto-tune error:', error);
+    res.status(500).json({
+      error: 'Auto-tune failed',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * POST /api/optimizer/slate-breakdown
+ * Generate AI-powered slate analysis and recommendations
+ */
+router.post('/slate-breakdown', async (req, res) => {
+  try {
+    const { slateId, mode = 'gpp' } = req.body;
+
+    if (!slateId) {
+      return res.status(400).json({ error: 'slateId is required' });
+    }
+
+    console.log(`🤖 Generating AI slate breakdown for slate ${slateId} (${mode} mode)`);
+
+    // Get all players for the slate
+    const players = playerModel.getBySlateId(slateId);
+
+    if (!players || players.length === 0) {
+      return res.status(404).json({ error: 'No players found for this slate' });
+    }
+
+    // Generate comprehensive breakdown
+    const breakdown = await generateSlateBreakdown(players, mode);
+
+    console.log(`✅ Slate breakdown complete`);
+
+    res.json({
+      success: true,
+      ...breakdown
+    });
+  } catch (error) {
+    console.error('Slate breakdown error:', error);
+    res.status(500).json({
+      error: 'Slate breakdown failed',
       message: error.message
     });
   }
