@@ -659,7 +659,9 @@ class RotowireService {
       }
 
       // ═══════════════════════════════════════════════════════════════
-      // ENHANCED PROJECTION ALGORITHM
+      // PROJECTION ALGORITHM - Using RotoWire as Baseline
+      // RotoWire projections already factor in matchups, injuries, rest
+      // We calculate floor/ceiling/volatility and advanced metrics on top
       // ═══════════════════════════════════════════════════════════════
       let projectedPoints = 0;
       let floor = 0;
@@ -672,21 +674,22 @@ class RotowireService {
       let leverageScore = 0;
       let blowoutRisk = 0;
 
-      // Check if player is actually playing - must have projected minutes
-      const isPlaying = minutes > 0 && projectedMinutes > 0;
+      // Get RotoWire's projection (already matchup-adjusted by their experts)
+      const rotowireProjection = parseFloat(player.pts) || 0;
 
-      if (isPlaying && (fptsLast3 > 0 || fptsLast5 > 0 || fptsSeason > 0)) {
+      // Check if player is actually playing
+      const isPlaying = minutes > 0 && rotowireProjection > 0;
+
+      if (isPlaying) {
+        // ───────────────────────────────────────────────────────────
+        // STEP 1: Use RotoWire Projection as Baseline
+        // ───────────────────────────────────────────────────────────
+        projectedPoints = rotowireProjection;
 
         // ───────────────────────────────────────────────────────────
-        // STEP 1: Calculate Recent Form Baseline
+        // STEP 2: Calculate Variance from Recent Performance
         // ───────────────────────────────────────────────────────────
-        const recentFormBase = (fptsLast3 * 0.40) + (fptsLast5 * 0.30) + (fptsLast7 * 0.20) + (fptsSeason * 0.10);
-
-        // ───────────────────────────────────────────────────────────
-        // STEP 2: Calculate Variance Metrics
-        // ───────────────────────────────────────────────────────────
-        // Estimate variance from available data points
-        // We approximate individual games using the spread between averages
+        // Use spread between recent averages to estimate volatility
         const recentGames = [];
         if (fptsLast3 > 0) recentGames.push(fptsLast3);
         if (fptsLast5 > 0) recentGames.push(fptsLast5);
@@ -697,89 +700,54 @@ class RotowireService {
         stdDev = varianceData.stdDev;
         volatility = varianceData.volatility;
 
-        // ───────────────────────────────────────────────────────────
-        // STEP 3: Calculate Weighted FPPM
-        // ───────────────────────────────────────────────────────────
-        const minutesLast3 = seasonMinutes * 0.9; // Approximate (assume slight variation)
-        const minutesLast5 = seasonMinutes * 0.95;
-        fppm = this.calculateWeightedFPPM(fptsLast3, minutesLast3, fptsLast5, minutesLast5, fptsSeason, seasonMinutes);
+        // If we don't have enough variance data, estimate from projection
+        if (stdDev === 0 || recentGames.length < 2) {
+          // Default volatility: ~15% of projection
+          stdDev = projectedPoints * 0.15;
+          volatility = 0.15;
+        }
 
         // ───────────────────────────────────────────────────────────
-        // STEP 4: Minutes Adjustment
+        // STEP 3: Calculate FPPM (Fantasy Points Per Minute)
         // ───────────────────────────────────────────────────────────
-        const minutesAdj = this.getMinutesAdjustment(projectedMinutes, seasonMinutes, recentFormBase);
+        fppm = minutes > 0 ? projectedPoints / minutes : 0;
 
         // ───────────────────────────────────────────────────────────
-        // STEP 5: Base Projection (Before Matchup)
+        // STEP 4: Calculate Floor & Ceiling
         // ───────────────────────────────────────────────────────────
-        const baseProjection = recentFormBase + minutesAdj;
+        // Floor = projection - 1 standard deviation (roughly 16th percentile)
+        // Ceiling = projection + 1 standard deviation (roughly 84th percentile)
+        floor = Math.max(0, projectedPoints - stdDev);
+        ceiling = projectedPoints + stdDev;
 
         // ───────────────────────────────────────────────────────────
-        // STEP 6: Enhanced Matchup Adjustments
-        // ───────────────────────────────────────────────────────────
-        const defenseAdj = this.getDefenseAdjustment(opponent);
-        const paceAdj = this.getImprovedPaceAdjustment(opponent, team); // IMPROVED
-        const positionDefenseAdj = this.getEnhancedPositionDefenseAdjustment(opponent, position); // ENHANCED
-        const vegasAdj = this.getVegasAdjustment(vegasImpliedTotal);
-        const teamTendencyAdj = this.getTeamTendencyAdjustment(team); // NEW
-        const restAdj = this.getRestAdjustment(restDays);
-
-        // Blowout risk analysis
-        const blowoutData = this.getBlowoutRisk(vegasSpread, vegasOverUnder);
-        blowoutRisk = blowoutData.risk;
-
-        // ───────────────────────────────────────────────────────────
-        // STEP 7: Final Projection
-        // ───────────────────────────────────────────────────────────
-        const totalMatchupAdjustment = defenseAdj + paceAdj + positionDefenseAdj + vegasAdj + teamTendencyAdj + restAdj + blowoutData.projectionAdjustment;
-        projectedPoints = baseProjection + totalMatchupAdjustment;
-
-        // ───────────────────────────────────────────────────────────
-        // STEP 8: Calculate Floor & Ceiling with Blowout Impact
-        // ───────────────────────────────────────────────────────────
-        floor = Math.max(0, projectedPoints - stdDev + blowoutData.floorImpact);
-        ceiling = projectedPoints + stdDev + blowoutData.ceilingImpact;
-
-        // ───────────────────────────────────────────────────────────
-        // STEP 9: Calculate Boom/Bust Probabilities
+        // STEP 5: Calculate Boom/Bust Probabilities
         // ───────────────────────────────────────────────────────────
         const probabilities = this.calculateBoomBustProbabilities(projectedPoints, stdDev, salary);
         boomProbability = probabilities.boomProb;
         bustProbability = probabilities.bustProb;
 
         // ───────────────────────────────────────────────────────────
-        // STEP 10: Calculate GPP Leverage Score
+        // STEP 6: Calculate GPP Leverage Score
         // ───────────────────────────────────────────────────────────
         leverageScore = this.calculateLeverageScore(boomProbability, rostership);
 
         // ───────────────────────────────────────────────────────────
-        // LOGGING: Show enhanced projection breakdown
+        // STEP 7: Blowout Risk (informational, not adjusting projection)
         // ───────────────────────────────────────────────────────────
-        const shouldLog = Math.abs(totalMatchupAdjustment) > 0.5 || Math.abs(minutesAdj) > 1.0;
+        const blowoutData = this.getBlowoutRisk(vegasSpread, vegasOverUnder);
+        blowoutRisk = blowoutData.risk;
 
-        if (shouldLog) {
-          console.log(`  📊 ${name} (${position}) vs ${opponent}:`);
-          console.log(`     Recent Form Base: ${recentFormBase.toFixed(1)} FP`);
-          console.log(`     Weighted FPPM: ${fppm.toFixed(2)}`);
-          console.log(`     Variance: σ=${stdDev.toFixed(1)}, Volatility=${(volatility * 100).toFixed(0)}%`);
-
-          if (Math.abs(minutesAdj) > 0.1) {
-            const minChange = projectedMinutes - seasonMinutes;
-            console.log(`     Minutes Adj: ${minutesAdj > 0 ? '+' : ''}${minutesAdj.toFixed(1)} FP (${minChange > 0 ? '+' : ''}${minChange.toFixed(0)} min: ${seasonMinutes.toFixed(0)} → ${projectedMinutes.toFixed(0)})`);
-          }
-
-          console.log(`     Base Projection: ${baseProjection.toFixed(1)} FP`);
-          console.log(`     Matchup Adjustments: ${totalMatchupAdjustment > 0 ? '+' : ''}${totalMatchupAdjustment.toFixed(1)} FP`);
-          console.log(`       └─ Defense: ${defenseAdj > 0 ? '+' : ''}${defenseAdj.toFixed(1)} | Pace: ${paceAdj > 0 ? '+' : ''}${paceAdj.toFixed(1)} | Position: ${positionDefenseAdj > 0 ? '+' : ''}${positionDefenseAdj.toFixed(1)}`);
-          console.log(`       └─ Vegas: ${vegasAdj > 0 ? '+' : ''}${vegasAdj.toFixed(1)} | Team: ${teamTendencyAdj > 0 ? '+' : ''}${teamTendencyAdj.toFixed(1)} | Rest: ${restAdj > 0 ? '+' : ''}${restAdj.toFixed(1)} (${restDays}d)`);
-
-          if (blowoutRisk > 0) {
-            console.log(`       └─ Blowout Risk: -${blowoutRisk.toFixed(1)} (spread: ${vegasSpread > 0 ? '+' : ''}${vegasSpread})`);
-          }
-
-          console.log(`     Final: ${projectedPoints.toFixed(1)} FP | Floor: ${floor.toFixed(1)} | Ceiling: ${ceiling.toFixed(1)}`);
-          console.log(`     Boom: ${boomProbability.toFixed(0)}% | Bust: ${bustProbability.toFixed(0)}% | Leverage: ${leverageScore.toFixed(1)}`);
+        // Adjust floor/ceiling for blowout scenarios
+        if (blowoutRisk > 0) {
+          floor = Math.max(0, floor + blowoutData.floorImpact);
+          ceiling = ceiling + blowoutData.ceilingImpact;
         }
+
+        // ───────────────────────────────────────────────────────────
+        // LOGGING: Show projection source
+        // ───────────────────────────────────────────────────────────
+        console.log(`  📊 ${name}: RotoWire ${rotowireProjection.toFixed(1)} FP | Floor: ${floor.toFixed(1)} | Ceiling: ${ceiling.toFixed(1)} | Boom: ${boomProbability.toFixed(0)}% | Lev: ${leverageScore.toFixed(1)}`);
       }
 
       // ═══════════════════════════════════════════════════════════════
