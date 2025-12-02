@@ -51,6 +51,8 @@ function OptimizerPage() {
   const [loadingBreakdown, setLoadingBreakdown] = useState(false);
   const [slateBreakdown, setSlateBreakdown] = useState(null);
   const [showBreakdown, setShowBreakdown] = useState(false);
+  const [reviewingLineup, setReviewingLineup] = useState(false);
+  const [lineupReview, setLineupReview] = useState(null);
 
   useEffect(() => {
     loadActiveSlate();
@@ -184,7 +186,7 @@ function OptimizerPage() {
           setMinRestDays(rec.minRestDays || 0);
         }
 
-        setMessage(`✅ Auto-Tune Complete! Settings optimized for ${rec.estimatedPlayersPass} players.`);
+        setMessage(`✅ Auto-Tune Complete! AI has optimized your settings.`);
       } else {
         setMessage('❌ Auto-tune failed');
       }
@@ -193,6 +195,27 @@ function OptimizerPage() {
       console.error('Auto-tune error:', error);
     } finally {
       setAutoTuning(false);
+    }
+  };
+
+  const handleReviewLineup = async (lineup) => {
+    if (!activeSlate || !lineup) return;
+
+    setReviewingLineup(true);
+    setLineupReview(null);
+
+    try {
+      const response = await optimizerAPI.reviewLineup(activeSlate.slate_id, lineup, mode);
+      if (response.data.success) {
+        setLineupReview(response.data);
+      } else {
+        setMessage('❌ Lineup review failed');
+      }
+    } catch (error) {
+      setMessage(`❌ Review error: ${error.response?.data?.error || error.message}`);
+      console.error('Review error:', error);
+    } finally {
+      setReviewingLineup(false);
     }
   };
 
@@ -833,12 +856,13 @@ function OptimizerPage() {
               </button>
             </div>
 
-            {/* Auto-Tune Result */}
-            {autoTuneResult && (
+            {/* Auto-Tune Result - AI Analysis */}
+            {autoTuneResult && autoTuneResult.aiAnalysis && (
               <div className="mt-4 p-3 bg-white rounded-md border border-green-300">
-                <pre className="text-xs text-gray-700 whitespace-pre-wrap font-mono">
-                  {autoTuneResult.explanation}
-                </pre>
+                <h4 className="text-sm font-semibold text-green-700 mb-2">🤖 AI Strategic Analysis</h4>
+                <div className="text-xs text-gray-700 whitespace-pre-wrap prose prose-sm max-w-none">
+                  {autoTuneResult.aiAnalysis}
+                </div>
               </div>
             )}
           </div>
@@ -1315,12 +1339,21 @@ function OptimizerPage() {
                   <h3 className="text-xl font-semibold">
                     {results.lineups.length > 1 ? `Lineup #${currentLineup.lineupNumber}` : 'Optimized Lineup'}
                   </h3>
-                  <button
-                    onClick={() => handleSaveLineup(currentLineup, selectedLineupIndex)}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-medium"
-                  >
-                    💾 Save Lineup
-                  </button>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleReviewLineup(currentLineup)}
+                      disabled={reviewingLineup}
+                      className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 font-medium disabled:opacity-50"
+                    >
+                      {reviewingLineup ? '🤖 Analyzing...' : '🤖 AI Review'}
+                    </button>
+                    <button
+                      onClick={() => handleSaveLineup(currentLineup, selectedLineupIndex)}
+                      className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-medium"
+                    >
+                      💾 Save Lineup
+                    </button>
+                  </div>
                 </div>
 
                 {/* Enhanced Lineup Summary */}
@@ -1418,6 +1451,24 @@ function OptimizerPage() {
                     </tbody>
                   </table>
                 </div>
+
+                {/* AI Lineup Review */}
+                {lineupReview && (
+                  <div className="mt-6 p-4 bg-gradient-to-r from-purple-50 to-pink-50 rounded-lg border border-purple-200">
+                    <div className="flex items-center justify-between mb-3">
+                      <h4 className="text-lg font-semibold text-purple-800">🤖 AI Lineup Review</h4>
+                      <button
+                        onClick={() => setLineupReview(null)}
+                        className="text-gray-500 hover:text-gray-700 text-xl"
+                      >
+                        ×
+                      </button>
+                    </div>
+                    <div className="prose prose-sm max-w-none text-gray-700 whitespace-pre-wrap">
+                      {lineupReview.review}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>

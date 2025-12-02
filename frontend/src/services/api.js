@@ -42,6 +42,7 @@ export const optimizerAPI = {
   validate: (players, minSalary) => api.post('/optimizer/validate', { players, minSalary }),
   autoTune: (slateId, mode) => api.post('/optimizer/auto-tune', { slateId, mode }),
   slateBreakdown: (slateId, mode) => api.post('/optimizer/slate-breakdown', { slateId, mode }),
+  reviewLineup: (slateId, lineup, mode) => api.post('/optimizer/review-lineup', { slateId, lineup, mode }),
 };
 
 // Chat API

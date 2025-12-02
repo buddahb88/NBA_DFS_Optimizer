@@ -1,7 +1,7 @@
 import express from 'express';
 import playerModel from '../models/playerModel.js';
 import optimizerService from '../services/optimizerService.js';
-import { autoTuneSettings } from '../utils/autoTuneSettings.js';
+import { autoTuneSettings, reviewLineup } from '../utils/autoTuneSettings.js';
 import { generateSlateBreakdown } from '../utils/slateAnalyzer.js';
 
 const router = express.Router();
@@ -82,14 +82,14 @@ router.post('/auto-tune', async (req, res) => {
       return res.status(404).json({ error: 'No players found for this slate' });
     }
 
-    // Analyze and generate recommendations
-    const result = autoTuneSettings(players, mode);
+    // Analyze and generate recommendations (async now)
+    const result = await autoTuneSettings(players, mode);
 
     if (result.error) {
       return res.status(400).json(result);
     }
 
-    console.log(`✅ Auto-tune complete: ${result.recommendations.estimatedPlayersPass}/${result.totalPlayers} players will pass`);
+    console.log(`✅ Auto-tune complete: ${result.totalPlayers} players analyzed`);
 
     res.json({
       success: true,
@@ -138,6 +138,43 @@ router.post('/slate-breakdown', async (req, res) => {
     console.error('Slate breakdown error:', error);
     res.status(500).json({
       error: 'Slate breakdown failed',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * POST /api/optimizer/review-lineup
+ * AI reviews a generated lineup and gives honest feedback
+ */
+router.post('/review-lineup', async (req, res) => {
+  try {
+    const { slateId, lineup, mode = 'gpp' } = req.body;
+
+    if (!slateId || !lineup) {
+      return res.status(400).json({ error: 'slateId and lineup are required' });
+    }
+
+    console.log(`🤖 AI reviewing lineup for slate ${slateId} (${mode} mode)`);
+
+    // Get all players for context
+    const players = playerModel.getBySlateId(slateId);
+
+    if (!players || players.length === 0) {
+      return res.status(404).json({ error: 'No players found for this slate' });
+    }
+
+    // Get AI review
+    const result = await reviewLineup(lineup, players, mode);
+
+    console.log(`✅ Lineup review complete`);
+
+    res.json(result);
+  } catch (error) {
+    console.error('Lineup review error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Lineup review failed',
       message: error.message
     });
   }
