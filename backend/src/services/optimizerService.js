@@ -368,15 +368,17 @@ class OptimizerService {
         const leverage = player.leverage_score || 1;
 
         // Cash score: weighted toward floor and consistency
-        // 50% projection + 30% floor + 20% value
+        // Prioritize: high floor, solid projection, good value
         const value = projection / (player.salary / 1000);
-        const cashScore = (projection * 0.5) + (floor * 0.3) + (value * 2);
+        const cashScore = (projection * 0.5) + (floor * 0.4) + (value * 1.5);
 
-        // GPP score: weighted toward ceiling and leverage
-        // Ceiling × leverage multiplier - penalize high ownership slightly
-        const leverageMultiplier = Math.max(1, leverage / 2);
-        const ownershipPenalty = ownership > 30 ? (ownership - 30) * 0.1 : 0;
-        const gppScore = (ceiling * leverageMultiplier) - ownershipPenalty;
+        // GPP score: weighted toward ceiling, value, and ownership
+        // Low ownership + high ceiling + good value = GPP gold
+        // Leverage already factors in boom probability vs ownership
+        const ceilingValue = ceiling / (player.salary / 1000);
+        const ownershipBoost = Math.max(0, (25 - ownership) * 0.5); // Boost for <25% owned
+        const leverageBonus = Math.min(leverage, 20) * 0.5; // Cap leverage impact
+        const gppScore = (ceiling * 0.4) + (ceilingValue * 3) + ownershipBoost + leverageBonus;
 
         model.variables[varName] = {
           cashScore,
