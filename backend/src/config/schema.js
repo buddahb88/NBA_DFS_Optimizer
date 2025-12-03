@@ -97,7 +97,8 @@ export const createTables = (db) => {
     { name: 'fppm', type: 'REAL' },                     // Weighted fantasy points per minute
     { name: 'leverage_score', type: 'REAL' },           // GPP leverage (boom prob / ownership)
     { name: 'blowout_risk', type: 'REAL' },             // Blowout risk adjustment
-    { name: 'std_dev', type: 'REAL' }                   // Standard deviation of recent games
+    { name: 'std_dev', type: 'REAL' },                  // Standard deviation of recent games
+    { name: 'rotowire_projection', type: 'REAL' }       // Original RotoWire projection (baseline)
   ];
 
   columnsToAdd.forEach(({ name, type }) => {

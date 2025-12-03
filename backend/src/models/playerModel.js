@@ -226,6 +226,115 @@ class PlayerModel {
     const stmt = db.prepare(`DELETE FROM players`);
     return stmt.run();
   }
+
+  /**
+   * Update projection for a single player
+   */
+  updateProjection(slateId, playerId, projectionData) {
+    const stmt = db.prepare(`
+      UPDATE players SET
+        projected_points = ?,
+        rotowire_projection = COALESCE(rotowire_projection, projected_points),
+        floor = ?,
+        ceiling = ?,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE slate_id = ? AND player_id = ?
+    `);
+
+    return stmt.run(
+      projectionData.adjusted_projection,
+      projectionData.floor || 0,
+      projectionData.ceiling || 0,
+      slateId,
+      playerId
+    );
+  }
+
+  /**
+   * Bulk update projections for a slate
+   */
+  bulkUpdateProjections(slateId, projections) {
+    // First, save original projections as rotowire_projection if not already set
+    const backupStmt = db.prepare(`
+      UPDATE players
+      SET rotowire_projection = projected_points
+      WHERE slate_id = ? AND rotowire_projection IS NULL
+    `);
+    backupStmt.run(slateId);
+
+    // Prepare update statement
+    const updateStmt = db.prepare(`
+      UPDATE players SET
+        projected_points = @adjustedProjection,
+        floor = @floor,
+        ceiling = @ceiling,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE slate_id = @slateId AND player_id = @playerId
+    `);
+
+    const updateMany = db.transaction((projectionList) => {
+      let updated = 0;
+      for (const proj of projectionList) {
+        const result = updateStmt.run({
+          adjustedProjection: proj.adjusted_projection,
+          floor: proj.floor || 0,
+          ceiling: proj.ceiling || 0,
+          slateId: slateId,
+          playerId: String(proj.player_id)
+        });
+        if (result.changes > 0) updated++;
+      }
+      return updated;
+    });
+
+    return updateMany(projections);
+  }
+
+  /**
+   * Get all players with full data for projection calculation
+   */
+  getAllForProjections(slateId) {
+    const stmt = db.prepare(`
+      SELECT
+        id,
+        player_id,
+        name,
+        team,
+        opponent,
+        position,
+        salary,
+        projected_points,
+        rotowire_projection,
+        projected_minutes,
+        rest_days,
+        vegas_implied_total,
+        vegas_spread,
+        vegas_over_under,
+        dvp_pts_allowed,
+        opp_def_eff,
+        rostership,
+        floor,
+        ceiling,
+        volatility,
+        std_dev
+      FROM players
+      WHERE slate_id = ?
+    `);
+    return stmt.all(slateId);
+  }
+
+  /**
+   * Reset projections to original RotoWire values
+   */
+  resetProjections(slateId) {
+    const stmt = db.prepare(`
+      UPDATE players SET
+        projected_points = COALESCE(rotowire_projection, projected_points),
+        updated_at = CURRENT_TIMESTAMP
+      WHERE slate_id = ? AND rotowire_projection IS NOT NULL
+    `);
+    return stmt.run(slateId);
+  }
 }
 
 export default new PlayerModel();

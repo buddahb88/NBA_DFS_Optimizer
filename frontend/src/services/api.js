@@ -24,6 +24,9 @@ export const playersAPI = {
   getBySlateId: (slateId, filters = {}) => api.get(`/players/${slateId}`, { params: filters }),
   syncFromRotoWire: (slateId, data = {}) => api.post(`/players/${slateId}/sync`, data),
   getById: (playerId) => api.get(`/players/player/${playerId}`),
+  recalculateProjections: (slateId) => api.post(`/players/${slateId}/recalculate-projections`),
+  resetProjections: (slateId) => api.post(`/players/${slateId}/reset-projections`),
+  getProjectionBreakdown: (slateId, playerId) => api.get(`/players/${slateId}/projection/${playerId}`),
 };
 
 // Lineups API
