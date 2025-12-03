@@ -36,6 +36,18 @@ class OptimizerService {
       minMinutes = 0,                   // Minimum projected minutes (0 = no filter)
       minUsage = 0,                     // Minimum usage rate (0 = no filter)
 
+      // Advanced Filters
+      minProjection = 0,                // Minimum projected points
+      minValue = 0,                     // Minimum value (pts per $1k)
+      maxRostership = 100,              // Maximum ownership %
+      minDvpPtsAllowed = 0,             // Minimum DVP points allowed (matchup quality)
+      minOppDefEff = 0,                 // Minimum opponent defensive efficiency
+      minImpliedTotal = 0,              // Minimum Vegas implied team total
+      minOverUnder = 0,                 // Minimum game over/under
+      minFloor = 0,                     // Minimum floor projection
+      maxVolatility = 1,                // Maximum volatility
+      minLeverageScore = 0,             // Minimum leverage score
+
       // Diversity for multi-lineup
       maxExposure = 60,                 // Max % exposure per player across lineups
 
@@ -50,12 +62,22 @@ class OptimizerService {
     console.log(`📊 Starting with ${players.length} total players`);
     console.log(`🎯 Generating ${numLineups} lineup(s)`);
 
-    // Step 1: Simple filter - only minutes and usage
+    // Step 1: Filter players based on all criteria
     let availablePlayers = this.filterPlayers(players, {
       lockedPlayers,
       excludedPlayers,
       minMinutes,
-      minUsage
+      minUsage,
+      minProjection,
+      minValue,
+      maxRostership,
+      minDvpPtsAllowed,
+      minOppDefEff,
+      minImpliedTotal,
+      minOverUnder,
+      minFloor,
+      maxVolatility,
+      minLeverageScore
     });
 
     console.log(`✅ ${availablePlayers.length} players in pool after filters\n`);
@@ -176,14 +198,39 @@ class OptimizerService {
   }
 
   /**
-   * Simple player filter - only minutes and usage
+   * Advanced player filter with all criteria
    */
   filterPlayers(players, filters) {
-    const { lockedPlayers, excludedPlayers, minMinutes, minUsage } = filters;
+    const {
+      lockedPlayers,
+      excludedPlayers,
+      minMinutes,
+      minUsage,
+      minProjection,
+      minValue,
+      maxRostership,
+      minDvpPtsAllowed,
+      minOppDefEff,
+      minImpliedTotal,
+      minOverUnder,
+      minFloor,
+      maxVolatility,
+      minLeverageScore
+    } = filters;
 
     console.log(`\n🔍 Applying filters:`);
     if (minMinutes > 0) console.log(`   - Min Minutes: ${minMinutes}`);
     if (minUsage > 0) console.log(`   - Min Usage: ${minUsage}%`);
+    if (minProjection > 0) console.log(`   - Min Projection: ${minProjection} pts`);
+    if (minValue > 0) console.log(`   - Min Value: ${minValue}x`);
+    if (maxRostership < 100) console.log(`   - Max Ownership: ${maxRostership}%`);
+    if (minDvpPtsAllowed > 0) console.log(`   - Min DVP Pts Allowed: ${minDvpPtsAllowed}`);
+    if (minOppDefEff > 0) console.log(`   - Min Opp Def Eff: ${minOppDefEff}`);
+    if (minImpliedTotal > 0) console.log(`   - Min Implied Total: ${minImpliedTotal}`);
+    if (minOverUnder > 0) console.log(`   - Min Over/Under: ${minOverUnder}`);
+    if (minFloor > 0) console.log(`   - Min Floor: ${minFloor}`);
+    if (maxVolatility < 1) console.log(`   - Max Volatility: ${maxVolatility}`);
+    if (minLeverageScore > 0) console.log(`   - Min Leverage: ${minLeverageScore}`);
 
     return players.filter(player => {
       // Always keep locked players
@@ -196,16 +243,6 @@ class OptimizerService {
         return false;
       }
 
-      // Filter by minutes if set
-      if (minMinutes > 0 && (player.projected_minutes || 0) < minMinutes) {
-        return false;
-      }
-
-      // Filter by usage if set
-      if (minUsage > 0 && (player.usage || 0) < minUsage) {
-        return false;
-      }
-
       // Must have a projection
       if (!player.projected_points || player.projected_points <= 0) {
         return false;
@@ -213,6 +250,60 @@ class OptimizerService {
 
       // Must have a salary
       if (!player.salary || player.salary <= 0) {
+        return false;
+      }
+
+      // Calculate value for filtering
+      const playerValue = player.projected_points / (player.salary / 1000);
+
+      // Core filters
+      if (minMinutes > 0 && (player.projected_minutes || 0) < minMinutes) {
+        return false;
+      }
+
+      if (minUsage > 0 && (player.usage || 0) < minUsage) {
+        return false;
+      }
+
+      if (minProjection > 0 && player.projected_points < minProjection) {
+        return false;
+      }
+
+      if (minValue > 0 && playerValue < minValue) {
+        return false;
+      }
+
+      if (maxRostership < 100 && (player.rostership || 0) > maxRostership) {
+        return false;
+      }
+
+      // Matchup filters
+      if (minDvpPtsAllowed > 0 && (player.dvp_pts_allowed || 0) < minDvpPtsAllowed) {
+        return false;
+      }
+
+      if (minOppDefEff > 0 && (player.opp_def_eff || 0) < minOppDefEff) {
+        return false;
+      }
+
+      if (minImpliedTotal > 0 && (player.vegas_implied_total || 0) < minImpliedTotal) {
+        return false;
+      }
+
+      if (minOverUnder > 0 && (player.vegas_over_under || 0) < minOverUnder) {
+        return false;
+      }
+
+      // Safety/risk filters
+      if (minFloor > 0 && (player.floor || 0) < minFloor) {
+        return false;
+      }
+
+      if (maxVolatility < 1 && (player.volatility || 0) > maxVolatility) {
+        return false;
+      }
+
+      if (minLeverageScore > 0 && (player.leverage_score || 0) < minLeverageScore) {
         return false;
       }
 

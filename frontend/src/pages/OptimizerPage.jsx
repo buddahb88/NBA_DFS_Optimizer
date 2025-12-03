@@ -46,6 +46,12 @@ function OptimizerPage() {
   const [minRestDays, setMinRestDays] = useState(0);
   const [minUsage, setMinUsage] = useState(0);
   const [minProjection, setMinProjection] = useState(mode === 'cash' ? 25 : 20);
+  const [minValue, setMinValue] = useState(0);
+  const [maxRostership, setMaxRostership] = useState(100);
+  const [minDvpPtsAllowed, setMinDvpPtsAllowed] = useState(0);
+  const [minOppDefEff, setMinOppDefEff] = useState(0);
+  const [minImpliedTotal, setMinImpliedTotal] = useState(0);
+  const [minOverUnder, setMinOverUnder] = useState(0);
   const [autoTuning, setAutoTuning] = useState(false);
   const [autoTuneResult, setAutoTuneResult] = useState(null);
   const [loadingBreakdown, setLoadingBreakdown] = useState(false);
@@ -263,6 +269,12 @@ function OptimizerPage() {
         minRestDays,
         minUsage,
         minProjection,
+        minValue,
+        maxRostership,
+        minDvpPtsAllowed,
+        minOppDefEff,
+        minImpliedTotal,
+        minOverUnder,
         filterInjured: true,
         usePaceBoost: true,
 
@@ -1190,50 +1202,347 @@ function OptimizerPage() {
 
           {showAdvanced && (
             <div className="mb-6 p-4 bg-gray-50 border border-gray-200 rounded-lg">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* Row 1: Core Filters */}
+              <h4 className="text-sm font-semibold text-gray-800 mb-3">📊 Core Filters</h4>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Min Rest Days
-                  </label>
-                  <input
-                    type="number"
-                    value={minRestDays}
-                    onChange={(e) => setMinRestDays(parseInt(e.target.value))}
-                    min="0"
-                    max="7"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-gray-500"
-                  />
-                  <p className="text-xs text-gray-500 mt-1">0 = back-to-back OK</p>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Min Usage %
-                  </label>
-                  <input
-                    type="number"
-                    value={minUsage}
-                    onChange={(e) => setMinUsage(parseInt(e.target.value))}
-                    min="0"
-                    max="40"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-gray-500"
-                  />
-                  <p className="text-xs text-gray-500 mt-1">Team play % threshold</p>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
                     Min Projection
                   </label>
                   <input
                     type="number"
                     value={minProjection}
-                    onChange={(e) => setMinProjection(parseInt(e.target.value))}
+                    onChange={(e) => setMinProjection(parseFloat(e.target.value) || 0)}
+                    min="0"
+                    max="80"
+                    step="1"
+                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                  />
+                  <p className="text-xs text-gray-500 mt-0.5">Fantasy pts</p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    Min Value (x)
+                  </label>
+                  <input
+                    type="number"
+                    value={minValue}
+                    onChange={(e) => setMinValue(parseFloat(e.target.value) || 0)}
+                    min="0"
+                    max="10"
+                    step="0.1"
+                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                  />
+                  <p className="text-xs text-gray-500 mt-0.5">Pts per $1k</p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    Min Usage %
+                  </label>
+                  <input
+                    type="number"
+                    value={minUsage}
+                    onChange={(e) => setMinUsage(parseFloat(e.target.value) || 0)}
+                    min="0"
+                    max="45"
+                    step="1"
+                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                  />
+                  <p className="text-xs text-gray-500 mt-0.5">Ball usage rate</p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    Max Ownership %
+                  </label>
+                  <input
+                    type="number"
+                    value={maxRostership}
+                    onChange={(e) => setMaxRostership(parseFloat(e.target.value) || 100)}
                     min="0"
                     max="100"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-gray-500"
+                    step="5"
+                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
                   />
-                  <p className="text-xs text-gray-500 mt-1">Minimum fantasy points</p>
+                  <p className="text-xs text-gray-500 mt-0.5">Roster % cap</p>
+                </div>
+              </div>
+
+              {/* Row 2: Matchup Filters */}
+              <h4 className="text-sm font-semibold text-gray-800 mb-3 mt-4">🎯 Matchup Filters</h4>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    Min DVP Pts Allowed
+                  </label>
+                  <input
+                    type="number"
+                    value={minDvpPtsAllowed}
+                    onChange={(e) => setMinDvpPtsAllowed(parseFloat(e.target.value) || 0)}
+                    min="0"
+                    max="70"
+                    step="1"
+                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-green-500"
+                  />
+                  <p className="text-xs text-gray-500 mt-0.5">Position matchup (40+)</p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    Min Opp Def Eff
+                  </label>
+                  <input
+                    type="number"
+                    value={minOppDefEff}
+                    onChange={(e) => setMinOppDefEff(parseFloat(e.target.value) || 0)}
+                    min="100"
+                    max="130"
+                    step="1"
+                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-green-500"
+                  />
+                  <p className="text-xs text-gray-500 mt-0.5">Weak D = 110+</p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    Min Implied Total
+                  </label>
+                  <input
+                    type="number"
+                    value={minImpliedTotal}
+                    onChange={(e) => setMinImpliedTotal(parseFloat(e.target.value) || 0)}
+                    min="90"
+                    max="140"
+                    step="1"
+                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-purple-500"
+                  />
+                  <p className="text-xs text-gray-500 mt-0.5">Team pts (110+)</p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    Min Over/Under
+                  </label>
+                  <input
+                    type="number"
+                    value={minOverUnder}
+                    onChange={(e) => setMinOverUnder(parseFloat(e.target.value) || 0)}
+                    min="200"
+                    max="260"
+                    step="1"
+                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-purple-500"
+                  />
+                  <p className="text-xs text-gray-500 mt-0.5">Game total (230+)</p>
+                </div>
+              </div>
+
+              {/* Row 3: Safety/Risk Filters */}
+              <h4 className="text-sm font-semibold text-gray-800 mb-3 mt-4">🛡️ Safety & Risk</h4>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    Min Floor
+                  </label>
+                  <input
+                    type="number"
+                    value={minFloor}
+                    onChange={(e) => setMinFloor(parseFloat(e.target.value) || 0)}
+                    min="0"
+                    max="60"
+                    step="1"
+                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-yellow-500"
+                  />
+                  <p className="text-xs text-gray-500 mt-0.5">25th pctl</p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    Max Volatility
+                  </label>
+                  <input
+                    type="number"
+                    value={maxVolatility}
+                    onChange={(e) => setMaxVolatility(parseFloat(e.target.value) || 1)}
+                    min="0"
+                    max="1"
+                    step="0.05"
+                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-yellow-500"
+                  />
+                  <p className="text-xs text-gray-500 mt-0.5">Safe = &lt;0.20</p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    Min Rest Days
+                  </label>
+                  <input
+                    type="number"
+                    value={minRestDays}
+                    onChange={(e) => setMinRestDays(parseInt(e.target.value) || 0)}
+                    min="0"
+                    max="7"
+                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-yellow-500"
+                  />
+                  <p className="text-xs text-gray-500 mt-0.5">0 = B2B OK</p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    Min Leverage
+                  </label>
+                  <input
+                    type="number"
+                    value={minLeverageScore}
+                    onChange={(e) => setMinLeverageScore(parseFloat(e.target.value) || 0)}
+                    min="0"
+                    max="20"
+                    step="0.5"
+                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-orange-500"
+                  />
+                  <p className="text-xs text-gray-500 mt-0.5">GPP upside (1+)</p>
+                </div>
+              </div>
+
+              {/* Quick Filter Presets */}
+              <div className="mt-4 pt-4 border-t border-gray-200">
+                <h4 className="text-sm font-semibold text-gray-800 mb-2">⚡ Quick Presets</h4>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      // Smart filter: Calculate adaptive thresholds that ensure enough players pass
+                      if (players.length < 10) {
+                        setMessage('❌ Not enough players loaded to calculate smart filters');
+                        return;
+                      }
+
+                      const percentile = (arr, p) => {
+                        const sorted = [...arr].filter(v => v > 0).sort((a, b) => a - b);
+                        if (sorted.length === 0) return 0;
+                        const idx = Math.floor(sorted.length * p);
+                        return sorted[Math.min(idx, sorted.length - 1)];
+                      };
+
+                      // Calculate values for all players
+                      const values = players.map(p => p.projected_points / (p.salary / 1000)).filter(v => v > 0);
+                      const projections = players.map(p => p.projected_points).filter(v => v > 0);
+                      const usages = players.map(p => p.usage || 0).filter(v => v > 0);
+
+                      // For small slates (<80 players), use very loose filters
+                      // For large slates (>150), can be more aggressive
+                      const slateSize = players.length;
+                      const isSmallSlate = slateSize < 80;
+                      const isLargeSlate = slateSize > 150;
+
+                      // Adaptive percentiles based on slate size
+                      // Small slate: 15-20th percentile (keep ~80% of players per filter)
+                      // Large slate: 30-35th percentile (keep ~65-70% per filter)
+                      const projPctl = isSmallSlate ? 0.15 : isLargeSlate ? 0.30 : 0.20;
+                      const valuePctl = isSmallSlate ? 0.20 : isLargeSlate ? 0.35 : 0.25;
+                      const usagePctl = isSmallSlate ? 0.15 : isLargeSlate ? 0.25 : 0.20;
+
+                      const smartProjection = Math.round(percentile(projections, projPctl));
+                      const smartValue = Math.round(percentile(values, valuePctl) * 10) / 10;
+                      const smartUsage = Math.round(percentile(usages, usagePctl));
+
+                      // Only use the 3 most impactful filters to avoid over-filtering
+                      // Reset all other advanced filters to defaults
+                      setMinProjection(smartProjection);
+                      setMinValue(smartValue);
+                      setMinUsage(smartUsage);
+
+                      // Reset other filters to not compound the filtering
+                      setMinFloor(0);
+                      setMaxVolatility(1);
+                      setMinDvpPtsAllowed(0);
+                      setMinOppDefEff(0);
+                      setMaxRostership(100);
+                      setMinLeverageScore(0);
+
+                      // Count how many players would pass
+                      const passingPlayers = players.filter(p => {
+                        const pValue = p.projected_points / (p.salary / 1000);
+                        return p.projected_points >= smartProjection &&
+                               pValue >= smartValue &&
+                               (p.usage || 0) >= smartUsage;
+                      }).length;
+
+                      setMessage(`✅ Smart filters applied for ${isSmallSlate ? 'small' : isLargeSlate ? 'large' : 'medium'} slate! Proj≥${smartProjection}, Value≥${smartValue}x, Usage≥${smartUsage}% → ${passingPlayers}/${slateSize} players pass`);
+                    }}
+                    className="px-3 py-1.5 text-xs bg-gradient-to-r from-blue-500 to-purple-500 text-white rounded-full hover:from-blue-600 hover:to-purple-600 font-medium shadow-sm"
+                  >
+                    🧠 Smart Filter (Auto)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMinProjection(25);
+                      setMinValue(5.4);
+                      setMinUsage(15);
+                      setMaxRostership(25);
+                      setMinDvpPtsAllowed(40);
+                      setMinOppDefEff(110);
+                      setMinFloor(25);
+                      setMaxVolatility(0.20);
+                    }}
+                    className="px-3 py-1.5 text-xs bg-blue-100 text-blue-700 rounded-full hover:bg-blue-200 font-medium"
+                  >
+                    🎯 Value + Matchup
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMinProjection(20);
+                      setMinValue(0);
+                      setMinUsage(0);
+                      setMaxRostership(100);
+                      setMinDvpPtsAllowed(0);
+                      setMinOppDefEff(0);
+                      setMinFloor(0);
+                      setMaxVolatility(1);
+                      setMinLeverageScore(0);
+                    }}
+                    className="px-3 py-1.5 text-xs bg-gray-100 text-gray-700 rounded-full hover:bg-gray-200 font-medium"
+                  >
+                    🔄 Reset All
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMinFloor(28);
+                      setMaxVolatility(0.18);
+                      setMinUsage(20);
+                      setMinProjection(25);
+                    }}
+                    className="px-3 py-1.5 text-xs bg-green-100 text-green-700 rounded-full hover:bg-green-200 font-medium"
+                  >
+                    💵 Cash Safe
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMaxRostership(15);
+                      setMinLeverageScore(2);
+                      setMinUsage(18);
+                      setMinProjection(22);
+                    }}
+                    className="px-3 py-1.5 text-xs bg-purple-100 text-purple-700 rounded-full hover:bg-purple-200 font-medium"
+                  >
+                    🏆 GPP Leverage
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMinImpliedTotal(112);
+                      setMinOverUnder(225);
+                      setMinOppDefEff(112);
+                    }}
+                    className="px-3 py-1.5 text-xs bg-orange-100 text-orange-700 rounded-full hover:bg-orange-200 font-medium"
+                  >
+                    🔥 Pace/Vegas
+                  </button>
                 </div>
               </div>
             </div>
