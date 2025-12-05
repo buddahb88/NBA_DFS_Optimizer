@@ -62,4 +62,32 @@ export const chatAPI = {
     api.delete(`/chat/sessions/${sessionId}`),
 };
 
+// Historical Insights API
+export const historicalAPI = {
+  getSummary: (dateParams = {}) =>
+    api.get('/historical/summary', { params: dateParams }),
+  getSlateInsights: (players, dateParams = {}) =>
+    api.post('/historical/slate-insights', { players, ...dateParams }),
+  getHotStreaks: (limit = 20, minGames = 5, dateParams = {}) =>
+    api.get('/historical/hot-streaks', { params: { limit, minGames, ...dateParams } }),
+  getColdStreaks: (limit = 20, minGames = 5, dateParams = {}) =>
+    api.get('/historical/cold-streaks', { params: { limit, minGames, ...dateParams } }),
+  getConsistencyLeaders: (limit = 20, minGames = 8, dateParams = {}) =>
+    api.get('/historical/consistency-leaders', { params: { limit, minGames, ...dateParams } }),
+  getBoomBustPlayers: (limit = 20, minGames = 8, dateParams = {}) =>
+    api.get('/historical/boom-bust-players', { params: { limit, minGames, ...dateParams } }),
+  getTopPerformers: (limit = 20, minGames = 10, dateParams = {}) =>
+    api.get('/historical/top-performers', { params: { limit, minGames, ...dateParams } }),
+  getPlayerHistory: (name, limit = 20) =>
+    api.get(`/historical/player/${encodeURIComponent(name)}`, { params: { limit } }),
+  getMatchupHistory: (player, opponent) =>
+    api.get(`/historical/matchup/${encodeURIComponent(player)}/${opponent}`),
+  getTeammateImpact: (player, teammate, team = null) =>
+    api.get(`/historical/teammate-impact/${encodeURIComponent(player)}/${encodeURIComponent(teammate)}`, { params: { team } }),
+  getUsageBumps: (players, minGames = 8, minAvgDk = 25) =>
+    api.post('/historical/usage-bumps', { players, minGames, minAvgDk }),
+  getMissingPlayers: (players, minGames = 5, minAvgDk = 20) =>
+    api.post('/historical/missing-players', { players, minGames, minAvgDk }),
+};
+
 export default api;

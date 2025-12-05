@@ -7,6 +7,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import db from '../config/database.js';
 import optimizerService from './optimizerService.js';
+import nbaStatsService from './nbaStatsService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -246,6 +247,100 @@ You now have access to advanced variance and risk analysis metrics for sophistic
 5. **Correlation**: Consider game environments (both teams from same matchup)
 6. **Punt Plays**: Use minimum salary players to afford studs
 7. **News Reactions**: Injury replacements often underpriced with low ownership
+
+**Historical Data Analysis (NEW):**
+You have access to historical game data synced from NBA.com. Use these tools to provide data-driven insights:
+
+1. **get_player_history** - Get a player's recent game log and performance trends
+   - Shows: recent games, avg DK points, ceiling/floor, home/away splits, B2B impact
+   - Use when: analyzing a player's form, consistency, or recent performance
+
+2. **get_matchup_history** - Get how a player performs vs a specific opponent
+   - Shows: all games vs that team, averages, individual game stats
+   - Use when: user asks about matchup-specific analysis
+
+3. **get_historical_summary** - Get overall data summary and top performers
+   - Shows: data range, league averages, B2B impact analysis, top fantasy scorers
+   - Use when: user wants to understand what historical data is available
+
+4. **get_usage_without_teammate** - Analyze player production when a teammate is OUT
+   - Shows: stats WITH teammate vs WITHOUT, usage bump %, recent games without
+   - Use when: user asks "How does X do when Y is out?" or when finding injury replacement value
+   - Example: "How does Kyrie do when Luka is out?" → get_usage_without_teammate(Kyrie, Luka, DAL)
+
+5. **analyze_roster_context** - Find historical games with similar roster configurations
+   - Shows: games where same players were out, who benefited most, usage bumps
+   - Use when: user asks about tonight's specific lineup scenario
+   - Example: "Lakers tonight without AD and LeBron - who benefits?" → analyze_roster_context(LAL, [active players], [AD, LeBron])
+
+6. **get_team_roster** - Get all players on a team with their averages
+   - Shows: full roster with games played, avg DK points, avg minutes
+   - Use when: need to know who's on a team or find teammates
+
+**When to use historical tools:**
+- "How has [player] been playing lately?" → get_player_history
+- "How does [player] do against [team]?" → get_matchup_history
+- "Who are the best fantasy players this season?" → get_historical_summary
+- "How does [player] do when [teammate] is out?" → get_usage_without_teammate
+- "Looking at [team] tonight with [player] out, who benefits?" → analyze_roster_context
+- "Who plays for [team]?" → get_team_roster
+- Support lineup recommendations with historical trends when relevant
+
+**ENHANCED PROJECTIONS & USAGE BUMP ANALYSIS:**
+
+When users ask for value plays, enhanced projections, or usage bump opportunities, YOU MUST follow this workflow:
+
+**STEP 1: Identify the current slate**
+```sql
+SELECT slate_id, name, start_time FROM slates ORDER BY created_at DESC LIMIT 1;
+```
+
+**STEP 2: Check for injured/OUT players**
+```sql
+SELECT name, team, injury_status FROM players 
+WHERE slate_id = '[slate_id]' AND injury_status = 'OUT' 
+ORDER BY team;
+```
+
+**STEP 3: For each team with OUT players, use historical tools:**
+- Use `get_team_roster` to see who's on the team
+- Use `analyze_roster_context` with activePlayers and absentPlayers arrays
+- This will automatically show you usage bump beneficiaries
+
+**STEP 4: Query players with enhanced metrics:**
+```sql
+SELECT name, team, opponent, position, salary, projected_points, 
+       floor, ceiling, boom_probability, bust_probability, 
+       leverage_score, rostership, value
+FROM players 
+WHERE slate_id = '[slate_id]' 
+AND (injury_status IS NULL OR injury_status = '')
+ORDER BY leverage_score DESC
+LIMIT 20;
+```
+
+**STEP 5: Combine historical usage bumps with current metrics:**
+- Cross-reference usage bump candidates from Step 3 with high leverage scores from Step 4
+- Highlight players who have BOTH:
+  - High leverage_score (≥3.0)
+  - Usage bump opportunity (from historical analysis)
+
+**IMPORTANT: When users ask for "enhanced projections" or "usage bumps":**
+- DO NOT say "I need more information"
+- Instead, AUTOMATICALLY execute Steps 1-5 above
+- The data is already in the database - you just need to query it!
+- Injured players are marked with injury_status = 'OUT'
+- All active players have their current projections with advanced metrics
+
+**Example User Request:** "Show me usage bump plays for today"
+**Your Response Flow:**
+1. Query slates → Get slate_id
+2. Query players → Find OUT players by team
+3. For each team with OUT players → analyze_roster_context
+4. Query players → Get high leverage scores
+5. Synthesize: Show usage bump candidates ranked by (usage_bump_% × leverage_score × value)
+
+**DON'T ASK - JUST DO IT!** You have all the tools and data needed to answer these questions proactively.
 
 **When Building Lineups:**
 - Always check current slate_id first if not provided
@@ -506,6 +601,299 @@ The table must be in plain text, NOT inside code block markers!
             }, null, 2);
           } catch (error) {
             console.error('❌ Get Slate Error:', error);
+            return JSON.stringify({ success: false, error: error.message });
+          }
+        },
+      }),
+
+      // Historical Player Analysis Tool
+      new DynamicStructuredTool({
+        name: 'get_player_history',
+        description: 'Get historical game log and performance trends for a player. Use this to analyze recent form, consistency, ceiling/floor, and matchup history. Great for supporting lineup decisions with data.',
+        schema: z.object({
+          playerName: z.string().describe('Player name to look up (e.g., "LeBron James", "Luka Doncic")'),
+          limit: z.number().optional().describe('Number of recent games to return (default 10, max 50)'),
+        }),
+        func: async ({ playerName, limit = 10 }) => {
+          try {
+            console.log(`\n📊 Getting historical data for: ${playerName}`);
+
+            const games = nbaStatsService.getPlayerHistory(playerName, Math.min(limit, 50));
+            const trends = nbaStatsService.getPerformanceTrends(playerName);
+
+            if (games.length === 0) {
+              return JSON.stringify({
+                success: false,
+                message: `No historical data found for "${playerName}". Try syncing historical data first.`,
+              });
+            }
+
+            console.log(`✅ Found ${games.length} games for ${playerName}`);
+
+            return JSON.stringify({
+              success: true,
+              player: playerName,
+              gamesFound: games.length,
+              trends: {
+                avgDkPoints: trends.avg_dk_pts,
+                avgMinutes: trends.avg_minutes,
+                ceiling: trends.ceiling,
+                floor: trends.floor,
+                consistency: trends.consistency,
+                homeAvg: trends.home_avg,
+                awayAvg: trends.away_avg,
+                b2bAvg: trends.b2b_avg,
+                restedAvg: trends.rested_avg,
+              },
+              recentGames: games.slice(0, 10).map(g => ({
+                date: g.game_date,
+                opponent: g.opponent,
+                minutes: g.minutes,
+                dkPoints: g.dk_fantasy_points,
+                points: g.points,
+                rebounds: g.rebounds,
+                assists: g.assists,
+                isHome: g.is_home,
+                isB2B: g.is_back_to_back,
+              })),
+            }, null, 2);
+          } catch (error) {
+            console.error('❌ Player History Error:', error);
+            return JSON.stringify({ success: false, error: error.message });
+          }
+        },
+      }),
+
+      // Matchup History Tool
+      new DynamicStructuredTool({
+        name: 'get_matchup_history',
+        description: 'Get a player\'s historical performance against a specific opponent. Use this to analyze how a player performs against certain teams.',
+        schema: z.object({
+          playerName: z.string().describe('Player name to look up'),
+          opponent: z.string().describe('Opponent team abbreviation (e.g., "LAL", "BOS", "MIA")'),
+        }),
+        func: async ({ playerName, opponent }) => {
+          try {
+            console.log(`\n🏀 Getting matchup history: ${playerName} vs ${opponent}`);
+
+            const games = nbaStatsService.getMatchupHistory(playerName, opponent.toUpperCase());
+
+            if (games.length === 0) {
+              return JSON.stringify({
+                success: true,
+                message: `No games found for ${playerName} vs ${opponent}`,
+                games: [],
+              });
+            }
+
+            // Calculate averages
+            const avgDkPts = games.reduce((sum, g) => sum + g.dk_fantasy_points, 0) / games.length;
+            const avgMinutes = games.reduce((sum, g) => sum + g.minutes, 0) / games.length;
+            const avgPoints = games.reduce((sum, g) => sum + g.points, 0) / games.length;
+
+            console.log(`✅ Found ${games.length} games vs ${opponent}`);
+
+            return JSON.stringify({
+              success: true,
+              player: playerName,
+              opponent: opponent.toUpperCase(),
+              gamesPlayed: games.length,
+              averages: {
+                dkPoints: Math.round(avgDkPts * 10) / 10,
+                minutes: Math.round(avgMinutes * 10) / 10,
+                points: Math.round(avgPoints * 10) / 10,
+              },
+              games: games.map(g => ({
+                date: g.game_date,
+                minutes: g.minutes,
+                dkPoints: g.dk_fantasy_points,
+                points: g.points,
+                rebounds: g.rebounds,
+                assists: g.assists,
+              })),
+            }, null, 2);
+          } catch (error) {
+            console.error('❌ Matchup History Error:', error);
+            return JSON.stringify({ success: false, error: error.message });
+          }
+        },
+      }),
+
+      // Historical Data Summary Tool
+      new DynamicStructuredTool({
+        name: 'get_historical_summary',
+        description: 'Get a summary of all historical data in the database, including date range, total games, and top performers. Use this to understand what data is available.',
+        schema: z.object({
+          topN: z.number().optional().describe('Number of top performers to return (default 10)'),
+        }),
+        func: async ({ topN = 10 }) => {
+          try {
+            console.log('\n📈 Getting historical data summary...');
+
+            const summary = nbaStatsService.getHistoricalSummary();
+            const topPerformers = nbaStatsService.getTopPerformers(topN, 5);
+            const b2bAnalysis = nbaStatsService.analyzeB2BImpact();
+
+            console.log(`✅ Summary: ${summary.total_games} games, ${summary.unique_players} players`);
+
+            return JSON.stringify({
+              success: true,
+              dataRange: {
+                totalGames: summary.total_games,
+                uniquePlayers: summary.unique_players,
+                uniqueDates: summary.unique_dates,
+                earliestGame: summary.earliest_game,
+                latestGame: summary.latest_game,
+              },
+              leagueAverages: {
+                dkPoints: Math.round(summary.avg_dk_points * 10) / 10,
+                minutes: Math.round(summary.avg_minutes * 10) / 10,
+              },
+              b2bImpact: b2bAnalysis,
+              topPerformers: topPerformers.map(p => ({
+                name: p.player_name,
+                team: p.team,
+                gamesPlayed: p.games_played,
+                avgDkPoints: p.avg_dk_pts,
+                avgMinutes: p.avg_minutes,
+                ceiling: p.ceiling,
+              })),
+            }, null, 2);
+          } catch (error) {
+            console.error('❌ Historical Summary Error:', error);
+            return JSON.stringify({ success: false, error: error.message });
+          }
+        },
+      }),
+
+      // Teammate Impact Tool - Usage without specific teammate
+      new DynamicStructuredTool({
+        name: 'get_usage_without_teammate',
+        description: 'Analyze how a player\'s usage and fantasy production changes when a specific teammate is OUT. Great for finding value when stars are injured or resting. Shows stats WITH vs WITHOUT the teammate.',
+        schema: z.object({
+          playerName: z.string().describe('The player to analyze (e.g., "Kyrie Irving")'),
+          teammateName: z.string().describe('The teammate who is OUT (e.g., "Luka Doncic")'),
+          team: z.string().optional().describe('Team abbreviation to filter by (e.g., "DAL") - optional but helps accuracy'),
+        }),
+        func: async ({ playerName, teammateName, team }) => {
+          try {
+            console.log(`\n🔄 Analyzing ${playerName} usage without ${teammateName}...`);
+
+            const result = nbaStatsService.getUsageWithoutTeammate(playerName, teammateName, team);
+
+            if (!result.success) {
+              return JSON.stringify(result);
+            }
+
+            console.log(`✅ Found data: ${result.withTeammate?.games || 0} games WITH, ${result.withoutTeammate?.games || 0} games WITHOUT`);
+
+            return JSON.stringify({
+              success: true,
+              analysis: {
+                player: result.player,
+                teammate: result.teammate,
+                team: result.team,
+                withTeammate: result.withTeammate,
+                withoutTeammate: result.withoutTeammate,
+                usageBump: result.usageBump,
+                insight: result.usageBump
+                  ? `${result.player} averages ${result.usageBump.dkPointsDiff > 0 ? '+' : ''}${result.usageBump.dkPointsDiff} DK points (${result.usageBump.percentBoost > 0 ? '+' : ''}${result.usageBump.percentBoost}%) when ${result.teammate} is OUT`
+                  : 'Insufficient data to calculate usage bump',
+                recentGamesWithout: result.recentGamesWithout,
+              },
+            }, null, 2);
+          } catch (error) {
+            console.error('❌ Teammate Impact Error:', error);
+            return JSON.stringify({ success: false, error: error.message });
+          }
+        },
+      }),
+
+      // Roster Context Analysis Tool - Tonight's lineup analysis
+      new DynamicStructuredTool({
+        name: 'analyze_roster_context',
+        description: 'Analyze historical games with similar roster configurations to tonight. Given which players are active and which are OUT, find games where the same situation occurred and identify who benefited most. Use this to find hidden value plays based on tonight\'s specific lineup.',
+        schema: z.object({
+          team: z.string().describe('Team abbreviation (e.g., "LAL", "DAL", "BOS")'),
+          activePlayers: z.array(z.string()).describe('Array of player names expected to play tonight'),
+          absentPlayers: z.array(z.string()).describe('Array of player names who are OUT tonight (injured, resting, etc.)'),
+        }),
+        func: async ({ team, activePlayers, absentPlayers }) => {
+          try {
+            console.log(`\n🏀 Analyzing roster context for ${team}...`);
+            console.log(`Active: ${activePlayers.join(', ')}`);
+            console.log(`Absent: ${absentPlayers.join(', ')}`);
+
+            const result = nbaStatsService.analyzeRosterContext(team, activePlayers, absentPlayers);
+
+            if (!result.success) {
+              return JSON.stringify(result);
+            }
+
+            console.log(`✅ Found ${result.matchingGamesCount} matching historical games`);
+
+            return JSON.stringify({
+              success: true,
+              analysis: {
+                team: result.team,
+                scenario: {
+                  activePlayers: result.activePlayers,
+                  absentPlayers: result.absentPlayers,
+                },
+                matchingGames: {
+                  count: result.matchingGamesCount,
+                  dates: result.matchingGameDates,
+                },
+                usageBumps: result.usageBumps,
+                topBeneficiaries: result.topBeneficiaries,
+                insight: result.topBeneficiaries?.length > 0
+                  ? `Top beneficiaries when ${absentPlayers.join(', ')} out: ${result.topBeneficiaries.map(p => `${p.player} (+${p.percentBoost}%)`).join(', ')}`
+                  : 'No significant usage bumps found in historical data',
+              },
+            }, null, 2);
+          } catch (error) {
+            console.error('❌ Roster Context Error:', error);
+            return JSON.stringify({ success: false, error: error.message });
+          }
+        },
+      }),
+
+      // Get Team Roster Tool
+      new DynamicStructuredTool({
+        name: 'get_team_roster',
+        description: 'Get the historical roster and player averages for a specific team. Useful for seeing who plays for a team and their typical production.',
+        schema: z.object({
+          team: z.string().describe('Team abbreviation (e.g., "LAL", "DAL", "BOS")'),
+        }),
+        func: async ({ team }) => {
+          try {
+            console.log(`\n📋 Getting roster for ${team}...`);
+
+            const roster = nbaStatsService.getTeamRoster(team.toUpperCase());
+
+            if (roster.length === 0) {
+              return JSON.stringify({
+                success: false,
+                message: `No historical data found for team ${team}`,
+              });
+            }
+
+            console.log(`✅ Found ${roster.length} players for ${team}`);
+
+            return JSON.stringify({
+              success: true,
+              team: team.toUpperCase(),
+              playerCount: roster.length,
+              roster: roster.map(p => ({
+                name: p.player_name,
+                games: p.games,
+                lastGame: p.last_game,
+                avgDkPoints: p.avg_dk,
+                avgMinutes: p.avg_min,
+              })),
+            }, null, 2);
+          } catch (error) {
+            console.error('❌ Team Roster Error:', error);
             return JSON.stringify({ success: false, error: error.message });
           }
         },

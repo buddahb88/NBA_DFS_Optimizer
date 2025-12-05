@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "DraftKings NBA DFS Lineup Optimizer with AI assistance",
   "private": true,
+  "type": "module",
   "workspaces": [
     "backend",
     "frontend"
@@ -11,7 +12,9 @@
     "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
     "dev:backend": "cd backend && npm run dev",
     "dev:frontend": "cd frontend && npm run dev",
-    "install:all": "npm install && cd backend && npm install && cd ../frontend && npm install"
+    "install:all": "npm install && cd backend && npm install && cd ../frontend && npm install",
+    "sync:games": "node scripts/sync_box_scores.js",
+    "sync:games:full": "node scripts/sync_box_scores.js --full"
   },
   "keywords": ["dfs", "draftkings", "nba", "optimizer", "ai"],
   "author": "",

@@ -10,6 +10,7 @@ import playersRouter from './routes/players.js';
 import lineupsRouter from './routes/lineups.js';
 import optimizerRouter from './routes/optimizer.js';
 import chatRouter from './routes/chat.js';
+import historicalRouter from './routes/historical.js';
 
 // Get directory paths for ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -26,7 +27,8 @@ createTables(db);
 
 // Middleware
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ limit: '1mb', extended: true }));
 
 // Request logging
 app.use((req, res, next) => {
@@ -40,6 +42,7 @@ app.use('/api/players', playersRouter);
 app.use('/api/lineups', lineupsRouter);
 app.use('/api/optimizer', optimizerRouter);
 app.use('/api/chat', chatRouter);
+app.use('/api/historical', historicalRouter);
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -60,7 +63,7 @@ app.use((req, res) => {
   res.status(404).json({ error: 'Route not found' });
 });
 
-// Start server
+// Start server (with date filtering for backtest mode and usage bump detection)
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
   console.log(`🌐 Network access: http://<your-ip>:${PORT}`);

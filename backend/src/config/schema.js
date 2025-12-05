@@ -8,7 +8,7 @@ export const createTables = (db) => {
   };
 
   // Check existing tables
-  const tables = ['slates', 'players', 'lineups', 'lineup_players', 'chat_sessions', 'chat_messages', 'team_defense_rankings', 'team_defense_vs_position'];
+  const tables = ['slates', 'players', 'lineups', 'lineup_players', 'chat_sessions', 'chat_messages', 'team_defense_rankings', 'team_defense_vs_position', 'historical_games'];
   const existingTables = tables.filter(t => tableExists(t));
   const newTables = tables.filter(t => !tableExists(t));
 
@@ -196,6 +196,66 @@ export const createTables = (db) => {
     )
   `);
 
+  // Historical game logs for ML analysis (basic + advanced stats from Basketball Reference)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS historical_games (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      -- Player identification
+      player_name TEXT NOT NULL,
+      team TEXT NOT NULL,
+      opponent TEXT NOT NULL,
+      -- Game info
+      game_date DATE NOT NULL,
+      season TEXT,
+      is_home INTEGER DEFAULT 0,
+      -- Basic box score stats
+      minutes REAL,
+      points INTEGER,
+      rebounds INTEGER,
+      assists INTEGER,
+      steals INTEGER,
+      blocks INTEGER,
+      turnovers INTEGER,
+      fouls INTEGER,
+      fg_made INTEGER,
+      fg_attempted INTEGER,
+      fg_pct REAL,
+      fg3_made INTEGER,
+      fg3_attempted INTEGER,
+      fg3_pct REAL,
+      ft_made INTEGER,
+      ft_attempted INTEGER,
+      ft_pct REAL,
+      oreb INTEGER,
+      dreb INTEGER,
+      plus_minus INTEGER,
+      -- Advanced stats (from Basketball Reference)
+      ts_pct REAL,        -- True Shooting %
+      efg_pct REAL,       -- Effective FG %
+      three_par REAL,     -- 3P Attempt Rate
+      ftr REAL,           -- Free Throw Rate
+      orb_pct REAL,       -- Offensive Rebound %
+      drb_pct REAL,       -- Defensive Rebound %
+      trb_pct REAL,       -- Total Rebound %
+      ast_pct REAL,       -- Assist %
+      stl_pct REAL,       -- Steal %
+      blk_pct REAL,       -- Block %
+      tov_pct REAL,       -- Turnover %
+      usg_pct REAL,       -- Usage %
+      off_rtg REAL,       -- Offensive Rating
+      def_rtg REAL,       -- Defensive Rating
+      bpm REAL,           -- Box Plus/Minus
+      -- Calculated DraftKings fantasy points
+      dk_fantasy_points REAL,
+      -- Context data (for ML features)
+      rest_days INTEGER,
+      is_back_to_back INTEGER DEFAULT 0,
+      -- Timestamps
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(player_name, team, game_date)
+    )
+  `);
+
   // Create indexes for better query performance
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_players_slate_id ON players(slate_id);
@@ -205,6 +265,12 @@ export const createTables = (db) => {
     CREATE INDEX IF NOT EXISTS idx_lineup_players_lineup_id ON lineup_players(lineup_id);
     CREATE INDEX IF NOT EXISTS idx_chat_messages_session_id ON chat_messages(session_id);
     CREATE INDEX IF NOT EXISTS idx_chat_sessions_slate_id ON chat_sessions(slate_id);
+    CREATE INDEX IF NOT EXISTS idx_historical_player_name ON historical_games(player_name);
+    CREATE INDEX IF NOT EXISTS idx_historical_game_date ON historical_games(game_date);
+    CREATE INDEX IF NOT EXISTS idx_historical_season ON historical_games(season);
+    CREATE INDEX IF NOT EXISTS idx_historical_team ON historical_games(team);
+    CREATE INDEX IF NOT EXISTS idx_historical_opponent ON historical_games(opponent);
+    CREATE INDEX IF NOT EXISTS idx_historical_usg_pct ON historical_games(usg_pct);
   `);
 
   if (newTables.length > 0) {

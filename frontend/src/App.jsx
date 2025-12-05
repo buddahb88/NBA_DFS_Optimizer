@@ -6,6 +6,7 @@ import LineupBuilderPage from './pages/LineupBuilderPage';
 import LineupsPage from './pages/LineupsPage';
 import OptimizerPage from './pages/OptimizerPage';
 import ChatPage from './pages/ChatPage';
+import InsightsPage from './pages/InsightsPage';
 
 function Navigation() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -14,6 +15,7 @@ function Navigation() {
   const navLinks = [
     { to: '/', label: 'Home' },
     { to: '/players', label: 'Player Pool' },
+    { to: '/insights', label: 'Insights' },
     { to: '/lineup-builder', label: 'Lineup Builder' },
     { to: '/optimizer', label: 'Optimizer' },
     { to: '/lineups', label: 'My Lineups' },
@@ -114,6 +116,7 @@ function App() {
                 <Routes>
                   <Route path="/" element={<HomePage />} />
                   <Route path="/players" element={<PlayerPoolPage />} />
+                  <Route path="/insights" element={<InsightsPage />} />
                   <Route path="/lineup-builder" element={<LineupBuilderPage />} />
                   <Route path="/optimizer" element={<OptimizerPage />} />
                   <Route path="/lineups" element={<LineupsPage />} />

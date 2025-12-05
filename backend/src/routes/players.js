@@ -269,4 +269,230 @@ router.get('/:slateId/projection/:playerId', async (req, res) => {
   }
 });
 
+// ═══════════════════════════════════════════════════════════════
+// ENHANCED PROJECTION ENDPOINT (Historical Data Blending)
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * Calculate ENHANCED projections using historical data blending
+ * POST /api/players/:slateId/enhanced-projections
+ *
+ * This uses our historical box score data to:
+ * - Blend season average, L3 momentum, matchup history with RotoWire
+ * - Apply usage bump adjustments when key teammates are OUT
+ * - Apply player-specific home/away and B2B adjustments
+ * - Apply hot/cold streak momentum factors
+ *
+ * Body params:
+ * - slateDate: (optional) Date string YYYY-MM-DD for backtesting
+ * - updateDb: (optional) boolean - whether to update DB with new projections (default: false)
+ */
+router.post('/:slateId/enhanced-projections', async (req, res) => {
+  try {
+    const { slateId } = req.params;
+    const { slateDate = null, updateDb = false } = req.body;
+
+    console.log(`\n🧠 ═══════════════════════════════════════════════════`);
+    console.log(`   ENHANCED PROJECTIONS FOR SLATE ${slateId}`);
+    if (slateDate) {
+      console.log(`   📅 Backtest mode: Using data before ${slateDate}`);
+    }
+    console.log(`═══════════════════════════════════════════════════════`);
+
+    // Clear projection cache for fresh calculations
+    projectionService.clearCache();
+
+    // Get all players with full data
+    const players = playerModel.getAllForProjections(slateId);
+
+    if (!players || players.length === 0) {
+      return res.status(404).json({ error: 'No players found for this slate' });
+    }
+
+    console.log(`📊 Found ${players.length} players to process`);
+
+    // Calculate enhanced projections
+    const enhancedResults = projectionService.calculateSlateEnhancedProjections(players, slateDate);
+
+    // Optionally update database
+    if (updateDb) {
+      console.log(`💾 Updating database with enhanced projections...`);
+      const projectionsToUpdate = enhancedResults.map(r => ({
+        player_id: r.player_id,
+        adjusted_projection: r.enhanced_projection,
+        floor: r.historical?.floor || r.enhanced_projection * 0.7,
+        ceiling: r.historical?.ceiling || r.enhanced_projection * 1.3
+      }));
+      playerModel.bulkUpdateProjections(slateId, projectionsToUpdate);
+    }
+
+    // Calculate summary stats
+    const enhancedPlayers = enhancedResults.filter(r => r.enhanced);
+    const avgRotowire = enhancedPlayers.reduce((sum, r) => sum + (r.rotowire_baseline || 0), 0) / (enhancedPlayers.length || 1);
+    const avgEnhanced = enhancedPlayers.reduce((sum, r) => sum + r.enhanced_projection, 0) / (enhancedPlayers.length || 1);
+    const avgDiff = avgEnhanced - avgRotowire;
+
+    // Get players with biggest positive changes
+    const topUp = enhancedResults
+      .filter(r => r.enhanced && r.enhanced_projection > (r.rotowire_baseline || 0))
+      .sort((a, b) => (b.enhanced_projection - (b.rotowire_baseline || 0)) - (a.enhanced_projection - (a.rotowire_baseline || 0)))
+      .slice(0, 10);
+
+    // Get players with biggest negative changes
+    const topDown = enhancedResults
+      .filter(r => r.enhanced && r.enhanced_projection < (r.rotowire_baseline || 0))
+      .sort((a, b) => (a.enhanced_projection - (a.rotowire_baseline || 0)) - (b.enhanced_projection - (b.rotowire_baseline || 0)))
+      .slice(0, 10);
+
+    // Get usage bump beneficiaries
+    const usageBumps = enhancedResults
+      .filter(r => r.usageBump?.hasUsageBump)
+      .sort((a, b) => (b.usageBump?.bump || 0) - (a.usageBump?.bump || 0));
+
+    // Get hot streaks
+    const hotStreaks = enhancedResults
+      .filter(r => r.historical?.streakPct > 10)
+      .sort((a, b) => (b.historical?.streakPct || 0) - (a.historical?.streakPct || 0))
+      .slice(0, 10);
+
+    // Get cold streaks
+    const coldStreaks = enhancedResults
+      .filter(r => r.historical?.streakPct < -10)
+      .sort((a, b) => (a.historical?.streakPct || 0) - (b.historical?.streakPct || 0))
+      .slice(0, 10);
+
+    res.json({
+      success: true,
+      message: `Enhanced projections calculated for ${enhancedPlayers.length} players`,
+      slateDate,
+      updatedDb: updateDb,
+      summary: {
+        totalPlayers: players.length,
+        enhancedPlayers: enhancedPlayers.length,
+        fallbackPlayers: enhancedResults.filter(r => !r.enhanced).length,
+        avgRotowireProjection: Math.round(avgRotowire * 10) / 10,
+        avgEnhancedProjection: Math.round(avgEnhanced * 10) / 10,
+        avgChange: Math.round(avgDiff * 10) / 10,
+        usageBumpsFound: usageBumps.length,
+        hotStreaks: hotStreaks.length,
+        coldStreaks: coldStreaks.length
+      },
+      topProjectionIncreases: topUp.map(p => ({
+        name: p.name,
+        team: p.team,
+        opponent: p.opponent,
+        position: p.position,
+        salary: p.salary,
+        rotowire: p.rotowire_baseline,
+        enhanced: p.enhanced_projection,
+        change: Math.round((p.enhanced_projection - (p.rotowire_baseline || 0)) * 10) / 10,
+        blendedBaseline: p.blended_baseline,
+        confidence: p.confidence,
+        historical: p.historical,
+        adjustments: p.adjustments
+      })),
+      topProjectionDecreases: topDown.map(p => ({
+        name: p.name,
+        team: p.team,
+        opponent: p.opponent,
+        position: p.position,
+        salary: p.salary,
+        rotowire: p.rotowire_baseline,
+        enhanced: p.enhanced_projection,
+        change: Math.round((p.enhanced_projection - (p.rotowire_baseline || 0)) * 10) / 10,
+        blendedBaseline: p.blended_baseline,
+        confidence: p.confidence,
+        historical: p.historical,
+        adjustments: p.adjustments
+      })),
+      usageBumpOpportunities: usageBumps.slice(0, 10).map(p => ({
+        name: p.name,
+        team: p.team,
+        salary: p.salary,
+        enhanced: p.enhanced_projection,
+        usageBump: p.usageBump
+      })),
+      hotStreakPlayers: hotStreaks.map(p => ({
+        name: p.name,
+        team: p.team,
+        seasonAvg: p.historical?.seasonAvg,
+        last3Avg: p.historical?.last3Avg,
+        streakPct: p.historical?.streakPct,
+        enhanced: p.enhanced_projection
+      })),
+      coldStreakPlayers: coldStreaks.map(p => ({
+        name: p.name,
+        team: p.team,
+        seasonAvg: p.historical?.seasonAvg,
+        last3Avg: p.historical?.last3Avg,
+        streakPct: p.historical?.streakPct,
+        enhanced: p.enhanced_projection
+      })),
+      // Full results (for detailed analysis)
+      allPlayers: enhancedResults.map(p => ({
+        player_id: p.player_id,
+        name: p.name,
+        team: p.team,
+        opponent: p.opponent,
+        position: p.position,
+        salary: p.salary,
+        rotowire_projection: p.rotowire_baseline,
+        enhanced_projection: p.enhanced_projection,
+        blended_baseline: p.blended_baseline,
+        total_adjustment: p.total_adjustment,
+        confidence: p.confidence,
+        enhanced: p.enhanced,
+        historical: p.historical,
+        matchup: p.matchup,
+        usageBump: p.usageBump,
+        adjustments: p.adjustments
+      }))
+    });
+  } catch (error) {
+    console.error('Enhanced projection error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Get enhanced projection breakdown for a single player
+ * GET /api/players/:slateId/enhanced-projection/:playerId
+ */
+router.get('/:slateId/enhanced-projection/:playerId', async (req, res) => {
+  try {
+    const { slateId, playerId } = req.params;
+    const { slateDate = null } = req.query;
+
+    const players = playerModel.getAllForProjections(slateId);
+    const player = players.find(p => p.player_id === playerId);
+
+    if (!player) {
+      return res.status(404).json({ error: 'Player not found' });
+    }
+
+    // Get slate roster for usage bump detection
+    const slateRoster = players.map(p => p.name);
+
+    const result = projectionService.calculateEnhancedProjection(player, {
+      slateRoster,
+      slateDate,
+      isHome: player.is_home === 1 || player.is_home === true,
+      isB2B: player.rest_days === 0
+    });
+
+    res.json({
+      player: {
+        name: player.name,
+        team: player.team,
+        opponent: player.opponent,
+        position: player.position,
+        salary: player.salary
+      },
+      projection: result
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 export default router;
