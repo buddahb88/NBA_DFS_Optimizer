@@ -235,6 +235,15 @@ async function createAzureSqlTables(db) {
     )
   `);
 
+  // Add missing columns to historical_games if table already exists
+  // This handles migrations for existing tables
+  await db.exec(`
+    IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('historical_games') AND name = 'rest_days')
+      ALTER TABLE historical_games ADD rest_days INT;
+    IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('historical_games') AND name = 'is_back_to_back')
+      ALTER TABLE historical_games ADD is_back_to_back INT DEFAULT 0;
+  `);
+
   // Create indexes
   await db.exec(`
     IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_players_slate_id')
