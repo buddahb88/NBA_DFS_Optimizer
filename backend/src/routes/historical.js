@@ -101,6 +101,8 @@ router.post('/sync', async (req, res) => {
   };
 
   const mode = isIncremental ? 'incremental update' : 'full sync';
+
+  // Send response IMMEDIATELY before starting background work
   res.json({
     success: true,
     mode: isIncremental ? 'incremental' : 'full',
@@ -109,67 +111,70 @@ router.post('/sync', async (req, res) => {
     lastGameDate: status.latestGame || null
   });
 
-  // Run sync for each season
-  try {
-    let totalGames = 0;
-    let totalPlayers = 0;
-    const startTime = Date.now();
+  // Run sync in background using setImmediate to ensure response is sent first
+  setImmediate(async () => {
+    try {
+      let totalGames = 0;
+      let totalPlayers = 0;
+      const startTime = Date.now();
 
-    for (let i = 0; i < seasonList.length; i++) {
-      const season = seasonList[i];
-      syncProgress.currentSeason = season;
-      syncProgress.seasonIndex = i + 1;
+      for (let i = 0; i < seasonList.length; i++) {
+        const season = seasonList[i];
+        syncProgress.currentSeason = season;
+        syncProgress.seasonIndex = i + 1;
 
-      let result;
-      if (isIncremental && season === '2024-25') {
-        // Only do incremental for current season
-        result = await nbaStatsService.fetchIncrementalGameLogs(season, status.latestGame, (progress) => {
-          syncProgress = {
-            ...syncProgress,
-            status: 'syncing',
-            mode: 'incremental',
-            currentSeason: season,
-            seasonIndex: i + 1,
-            ...progress,
-            percent: Math.round((progress.processed / progress.total) * 100)
-          };
-        });
-      } else {
-        result = await nbaStatsService.fetchSeasonGameLogs(season, (progress) => {
-          syncProgress = {
-            ...syncProgress,
-            status: 'syncing',
-            mode: 'full',
-            currentSeason: season,
-            seasonIndex: i + 1,
-            ...progress,
-            percent: Math.round((progress.processed / progress.total) * 100)
-          };
-        });
+        let result;
+        if (isIncremental && season === '2024-25') {
+          // Only do incremental for current season
+          result = await nbaStatsService.fetchIncrementalGameLogs(season, status.latestGame, (progress) => {
+            syncProgress = {
+              ...syncProgress,
+              status: 'syncing',
+              mode: 'incremental',
+              currentSeason: season,
+              seasonIndex: i + 1,
+              ...progress,
+              percent: Math.round((progress.processed / progress.total) * 100)
+            };
+          });
+        } else {
+          result = await nbaStatsService.fetchSeasonGameLogs(season, (progress) => {
+            syncProgress = {
+              ...syncProgress,
+              status: 'syncing',
+              mode: 'full',
+              currentSeason: season,
+              seasonIndex: i + 1,
+              ...progress,
+              percent: Math.round((progress.processed / progress.total) * 100)
+            };
+          });
+        }
+
+        totalGames += result.games || 0;
+        totalPlayers = result.players || totalPlayers;
       }
 
-      totalGames += result.games || 0;
-      totalPlayers = result.players || totalPlayers;
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+
+      syncProgress = {
+        status: 'complete',
+        mode: isIncremental ? 'incremental' : 'full',
+        seasons: seasonList,
+        games: totalGames,
+        players: totalPlayers,
+        elapsed
+      };
+    } catch (error) {
+      console.error('Sync error:', error);
+      syncProgress = {
+        status: 'error',
+        error: error.message
+      };
+    } finally {
+      isSyncing = false;
     }
-
-    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-
-    syncProgress = {
-      status: 'complete',
-      mode: isIncremental ? 'incremental' : 'full',
-      seasons: seasonList,
-      games: totalGames,
-      players: totalPlayers,
-      elapsed
-    };
-  } catch (error) {
-    syncProgress = {
-      status: 'error',
-      error: error.message
-    };
-  } finally {
-    isSyncing = false;
-  }
+  });
 });
 
 /**

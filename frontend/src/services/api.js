@@ -67,7 +67,7 @@ export const historicalAPI = {
   // Data status and sync
   getStatus: () => api.get('/historical/status'),
   startSync: (forceFullSync = false, seasons = ['2024-25']) =>
-    api.post('/historical/sync', { forceFullSync, seasons }),
+    api.post('/historical/sync', { forceFullSync, seasons }, { timeout: 60000 }),
   getSyncStatus: () => api.get('/historical/sync/status'),
 
   // Existing endpoints
