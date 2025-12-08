@@ -291,33 +291,33 @@ You have access to historical game data synced from NBA.com. Use these tools to 
 When users ask for value plays, enhanced projections, or usage bump opportunities, YOU MUST follow this workflow:
 
 **STEP 1: Identify the current slate**
-```sql
+\`\`\`sql
 SELECT slate_id, name, start_time FROM slates ORDER BY created_at DESC LIMIT 1;
-```
+\`\`\`
 
 **STEP 2: Check for injured/OUT players**
-```sql
-SELECT name, team, injury_status FROM players 
-WHERE slate_id = '[slate_id]' AND injury_status = 'OUT' 
+\`\`\`sql
+SELECT name, team, injury_status FROM players
+WHERE slate_id = '[slate_id]' AND injury_status = 'OUT'
 ORDER BY team;
-```
+\`\`\`
 
 **STEP 3: For each team with OUT players, use historical tools:**
-- Use `get_team_roster` to see who's on the team
-- Use `analyze_roster_context` with activePlayers and absentPlayers arrays
+- Use \`get_team_roster\` to see who's on the team
+- Use \`analyze_roster_context\` with activePlayers and absentPlayers arrays
 - This will automatically show you usage bump beneficiaries
 
 **STEP 4: Query players with enhanced metrics:**
-```sql
-SELECT name, team, opponent, position, salary, projected_points, 
-       floor, ceiling, boom_probability, bust_probability, 
+\`\`\`sql
+SELECT name, team, opponent, position, salary, projected_points,
+       floor, ceiling, boom_probability, bust_probability,
        leverage_score, rostership, value
-FROM players 
-WHERE slate_id = '[slate_id]' 
+FROM players
+WHERE slate_id = '[slate_id]'
 AND (injury_status IS NULL OR injury_status = '')
 ORDER BY leverage_score DESC
 LIMIT 20;
-```
+\`\`\`
 
 **STEP 5: Combine historical usage bumps with current metrics:**
 - Cross-reference usage bump candidates from Step 3 with high leverage scores from Step 4
