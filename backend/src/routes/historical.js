@@ -10,6 +10,9 @@ import nbaStatsService from '../services/nbaStatsService.js';
 
 const router = express.Router();
 
+// Azure Blob Storage URL for box scores (with SAS token for read access)
+const BLOB_STORAGE_URL = process.env.BLOB_STORAGE_URL || 'https://nbadfsdata.blob.core.windows.net/nba-data/box_scores.json?se=2026-12-31&sp=r&sv=2022-11-02&sr=b&sig=4jVifOP8UL1XSEDbFgtoaavdSSNl4ZWrJefIXJBSqUw%3D';
+
 // Track sync progress
 let syncProgress = null;
 let isSyncing = false;
@@ -67,8 +70,8 @@ router.get('/summary', (req, res) => {
 
 /**
  * POST /api/historical/sync
- * Start syncing historical game data from NBA.com
- * Supports multiple seasons - syncs each selected season sequentially
+ * Sync historical game data from Azure Blob Storage
+ * The blob is updated nightly by an Azure Function that scrapes Basketball Reference
  */
 router.post('/sync', async (req, res) => {
   if (isSyncing) {
@@ -78,93 +81,96 @@ router.post('/sync', async (req, res) => {
     });
   }
 
-  const { seasons = ['2024-25'], forceFullSync = false } = req.body;
-
-  // Ensure seasons is an array
-  const seasonList = Array.isArray(seasons) ? seasons : [seasons];
-
   // Check current data status
   const status = nbaStatsService.getDataStatus();
-  const isIncremental = !forceFullSync && status.hasData && status.latestGame;
 
   // Start sync in background
   isSyncing = true;
   syncProgress = {
     status: 'starting',
-    mode: isIncremental ? 'incremental' : 'full',
-    seasons: seasonList,
-    currentSeason: null,
-    seasonIndex: 0,
+    mode: 'blob',
     processed: 0,
     total: 0,
     games: 0
   };
 
-  const mode = isIncremental ? 'incremental update' : 'full sync';
-
   // Send response IMMEDIATELY before starting background work
   res.json({
     success: true,
-    mode: isIncremental ? 'incremental' : 'full',
-    seasons: seasonList,
-    message: `Started ${mode} for ${seasonList.length} season(s): ${seasonList.join(', ')}. Check /api/historical/sync/status for progress.`,
+    mode: 'blob',
+    message: 'Started syncing from Azure Blob Storage. Check /api/historical/sync/status for progress.',
     lastGameDate: status.latestGame || null
   });
 
-  // Run sync in background using setImmediate to ensure response is sent first
+  // Run sync in background
   setImmediate(async () => {
     try {
-      let totalGames = 0;
-      let totalPlayers = 0;
       const startTime = Date.now();
 
-      for (let i = 0; i < seasonList.length; i++) {
-        const season = seasonList[i];
-        syncProgress.currentSeason = season;
-        syncProgress.seasonIndex = i + 1;
+      syncProgress = {
+        status: 'fetching',
+        mode: 'blob',
+        message: 'Downloading box_scores.json from Azure Blob Storage...'
+      };
 
-        let result;
-        if (isIncremental && season === '2024-25') {
-          // Only do incremental for current season
-          result = await nbaStatsService.fetchIncrementalGameLogs(season, status.latestGame, (progress) => {
-            syncProgress = {
-              ...syncProgress,
-              status: 'syncing',
-              mode: 'incremental',
-              currentSeason: season,
-              seasonIndex: i + 1,
-              ...progress,
-              percent: Math.round((progress.processed / progress.total) * 100)
-            };
-          });
-        } else {
-          result = await nbaStatsService.fetchSeasonGameLogs(season, (progress) => {
-            syncProgress = {
-              ...syncProgress,
-              status: 'syncing',
-              mode: 'full',
-              currentSeason: season,
-              seasonIndex: i + 1,
-              ...progress,
-              percent: Math.round((progress.processed / progress.total) * 100)
-            };
-          });
+      // Fetch box scores from blob storage
+      const response = await fetch(BLOB_STORAGE_URL);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch blob: ${response.status} ${response.statusText}`);
+      }
+
+      const boxScores = await response.json();
+      console.log(`Downloaded ${boxScores.length} games from blob storage`);
+
+      syncProgress = {
+        status: 'importing',
+        mode: 'blob',
+        total: boxScores.length,
+        processed: 0,
+        message: 'Importing games to database...'
+      };
+
+      // Import games to database
+      let imported = 0;
+      let skipped = 0;
+
+      for (let i = 0; i < boxScores.length; i++) {
+        const game = boxScores[i];
+        try {
+          const wasInserted = nbaStatsService.insertGameFromBoxScore(game);
+          if (wasInserted) {
+            imported++;
+          } else {
+            skipped++;
+          }
+        } catch (e) {
+          // Skip duplicates or errors
+          skipped++;
         }
 
-        totalGames += result.games || 0;
-        totalPlayers = result.players || totalPlayers;
+        // Update progress every 100 games
+        if (i % 100 === 0) {
+          syncProgress = {
+            ...syncProgress,
+            processed: i,
+            percent: Math.round((i / boxScores.length) * 100)
+          };
+        }
       }
 
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
 
       syncProgress = {
         status: 'complete',
-        mode: isIncremental ? 'incremental' : 'full',
-        seasons: seasonList,
-        games: totalGames,
-        players: totalPlayers,
+        mode: 'blob',
+        games: imported,
+        skipped: skipped,
+        total: boxScores.length,
         elapsed
       };
+
+      console.log(`Sync complete: ${imported} imported, ${skipped} skipped in ${elapsed}s`);
+
     } catch (error) {
       console.error('Sync error:', error);
       syncProgress = {

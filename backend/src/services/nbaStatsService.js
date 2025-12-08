@@ -830,6 +830,79 @@ class NBAStatsService {
   }
 
   /**
+   * Insert a single game from box score JSON (from Azure Blob)
+   * Used when syncing from blob storage
+   * @param {Object} game - Box score game object from blob storage
+   * @returns {boolean} - Whether the game was inserted (false if already exists)
+   */
+  insertGameFromBoxScore(game) {
+    // Map blob storage fields to database fields
+    const gameData = {
+      player_id: null, // Not available from Basketball Reference
+      player_name: game.player_name,
+      team: this.teamAbbreviations[game.team] || game.team, // Convert full name to abbrev if needed
+      opponent: this.teamAbbreviations[game.opponent] || game.opponent,
+      position: null,
+      game_id: `${game.game_date}_${game.team}_${game.opponent}`, // Generate unique ID
+      game_date: game.game_date,
+      season: '2024-25',
+      is_home: game.is_home,
+      minutes: game.minutes || 0,
+      points: game.points || 0,
+      rebounds: game.rebounds || 0,
+      assists: game.assists || 0,
+      steals: game.steals || 0,
+      blocks: game.blocks || 0,
+      turnovers: game.turnovers || 0,
+      fg_made: game.fg_made || 0,
+      fg_attempted: game.fg_attempted || 0,
+      fg3_made: game.fg3_made || 0,
+      fg3_attempted: game.fg3_attempted || 0,
+      ft_made: game.ft_made || 0,
+      ft_attempted: game.ft_attempted || 0,
+      oreb: game.oreb || 0,
+      dreb: game.dreb || 0,
+      plus_minus: game.plus_minus || 0,
+      dk_fantasy_points: game.dk_fantasy_points || this.calculateDKFantasyPoints({
+        points: game.points,
+        fg3_made: game.fg3_made,
+        rebounds: game.rebounds,
+        assists: game.assists,
+        steals: game.steals,
+        blocks: game.blocks,
+        turnovers: game.turnovers
+      }),
+      rest_days: null,
+      is_back_to_back: 0
+    };
+
+    try {
+      const stmt = db.prepare(`
+        INSERT OR IGNORE INTO historical_games (
+          player_id, player_name, team, opponent, position, game_id, game_date, season, is_home,
+          minutes, points, rebounds, assists, steals, blocks, turnovers,
+          fg_made, fg_attempted, fg3_made, fg3_attempted, ft_made, ft_attempted,
+          oreb, dreb, plus_minus, dk_fantasy_points, rest_days, is_back_to_back
+        ) VALUES (
+          @player_id, @player_name, @team, @opponent, @position, @game_id, @game_date, @season, @is_home,
+          @minutes, @points, @rebounds, @assists, @steals, @blocks, @turnovers,
+          @fg_made, @fg_attempted, @fg3_made, @fg3_attempted, @ft_made, @ft_attempted,
+          @oreb, @dreb, @plus_minus, @dk_fantasy_points, @rest_days, @is_back_to_back
+        )
+      `);
+
+      const result = stmt.run(gameData);
+      return result.changes > 0;
+    } catch (error) {
+      // If it's a duplicate key error, return false (game already exists)
+      if (error.message.includes('UNIQUE constraint failed')) {
+        return false;
+      }
+      throw error;
+    }
+  }
+
+  /**
    * Check if historical data exists and return status
    */
   getDataStatus() {
