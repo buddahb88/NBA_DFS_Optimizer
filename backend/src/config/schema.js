@@ -58,6 +58,7 @@ async function createAzureSqlTables(db) {
       injury_status NVARCHAR(100),
       per FLOAT,
       [usage] FLOAT,
+      rest_days INT,
       fpts_last3 FLOAT,
       fpts_last5 FLOAT,
       fpts_last7 FLOAT,
@@ -86,6 +87,12 @@ async function createAzureSqlTables(db) {
       updated_at DATETIME2 DEFAULT GETDATE(),
       CONSTRAINT UQ_players_slate_player UNIQUE(slate_id, player_id)
     )
+  `);
+
+  // Add missing columns to players table if it already exists
+  await db.exec(`
+    IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('players') AND name = 'rest_days')
+      ALTER TABLE players ADD rest_days INT;
   `);
 
   // Lineups table
