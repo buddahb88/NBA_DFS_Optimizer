@@ -15,6 +15,28 @@ let syncProgress = null;
 let isSyncing = false;
 
 /**
+ * GET /api/historical/status
+ * Check if historical data exists and if updates are needed
+ * Use this to determine whether to show "Full Populate" or "Update" button
+ */
+router.get('/status', (req, res) => {
+  try {
+    const status = nbaStatsService.getDataStatus();
+    res.json({
+      success: true,
+      ...status,
+      recommendation: status.needsFullSync
+        ? 'FULL_SYNC'
+        : status.needsUpdate
+          ? 'INCREMENTAL_UPDATE'
+          : 'UP_TO_DATE'
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
  * GET /api/historical/summary
  * Get summary of historical data in database
  */
@@ -46,6 +68,7 @@ router.get('/summary', (req, res) => {
 /**
  * POST /api/historical/sync
  * Start syncing historical game data from NBA.com
+ * Automatically determines whether to do full sync or incremental update
  */
 router.post('/sync', async (req, res) => {
   if (isSyncing) {
@@ -55,29 +78,56 @@ router.post('/sync', async (req, res) => {
     });
   }
 
-  const { season = '2024-25' } = req.body;
+  const { season = '2024-25', forceFullSync = false } = req.body;
+
+  // Check current data status
+  const status = nbaStatsService.getDataStatus();
+  const isIncremental = !forceFullSync && status.hasData && status.latestGame;
 
   // Start sync in background
   isSyncing = true;
-  syncProgress = { status: 'starting', processed: 0, total: 0, games: 0 };
+  syncProgress = {
+    status: 'starting',
+    mode: isIncremental ? 'incremental' : 'full',
+    processed: 0,
+    total: 0,
+    games: 0
+  };
 
+  const mode = isIncremental ? 'incremental update' : 'full sync';
   res.json({
     success: true,
-    message: `Started syncing ${season} season data. Check /api/historical/sync/status for progress.`
+    mode: isIncremental ? 'incremental' : 'full',
+    message: `Started ${mode} for ${season} season. Check /api/historical/sync/status for progress.`,
+    lastGameDate: status.latestGame || null
   });
 
   // Run sync
   try {
-    const result = await nbaStatsService.fetchSeasonGameLogs(season, (progress) => {
-      syncProgress = {
-        status: 'syncing',
-        ...progress,
-        percent: Math.round((progress.processed / progress.total) * 100)
-      };
-    });
+    let result;
+    if (isIncremental) {
+      result = await nbaStatsService.fetchIncrementalGameLogs(season, status.latestGame, (progress) => {
+        syncProgress = {
+          status: 'syncing',
+          mode: 'incremental',
+          ...progress,
+          percent: Math.round((progress.processed / progress.total) * 100)
+        };
+      });
+    } else {
+      result = await nbaStatsService.fetchSeasonGameLogs(season, (progress) => {
+        syncProgress = {
+          status: 'syncing',
+          mode: 'full',
+          ...progress,
+          percent: Math.round((progress.processed / progress.total) * 100)
+        };
+      });
+    }
 
     syncProgress = {
       status: 'complete',
+      mode: isIncremental ? 'incremental' : 'full',
       ...result
     };
   } catch (error) {

@@ -85,9 +85,58 @@ function InsightsPage() {
   const [endDate, setEndDate] = useState(getYesterday());
   const [dateFilterEnabled, setDateFilterEnabled] = useState(false);
 
+  // Data sync state
+  const [dataStatus, setDataStatus] = useState(null);
+  const [syncProgress, setSyncProgress] = useState(null);
+  const [isSyncing, setIsSyncing] = useState(false);
+
   useEffect(() => {
     loadData();
+    checkDataStatus();
   }, []);
+
+  // Poll for sync status if syncing
+  useEffect(() => {
+    let interval;
+    if (isSyncing) {
+      interval = setInterval(async () => {
+        try {
+          const res = await historicalAPI.getSyncStatus();
+          setSyncProgress(res.data?.progress);
+          if (res.data?.progress?.status === 'complete' || res.data?.progress?.status === 'error') {
+            setIsSyncing(false);
+            checkDataStatus(); // Refresh status after sync
+            if (res.data?.progress?.status === 'complete') {
+              loadData(dateFilterEnabled); // Reload data
+            }
+          }
+        } catch (e) {
+          console.error('Error checking sync status:', e);
+        }
+      }, 3000);
+    }
+    return () => clearInterval(interval);
+  }, [isSyncing]);
+
+  const checkDataStatus = async () => {
+    try {
+      const res = await historicalAPI.getStatus();
+      setDataStatus(res.data);
+    } catch (e) {
+      console.error('Error checking data status:', e);
+    }
+  };
+
+  const startDataSync = async (forceFullSync = false) => {
+    try {
+      setIsSyncing(true);
+      setSyncProgress({ status: 'starting', mode: forceFullSync ? 'full' : 'auto' });
+      await historicalAPI.startSync(forceFullSync);
+    } catch (e) {
+      console.error('Error starting sync:', e);
+      setIsSyncing(false);
+    }
+  };
 
   const loadData = async (useFilters = false) => {
     setLoading(true);
@@ -189,6 +238,100 @@ function InsightsPage() {
           Refresh Data
         </button>
       </div>
+
+      {/* Data Sync Status */}
+      {dataStatus && (
+        <div className={`rounded-lg shadow p-4 ${
+          dataStatus.needsFullSync ? 'bg-yellow-50 border border-yellow-200' :
+          dataStatus.needsUpdate ? 'bg-blue-50 border border-blue-200' :
+          'bg-green-50 border border-green-200'
+        }`}>
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-lg">
+                  {dataStatus.needsFullSync ? '⚠️' : dataStatus.needsUpdate ? '🔄' : '✅'}
+                </span>
+                <span className="font-medium text-gray-900">
+                  {dataStatus.needsFullSync ? 'No Historical Data' :
+                   dataStatus.needsUpdate ? 'Update Available' :
+                   'Data Up to Date'}
+                </span>
+              </div>
+              <p className="text-sm text-gray-600 mt-1">
+                {dataStatus.hasData ? (
+                  <>
+                    {dataStatus.totalGames?.toLocaleString()} games from {dataStatus.uniquePlayers} players
+                    <span className="text-gray-400 ml-2">
+                      ({dataStatus.earliestGame} to {dataStatus.latestGame})
+                    </span>
+                  </>
+                ) : (
+                  'Click "Full Sync" to populate historical game data from NBA.com'
+                )}
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {isSyncing ? (
+                <div className="flex items-center gap-3">
+                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
+                  <div className="text-sm">
+                    <div className="font-medium text-gray-900">
+                      {syncProgress?.mode === 'incremental' ? 'Updating' : 'Syncing'}...
+                      {syncProgress?.percent ? ` ${syncProgress.percent}%` : ''}
+                    </div>
+                    {syncProgress?.processed && (
+                      <div className="text-gray-500">
+                        {syncProgress.processed}/{syncProgress.total} players | {syncProgress.games} games
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <>
+                  {dataStatus.needsFullSync ? (
+                    <button
+                      onClick={() => startDataSync(true)}
+                      className="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 text-sm font-medium"
+                    >
+                      Full Sync (First Time)
+                    </button>
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => startDataSync(false)}
+                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium"
+                      >
+                        {dataStatus.needsUpdate ? 'Update Data' : 'Check for Updates'}
+                      </button>
+                      <button
+                        onClick={() => startDataSync(true)}
+                        className="px-3 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 text-sm"
+                        title="Force full re-sync of all data"
+                      >
+                        Force Full Sync
+                      </button>
+                    </>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Sync Complete Message */}
+          {syncProgress?.status === 'complete' && (
+            <div className="mt-3 p-2 bg-green-100 border border-green-200 rounded text-sm text-green-800">
+              ✅ Sync complete! {syncProgress.games} games synced in {syncProgress.elapsed}s
+            </div>
+          )}
+          {syncProgress?.status === 'error' && (
+            <div className="mt-3 p-2 bg-red-100 border border-red-200 rounded text-sm text-red-800">
+              ❌ Error: {syncProgress.error}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Backtesting Date Filter */}
       <div className="bg-white rounded-lg shadow p-4">

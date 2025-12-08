@@ -64,6 +64,13 @@ export const chatAPI = {
 
 // Historical Insights API
 export const historicalAPI = {
+  // Data status and sync
+  getStatus: () => api.get('/historical/status'),
+  startSync: (forceFullSync = false) =>
+    api.post('/historical/sync', { forceFullSync }),
+  getSyncStatus: () => api.get('/historical/sync/status'),
+
+  // Existing endpoints
   getSummary: (dateParams = {}) =>
     api.get('/historical/summary', { params: dateParams }),
   getSlateInsights: (players, dateParams = {}) =>

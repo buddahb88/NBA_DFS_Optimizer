@@ -830,6 +830,119 @@ class NBAStatsService {
   }
 
   /**
+   * Check if historical data exists and return status
+   */
+  getDataStatus() {
+    try {
+      const result = db.prepare(`
+        SELECT
+          COUNT(*) as totalGames,
+          COUNT(DISTINCT player_name) as uniquePlayers,
+          MIN(game_date) as earliestGame,
+          MAX(game_date) as latestGame
+        FROM historical_games
+      `).get();
+
+      return {
+        hasData: result.totalGames > 0,
+        totalGames: result.totalGames,
+        uniquePlayers: result.uniquePlayers,
+        earliestGame: result.earliestGame,
+        latestGame: result.latestGame,
+        needsFullSync: result.totalGames === 0,
+        needsUpdate: result.latestGame ? this.daysSinceDate(result.latestGame) > 1 : true
+      };
+    } catch (error) {
+      // Table might not exist
+      return {
+        hasData: false,
+        totalGames: 0,
+        needsFullSync: true,
+        needsUpdate: true,
+        error: error.message
+      };
+    }
+  }
+
+  /**
+   * Calculate days since a date
+   */
+  daysSinceDate(dateStr) {
+    const date = new Date(dateStr);
+    const today = new Date();
+    const diffTime = Math.abs(today - date);
+    return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  }
+
+  /**
+   * Fetch game logs incrementally (only games after lastDate)
+   */
+  async fetchIncrementalGameLogs(season = '2024-25', lastDate = null, progressCallback = null) {
+    console.log(`\n🏀 ═══════════════════════════════════════════════════`);
+    console.log(`   INCREMENTAL UPDATE: Games after ${lastDate || 'beginning'}`);
+    console.log(`═══════════════════════════════════════════════════════\n`);
+
+    const startTime = Date.now();
+
+    // Get all active players
+    const players = await this.fetchAllPlayers();
+
+    let totalGames = 0;
+    let processedPlayers = 0;
+    let newGamesFound = 0;
+
+    // Process players one at a time with delay
+    for (const player of players) {
+      try {
+        const games = await this.fetchPlayerGameLog(player.id, player.name, season);
+
+        if (games.length > 0) {
+          // Filter to only games after lastDate
+          const newGames = lastDate
+            ? games.filter(g => g.game_date > lastDate)
+            : games;
+
+          if (newGames.length > 0) {
+            const gamesWithRest = this.calculateRestDays(newGames);
+            const inserted = this.bulkInsertGames(gamesWithRest);
+            totalGames += inserted;
+            newGamesFound += newGames.length;
+            console.log(`✅ ${player.name}: ${newGames.length} new games inserted`);
+          }
+        }
+      } catch (error) {
+        console.error(`❌ Failed for ${player.name}:`, error.message);
+      }
+
+      processedPlayers++;
+
+      if (progressCallback) {
+        progressCallback({
+          processed: processedPlayers,
+          total: players.length,
+          games: totalGames,
+          newGames: newGamesFound
+        });
+      }
+
+      // Delay between each player request
+      if (processedPlayers < players.length) {
+        await this.sleep(this.requestDelay);
+      }
+    }
+
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+
+    console.log(`\n═══════════════════════════════════════════════════════`);
+    console.log(`✅ Complete! Processed ${processedPlayers} players`);
+    console.log(`📊 New games inserted: ${totalGames}`);
+    console.log(`⏱️  Elapsed time: ${elapsed}s`);
+    console.log(`═══════════════════════════════════════════════════════\n`);
+
+    return { players: processedPlayers, games: totalGames, newGames: newGamesFound, elapsed };
+  }
+
+  /**
    * Get players on a specific team from historical data
    */
   getTeamRoster(team) {
