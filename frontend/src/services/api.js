@@ -66,8 +66,8 @@ export const chatAPI = {
 export const historicalAPI = {
   // Data status and sync
   getStatus: () => api.get('/historical/status'),
-  startSync: (forceFullSync = false) =>
-    api.post('/historical/sync', { forceFullSync }),
+  startSync: (forceFullSync = false, seasons = ['2024-25']) =>
+    api.post('/historical/sync', { forceFullSync, seasons }),
   getSyncStatus: () => api.get('/historical/sync/status'),
 
   // Existing endpoints

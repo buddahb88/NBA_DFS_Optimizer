@@ -89,6 +89,16 @@ function InsightsPage() {
   const [dataStatus, setDataStatus] = useState(null);
   const [syncProgress, setSyncProgress] = useState(null);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [selectedSeasons, setSelectedSeasons] = useState(['2024-25']); // Default to current season
+
+  // Available seasons (most recent first)
+  const availableSeasons = [
+    { value: '2024-25', label: '2024-25 (Current)' },
+    { value: '2023-24', label: '2023-24' },
+    { value: '2022-23', label: '2022-23' },
+    { value: '2021-22', label: '2021-22' },
+    { value: '2020-21', label: '2020-21' },
+  ];
 
   useEffect(() => {
     loadData();
@@ -130,12 +140,23 @@ function InsightsPage() {
   const startDataSync = async (forceFullSync = false) => {
     try {
       setIsSyncing(true);
-      setSyncProgress({ status: 'starting', mode: forceFullSync ? 'full' : 'auto' });
-      await historicalAPI.startSync(forceFullSync);
+      setSyncProgress({ status: 'starting', mode: forceFullSync ? 'full' : 'auto', seasons: selectedSeasons });
+      await historicalAPI.startSync(forceFullSync, selectedSeasons);
     } catch (e) {
       console.error('Error starting sync:', e);
       setIsSyncing(false);
     }
+  };
+
+  const toggleSeason = (season) => {
+    setSelectedSeasons(prev => {
+      if (prev.includes(season)) {
+        // Don't allow deselecting all seasons
+        if (prev.length === 1) return prev;
+        return prev.filter(s => s !== season);
+      }
+      return [...prev, season].sort().reverse(); // Keep sorted, newest first
+    });
   };
 
   const loadData = async (useFilters = false) => {
@@ -267,7 +288,7 @@ function InsightsPage() {
                     </span>
                   </>
                 ) : (
-                  'Click "Full Sync" to populate historical game data from NBA.com'
+                  'Select seasons and click sync to populate historical game data'
                 )}
               </p>
             </div>
@@ -280,6 +301,7 @@ function InsightsPage() {
                     <div className="font-medium text-gray-900">
                       {syncProgress?.mode === 'incremental' ? 'Updating' : 'Syncing'}...
                       {syncProgress?.percent ? ` ${syncProgress.percent}%` : ''}
+                      {syncProgress?.currentSeason && ` (${syncProgress.currentSeason})`}
                     </div>
                     {syncProgress?.processed && (
                       <div className="text-gray-500">
@@ -290,34 +312,58 @@ function InsightsPage() {
                 </div>
               ) : (
                 <>
-                  {dataStatus.needsFullSync ? (
+                  <button
+                    onClick={() => startDataSync(dataStatus.needsFullSync)}
+                    className={`px-4 py-2 text-white rounded-lg text-sm font-medium ${
+                      dataStatus.needsFullSync
+                        ? 'bg-yellow-600 hover:bg-yellow-700'
+                        : 'bg-blue-600 hover:bg-blue-700'
+                    }`}
+                  >
+                    {dataStatus.needsFullSync ? 'Sync Selected Seasons' :
+                     dataStatus.needsUpdate ? 'Update Data' : 'Sync Selected Seasons'}
+                  </button>
+                  {!dataStatus.needsFullSync && (
                     <button
                       onClick={() => startDataSync(true)}
-                      className="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 text-sm font-medium"
+                      className="px-3 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 text-sm"
+                      title="Force full re-sync of all selected seasons"
                     >
-                      Full Sync (First Time)
+                      Force Full Sync
                     </button>
-                  ) : (
-                    <>
-                      <button
-                        onClick={() => startDataSync(false)}
-                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium"
-                      >
-                        {dataStatus.needsUpdate ? 'Update Data' : 'Check for Updates'}
-                      </button>
-                      <button
-                        onClick={() => startDataSync(true)}
-                        className="px-3 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 text-sm"
-                        title="Force full re-sync of all data"
-                      >
-                        Force Full Sync
-                      </button>
-                    </>
                   )}
                 </>
               )}
             </div>
           </div>
+
+          {/* Season Selector */}
+          {!isSyncing && (
+            <div className="mt-3 pt-3 border-t border-gray-200">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-sm font-medium text-gray-700">Seasons to sync:</span>
+                {availableSeasons.map(season => (
+                  <button
+                    key={season.value}
+                    onClick={() => toggleSeason(season.value)}
+                    className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${
+                      selectedSeasons.includes(season.value)
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                    }`}
+                  >
+                    {season.label}
+                  </button>
+                ))}
+                <span className="text-xs text-gray-400 ml-2">
+                  ({selectedSeasons.length} season{selectedSeasons.length !== 1 ? 's' : ''} selected)
+                </span>
+              </div>
+              <p className="text-xs text-gray-500 mt-2">
+                Each season adds ~15-20 minutes of sync time due to NBA.com rate limits
+              </p>
+            </div>
+          )}
 
           {/* Sync Complete Message */}
           {syncProgress?.status === 'complete' && (

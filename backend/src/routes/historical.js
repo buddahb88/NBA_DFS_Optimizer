@@ -68,7 +68,7 @@ router.get('/summary', (req, res) => {
 /**
  * POST /api/historical/sync
  * Start syncing historical game data from NBA.com
- * Automatically determines whether to do full sync or incremental update
+ * Supports multiple seasons - syncs each selected season sequentially
  */
 router.post('/sync', async (req, res) => {
   if (isSyncing) {
@@ -78,7 +78,10 @@ router.post('/sync', async (req, res) => {
     });
   }
 
-  const { season = '2024-25', forceFullSync = false } = req.body;
+  const { seasons = ['2024-25'], forceFullSync = false } = req.body;
+
+  // Ensure seasons is an array
+  const seasonList = Array.isArray(seasons) ? seasons : [seasons];
 
   // Check current data status
   const status = nbaStatsService.getDataStatus();
@@ -89,6 +92,9 @@ router.post('/sync', async (req, res) => {
   syncProgress = {
     status: 'starting',
     mode: isIncremental ? 'incremental' : 'full',
+    seasons: seasonList,
+    currentSeason: null,
+    seasonIndex: 0,
     processed: 0,
     total: 0,
     games: 0
@@ -98,37 +104,63 @@ router.post('/sync', async (req, res) => {
   res.json({
     success: true,
     mode: isIncremental ? 'incremental' : 'full',
-    message: `Started ${mode} for ${season} season. Check /api/historical/sync/status for progress.`,
+    seasons: seasonList,
+    message: `Started ${mode} for ${seasonList.length} season(s): ${seasonList.join(', ')}. Check /api/historical/sync/status for progress.`,
     lastGameDate: status.latestGame || null
   });
 
-  // Run sync
+  // Run sync for each season
   try {
-    let result;
-    if (isIncremental) {
-      result = await nbaStatsService.fetchIncrementalGameLogs(season, status.latestGame, (progress) => {
-        syncProgress = {
-          status: 'syncing',
-          mode: 'incremental',
-          ...progress,
-          percent: Math.round((progress.processed / progress.total) * 100)
-        };
-      });
-    } else {
-      result = await nbaStatsService.fetchSeasonGameLogs(season, (progress) => {
-        syncProgress = {
-          status: 'syncing',
-          mode: 'full',
-          ...progress,
-          percent: Math.round((progress.processed / progress.total) * 100)
-        };
-      });
+    let totalGames = 0;
+    let totalPlayers = 0;
+    const startTime = Date.now();
+
+    for (let i = 0; i < seasonList.length; i++) {
+      const season = seasonList[i];
+      syncProgress.currentSeason = season;
+      syncProgress.seasonIndex = i + 1;
+
+      let result;
+      if (isIncremental && season === '2024-25') {
+        // Only do incremental for current season
+        result = await nbaStatsService.fetchIncrementalGameLogs(season, status.latestGame, (progress) => {
+          syncProgress = {
+            ...syncProgress,
+            status: 'syncing',
+            mode: 'incremental',
+            currentSeason: season,
+            seasonIndex: i + 1,
+            ...progress,
+            percent: Math.round((progress.processed / progress.total) * 100)
+          };
+        });
+      } else {
+        result = await nbaStatsService.fetchSeasonGameLogs(season, (progress) => {
+          syncProgress = {
+            ...syncProgress,
+            status: 'syncing',
+            mode: 'full',
+            currentSeason: season,
+            seasonIndex: i + 1,
+            ...progress,
+            percent: Math.round((progress.processed / progress.total) * 100)
+          };
+        });
+      }
+
+      totalGames += result.games || 0;
+      totalPlayers = result.players || totalPlayers;
     }
+
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
 
     syncProgress = {
       status: 'complete',
       mode: isIncremental ? 'incremental' : 'full',
-      ...result
+      seasons: seasonList,
+      games: totalGames,
+      players: totalPlayers,
+      elapsed
     };
   } catch (error) {
     syncProgress = {
