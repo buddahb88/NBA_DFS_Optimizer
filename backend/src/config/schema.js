@@ -1,16 +1,291 @@
-export const createTables = (db) => {
+import { DATABASE_TYPE } from './database.js';
+
+/**
+ * Create all database tables
+ * Supports both SQLite and Azure SQL syntax
+ */
+export const createTables = async (db) => {
   console.log('🔄 Initializing database schema...');
 
+  const isAzureSql = DATABASE_TYPE === 'azuresql';
+
+  if (isAzureSql) {
+    await createAzureSqlTables(db);
+  } else {
+    await createSqliteTables(db);
+  }
+};
+
+/**
+ * Azure SQL table creation
+ */
+async function createAzureSqlTables(db) {
+  console.log('📊 Creating Azure SQL tables...');
+
+  // Connect to Azure SQL
+  await db.connect();
+
+  // Slates table
+  await db.exec(`
+    IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='slates' AND xtype='U')
+    CREATE TABLE slates (
+      id INT IDENTITY(1,1) PRIMARY KEY,
+      slate_id NVARCHAR(100) UNIQUE NOT NULL,
+      name NVARCHAR(255) NOT NULL,
+      sport NVARCHAR(50) DEFAULT 'NBA',
+      start_time DATETIME2,
+      created_at DATETIME2 DEFAULT GETDATE(),
+      updated_at DATETIME2 DEFAULT GETDATE()
+    )
+  `);
+
+  // Players table
+  await db.exec(`
+    IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='players' AND xtype='U')
+    CREATE TABLE players (
+      id INT IDENTITY(1,1) PRIMARY KEY,
+      slate_id NVARCHAR(100) NOT NULL,
+      player_id NVARCHAR(100) NOT NULL,
+      name NVARCHAR(255) NOT NULL,
+      team NVARCHAR(50),
+      opponent NVARCHAR(50),
+      position NVARCHAR(50) NOT NULL,
+      salary INT NOT NULL,
+      projected_points FLOAT,
+      projected_minutes FLOAT,
+      value FLOAT,
+      game_info NVARCHAR(500),
+      injury_status NVARCHAR(100),
+      per FLOAT,
+      [usage] FLOAT,
+      fpts_last3 FLOAT,
+      fpts_last5 FLOAT,
+      fpts_last7 FLOAT,
+      fpts_last14 FLOAT,
+      vegas_implied_total FLOAT,
+      vegas_spread FLOAT,
+      vegas_over_under FLOAT,
+      vegas_win_prob FLOAT,
+      rostership FLOAT,
+      value_gpp FLOAT,
+      headshot NVARCHAR(500),
+      raw_data NVARCHAR(MAX),
+      dvp_pts_allowed FLOAT,
+      opp_def_eff FLOAT,
+      floor FLOAT,
+      ceiling FLOAT,
+      volatility FLOAT,
+      boom_probability FLOAT,
+      bust_probability FLOAT,
+      fppm FLOAT,
+      leverage_score FLOAT,
+      blowout_risk FLOAT,
+      std_dev FLOAT,
+      rotowire_projection FLOAT,
+      created_at DATETIME2 DEFAULT GETDATE(),
+      updated_at DATETIME2 DEFAULT GETDATE(),
+      CONSTRAINT UQ_players_slate_player UNIQUE(slate_id, player_id)
+    )
+  `);
+
+  // Lineups table
+  await db.exec(`
+    IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='lineups' AND xtype='U')
+    CREATE TABLE lineups (
+      id INT IDENTITY(1,1) PRIMARY KEY,
+      slate_id NVARCHAR(100) NOT NULL,
+      name NVARCHAR(255) NOT NULL,
+      total_salary INT NOT NULL,
+      projected_points FLOAT,
+      created_at DATETIME2 DEFAULT GETDATE(),
+      updated_at DATETIME2 DEFAULT GETDATE()
+    )
+  `);
+
+  // Lineup players junction table
+  await db.exec(`
+    IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='lineup_players' AND xtype='U')
+    CREATE TABLE lineup_players (
+      id INT IDENTITY(1,1) PRIMARY KEY,
+      lineup_id INT NOT NULL,
+      player_id INT NOT NULL,
+      position_slot NVARCHAR(50) NOT NULL,
+      FOREIGN KEY (lineup_id) REFERENCES lineups(id) ON DELETE CASCADE
+    )
+  `);
+
+  // Chat sessions
+  await db.exec(`
+    IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='chat_sessions' AND xtype='U')
+    CREATE TABLE chat_sessions (
+      id INT IDENTITY(1,1) PRIMARY KEY,
+      title NVARCHAR(255),
+      slate_id NVARCHAR(100),
+      created_at DATETIME2 DEFAULT GETDATE(),
+      updated_at DATETIME2 DEFAULT GETDATE()
+    )
+  `);
+
+  // Chat messages
+  await db.exec(`
+    IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='chat_messages' AND xtype='U')
+    CREATE TABLE chat_messages (
+      id INT IDENTITY(1,1) PRIMARY KEY,
+      session_id INT NOT NULL,
+      role NVARCHAR(50) NOT NULL,
+      content NVARCHAR(MAX) NOT NULL,
+      metadata NVARCHAR(MAX),
+      created_at DATETIME2 DEFAULT GETDATE(),
+      FOREIGN KEY (session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
+    )
+  `);
+
+  // Team defense rankings
+  await db.exec(`
+    IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='team_defense_rankings' AND xtype='U')
+    CREATE TABLE team_defense_rankings (
+      team NVARCHAR(10) PRIMARY KEY,
+      def_eff FLOAT NOT NULL,
+      off_eff FLOAT,
+      pace FLOAT,
+      ast_ratio FLOAT,
+      to_ratio FLOAT,
+      rebr FLOAT,
+      eff_fg_pct FLOAT,
+      ts_pct FLOAT,
+      updated_at DATETIME2 DEFAULT GETDATE()
+    )
+  `);
+
+  // Team defense vs position
+  await db.exec(`
+    IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='team_defense_vs_position' AND xtype='U')
+    CREATE TABLE team_defense_vs_position (
+      id INT IDENTITY(1,1) PRIMARY KEY,
+      team NVARCHAR(10) NOT NULL,
+      position NVARCHAR(10) NOT NULL,
+      rank INT NOT NULL,
+      pts_allowed FLOAT,
+      fg_pct_allowed FLOAT,
+      tpm_allowed FLOAT,
+      reb_allowed FLOAT,
+      ast_allowed FLOAT,
+      stl_allowed FLOAT,
+      blk_allowed FLOAT,
+      to_allowed FLOAT,
+      updated_at DATETIME2 DEFAULT GETDATE(),
+      CONSTRAINT UQ_team_position UNIQUE(team, position)
+    )
+  `);
+
+  // Historical games
+  await db.exec(`
+    IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='historical_games' AND xtype='U')
+    CREATE TABLE historical_games (
+      id INT IDENTITY(1,1) PRIMARY KEY,
+      player_id NVARCHAR(100),
+      player_name NVARCHAR(255) NOT NULL,
+      team NVARCHAR(10) NOT NULL,
+      opponent NVARCHAR(10) NOT NULL,
+      position NVARCHAR(50),
+      game_id NVARCHAR(100),
+      game_date DATE NOT NULL,
+      season NVARCHAR(20),
+      is_home INT DEFAULT 0,
+      minutes FLOAT,
+      points INT,
+      rebounds INT,
+      assists INT,
+      steals INT,
+      blocks INT,
+      turnovers INT,
+      fouls INT,
+      fg_made INT,
+      fg_attempted INT,
+      fg_pct FLOAT,
+      fg3_made INT,
+      fg3_attempted INT,
+      fg3_pct FLOAT,
+      ft_made INT,
+      ft_attempted INT,
+      ft_pct FLOAT,
+      oreb INT,
+      dreb INT,
+      plus_minus INT,
+      ts_pct FLOAT,
+      efg_pct FLOAT,
+      three_par FLOAT,
+      ftr FLOAT,
+      orb_pct FLOAT,
+      drb_pct FLOAT,
+      trb_pct FLOAT,
+      ast_pct FLOAT,
+      stl_pct FLOAT,
+      blk_pct FLOAT,
+      tov_pct FLOAT,
+      usg_pct FLOAT,
+      off_rtg FLOAT,
+      def_rtg FLOAT,
+      bpm FLOAT,
+      dk_fantasy_points FLOAT,
+      rest_days INT,
+      is_back_to_back INT DEFAULT 0,
+      created_at DATETIME2 DEFAULT GETDATE(),
+      CONSTRAINT UQ_historical_player_date UNIQUE(player_name, team, game_date)
+    )
+  `);
+
+  // Create indexes
+  await db.exec(`
+    IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_players_slate_id')
+      CREATE INDEX idx_players_slate_id ON players(slate_id);
+    IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_players_position')
+      CREATE INDEX idx_players_position ON players(position);
+    IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_players_salary')
+      CREATE INDEX idx_players_salary ON players(salary);
+    IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_lineups_slate_id')
+      CREATE INDEX idx_lineups_slate_id ON lineups(slate_id);
+    IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_lineup_players_lineup_id')
+      CREATE INDEX idx_lineup_players_lineup_id ON lineup_players(lineup_id);
+    IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_chat_messages_session_id')
+      CREATE INDEX idx_chat_messages_session_id ON chat_messages(session_id);
+    IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_chat_sessions_slate_id')
+      CREATE INDEX idx_chat_sessions_slate_id ON chat_sessions(slate_id);
+    IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_historical_player_name')
+      CREATE INDEX idx_historical_player_name ON historical_games(player_name);
+    IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_historical_game_date')
+      CREATE INDEX idx_historical_game_date ON historical_games(game_date);
+    IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_historical_season')
+      CREATE INDEX idx_historical_season ON historical_games(season);
+    IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_historical_team')
+      CREATE INDEX idx_historical_team ON historical_games(team);
+  `);
+
+  console.log('✅ Azure SQL schema ready!');
+}
+
+/**
+ * SQLite table creation (original code)
+ */
+async function createSqliteTables(db) {
   // Helper function to check if table exists
-  const tableExists = (tableName) => {
-    const result = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`).get(tableName);
+  const tableExists = async (tableName) => {
+    const result = await db.get(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`, tableName);
     return !!result;
   };
 
   // Check existing tables
   const tables = ['slates', 'players', 'lineups', 'lineup_players', 'chat_sessions', 'chat_messages', 'team_defense_rankings', 'team_defense_vs_position', 'historical_games'];
-  const existingTables = tables.filter(t => tableExists(t));
-  const newTables = tables.filter(t => !tableExists(t));
+  const existingTables = [];
+  const newTables = [];
+
+  for (const t of tables) {
+    if (await tableExists(t)) {
+      existingTables.push(t);
+    } else {
+      newTables.push(t);
+    }
+  }
 
   if (existingTables.length > 0) {
     console.log(`✓ Found ${existingTables.length} existing table(s): ${existingTables.join(', ')}`);
@@ -19,8 +294,8 @@ export const createTables = (db) => {
     console.log(`⚡ Creating ${newTables.length} new table(s): ${newTables.join(', ')}`);
   }
 
-  // Slates table - stores different DFS slates (Main, Showdown, etc.)
-  db.exec(`
+  // Slates table
+  await db.exec(`
     CREATE TABLE IF NOT EXISTS slates (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       slate_id TEXT UNIQUE NOT NULL,
@@ -32,8 +307,8 @@ export const createTables = (db) => {
     )
   `);
 
-  // Players table - stores player information for each slate
-  db.exec(`
+  // Players table
+  await db.exec(`
     CREATE TABLE IF NOT EXISTS players (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       slate_id TEXT NOT NULL,
@@ -69,48 +344,39 @@ export const createTables = (db) => {
     )
   `);
 
-  // Add new columns if they don't exist (for existing databases)
+  // Add new columns if they don't exist (check first to avoid errors)
   const columnsToAdd = [
-    { name: 'projected_minutes', type: 'REAL' },
-    { name: 'per', type: 'REAL' },
-    { name: 'usage', type: 'REAL' },
     { name: 'rest_days', type: 'INTEGER' },
-    { name: 'fpts_last3', type: 'REAL' },
-    { name: 'fpts_last5', type: 'REAL' },
-    { name: 'fpts_last7', type: 'REAL' },
-    { name: 'fpts_last14', type: 'REAL' },
-    { name: 'vegas_implied_total', type: 'REAL' },
-    { name: 'vegas_spread', type: 'REAL' },
-    { name: 'vegas_over_under', type: 'REAL' },
-    { name: 'vegas_win_prob', type: 'REAL' },
-    { name: 'rostership', type: 'REAL' },
-    { name: 'value_gpp', type: 'REAL' },
-    { name: 'headshot', type: 'TEXT' },
     { name: 'dvp_pts_allowed', type: 'REAL' },
     { name: 'opp_def_eff', type: 'REAL' },
-    // Advanced projection metrics
-    { name: 'floor', type: 'REAL' },                    // 25th percentile projection
-    { name: 'ceiling', type: 'REAL' },                  // 75th percentile projection
-    { name: 'volatility', type: 'REAL' },               // Standard deviation / mean
-    { name: 'boom_probability', type: 'REAL' },         // % chance of exceeding value by 10+ pts
-    { name: 'bust_probability', type: 'REAL' },         // % chance of failing to meet value
-    { name: 'fppm', type: 'REAL' },                     // Weighted fantasy points per minute
-    { name: 'leverage_score', type: 'REAL' },           // GPP leverage (boom prob / ownership)
-    { name: 'blowout_risk', type: 'REAL' },             // Blowout risk adjustment
-    { name: 'std_dev', type: 'REAL' },                  // Standard deviation of recent games
-    { name: 'rotowire_projection', type: 'REAL' }       // Original RotoWire projection (baseline)
+    { name: 'floor', type: 'REAL' },
+    { name: 'ceiling', type: 'REAL' },
+    { name: 'volatility', type: 'REAL' },
+    { name: 'boom_probability', type: 'REAL' },
+    { name: 'bust_probability', type: 'REAL' },
+    { name: 'fppm', type: 'REAL' },
+    { name: 'leverage_score', type: 'REAL' },
+    { name: 'blowout_risk', type: 'REAL' },
+    { name: 'std_dev', type: 'REAL' },
+    { name: 'rotowire_projection', type: 'REAL' }
   ];
 
-  columnsToAdd.forEach(({ name, type }) => {
-    try {
-      db.exec(`ALTER TABLE players ADD COLUMN ${name} ${type}`);
-    } catch (e) {
-      // Column already exists, ignore
-    }
-  });
+  // Get existing columns to check which need to be added
+  const existingColumns = await db.all(`PRAGMA table_info(players)`);
+  const existingColumnNames = new Set(existingColumns.map(c => c.name));
 
-  // Lineups table - stores user-created lineups
-  db.exec(`
+  for (const { name, type } of columnsToAdd) {
+    if (!existingColumnNames.has(name)) {
+      try {
+        await db.exec(`ALTER TABLE players ADD COLUMN ${name} ${type}`);
+      } catch (e) {
+        // Column might already exist, ignore
+      }
+    }
+  }
+
+  // Lineups table
+  await db.exec(`
     CREATE TABLE IF NOT EXISTS lineups (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       slate_id TEXT NOT NULL,
@@ -123,8 +389,8 @@ export const createTables = (db) => {
     )
   `);
 
-  // Lineup players - junction table for lineups and players
-  db.exec(`
+  // Lineup players junction table
+  await db.exec(`
     CREATE TABLE IF NOT EXISTS lineup_players (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       lineup_id INTEGER NOT NULL,
@@ -135,8 +401,8 @@ export const createTables = (db) => {
     )
   `);
 
-  // Chat sessions - stores AI chat conversations
-  db.exec(`
+  // Chat sessions
+  await db.exec(`
     CREATE TABLE IF NOT EXISTS chat_sessions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       title TEXT,
@@ -147,8 +413,8 @@ export const createTables = (db) => {
     )
   `);
 
-  // Chat messages - stores individual messages in conversations
-  db.exec(`
+  // Chat messages
+  await db.exec(`
     CREATE TABLE IF NOT EXISTS chat_messages (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       session_id INTEGER NOT NULL,
@@ -160,8 +426,8 @@ export const createTables = (db) => {
     )
   `);
 
-  // Team defense rankings - stores team defensive efficiency and advanced stats
-  db.exec(`
+  // Team defense rankings
+  await db.exec(`
     CREATE TABLE IF NOT EXISTS team_defense_rankings (
       team TEXT PRIMARY KEY,
       def_eff REAL NOT NULL,
@@ -176,8 +442,8 @@ export const createTables = (db) => {
     )
   `);
 
-  // Team defense vs position - position-specific defensive rankings
-  db.exec(`
+  // Team defense vs position
+  await db.exec(`
     CREATE TABLE IF NOT EXISTS team_defense_vs_position (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       team TEXT NOT NULL,
@@ -196,19 +462,19 @@ export const createTables = (db) => {
     )
   `);
 
-  // Historical game logs for ML analysis (basic + advanced stats from Basketball Reference)
-  db.exec(`
+  // Historical games
+  await db.exec(`
     CREATE TABLE IF NOT EXISTS historical_games (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      -- Player identification
+      player_id TEXT,
       player_name TEXT NOT NULL,
       team TEXT NOT NULL,
       opponent TEXT NOT NULL,
-      -- Game info
+      position TEXT,
+      game_id TEXT,
       game_date DATE NOT NULL,
       season TEXT,
       is_home INTEGER DEFAULT 0,
-      -- Basic box score stats
       minutes REAL,
       points INTEGER,
       rebounds INTEGER,
@@ -229,35 +495,31 @@ export const createTables = (db) => {
       oreb INTEGER,
       dreb INTEGER,
       plus_minus INTEGER,
-      -- Advanced stats (from Basketball Reference)
-      ts_pct REAL,        -- True Shooting %
-      efg_pct REAL,       -- Effective FG %
-      three_par REAL,     -- 3P Attempt Rate
-      ftr REAL,           -- Free Throw Rate
-      orb_pct REAL,       -- Offensive Rebound %
-      drb_pct REAL,       -- Defensive Rebound %
-      trb_pct REAL,       -- Total Rebound %
-      ast_pct REAL,       -- Assist %
-      stl_pct REAL,       -- Steal %
-      blk_pct REAL,       -- Block %
-      tov_pct REAL,       -- Turnover %
-      usg_pct REAL,       -- Usage %
-      off_rtg REAL,       -- Offensive Rating
-      def_rtg REAL,       -- Defensive Rating
-      bpm REAL,           -- Box Plus/Minus
-      -- Calculated DraftKings fantasy points
+      ts_pct REAL,
+      efg_pct REAL,
+      three_par REAL,
+      ftr REAL,
+      orb_pct REAL,
+      drb_pct REAL,
+      trb_pct REAL,
+      ast_pct REAL,
+      stl_pct REAL,
+      blk_pct REAL,
+      tov_pct REAL,
+      usg_pct REAL,
+      off_rtg REAL,
+      def_rtg REAL,
+      bpm REAL,
       dk_fantasy_points REAL,
-      -- Context data (for ML features)
       rest_days INTEGER,
       is_back_to_back INTEGER DEFAULT 0,
-      -- Timestamps
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       UNIQUE(player_name, team, game_date)
     )
   `);
 
-  // Create indexes for better query performance
-  db.exec(`
+  // Create indexes
+  await db.exec(`
     CREATE INDEX IF NOT EXISTS idx_players_slate_id ON players(slate_id);
     CREATE INDEX IF NOT EXISTS idx_players_position ON players(position);
     CREATE INDEX IF NOT EXISTS idx_players_salary ON players(salary);
@@ -278,4 +540,4 @@ export const createTables = (db) => {
   } else {
     console.log('✅ Database schema ready! All tables already exist');
   }
-};
+}

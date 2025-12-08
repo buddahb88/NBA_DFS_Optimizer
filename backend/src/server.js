@@ -3,7 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import db from './config/database.js';
+import db, { DATABASE_TYPE } from './config/database.js';
 import { createTables } from './config/schema.js';
 import slatesRouter from './routes/slates.js';
 import playersRouter from './routes/players.js';
@@ -21,9 +21,6 @@ dotenv.config({ path: path.join(__dirname, '../.env') });
 
 const app = express();
 const PORT = process.env.PORT || 3001;
-
-// Initialize database
-createTables(db);
 
 // Middleware
 app.use(cors());
@@ -46,7 +43,7 @@ app.use('/api/historical', historicalRouter);
 
 // Health check
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', message: 'NBA DFS Optimizer API is running' });
+  res.json({ status: 'ok', message: 'NBA DFS Optimizer API is running', database: DATABASE_TYPE });
 });
 
 // Error handling middleware
@@ -63,16 +60,29 @@ app.use((req, res) => {
   res.status(404).json({ error: 'Route not found' });
 });
 
-// Start server (with date filtering for backtest mode and usage bump detection)
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
-  console.log(`🌐 Network access: http://<your-ip>:${PORT}`);
-  console.log(`📊 Database: ${process.env.DATABASE_PATH || 'data/nba_dfs.db'}`);
-});
+// Initialize database and start server
+async function startServer() {
+  try {
+    // Initialize database schema (async for Azure SQL)
+    await createTables(db);
+
+    // Start server
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`🚀 Server running on http://localhost:${PORT}`);
+      console.log(`🌐 Network access: http://<your-ip>:${PORT}`);
+      console.log(`📊 Database: ${DATABASE_TYPE === 'azuresql' ? 'Azure SQL' : 'SQLite'}`);
+    });
+  } catch (err) {
+    console.error('Failed to start server:', err);
+    process.exit(1);
+  }
+}
+
+startServer();
 
 // Graceful shutdown
 process.on('SIGINT', () => {
   console.log('\n👋 Shutting down gracefully...');
-  db.close();
+  if (db.close) db.close();
   process.exit(0);
 });

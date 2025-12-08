@@ -30,6 +30,8 @@ import teamDefenseVsPositionModel from '../models/teamDefenseVsPositionModel.js'
 import { normalizeForRankings, normalizeForVsPosition } from '../utils/teamMapping.js';
 import db from '../config/database.js';
 
+const DATABASE_TYPE = process.env.DATABASE_TYPE || 'sqlite';
+
 class ProjectionService {
   constructor() {
     this.defenseRankings = null;
@@ -72,7 +74,7 @@ class ProjectionService {
    * @param {string} playerName - Player's name
    * @param {string} slateDate - Date of the slate (to filter out future games for backtesting)
    */
-  getPlayerHistoricalStats(playerName, slateDate = null) {
+  async getPlayerHistoricalStats(playerName, slateDate = null) {
     const normalizedName = this.normalizeName(playerName);
     const cacheKey = `${normalizedName}_${slateDate || 'current'}`;
 
@@ -80,53 +82,103 @@ class ProjectionService {
       return this.historicalCache[cacheKey];
     }
 
-    // Build date filter for backtesting
-    let dateFilter = '';
-    const params = [`%${playerName}%`];
-    if (slateDate) {
-      dateFilter = 'AND game_date < ?';
-      params.push(slateDate);
+    let seasonStats, last3, last5;
+
+    if (DATABASE_TYPE === 'azuresql') {
+      // Build date filter for backtesting
+      let dateFilter = '';
+      const params = { playerName: `%${playerName}%` };
+      if (slateDate) {
+        dateFilter = 'AND game_date < @slateDate';
+        params.slateDate = slateDate;
+      }
+
+      // Get season stats
+      seasonStats = await db.get(`
+        SELECT
+          COUNT(*) as games,
+          AVG(dk_fantasy_points) as avg_dk,
+          AVG(minutes) as avg_min,
+          MIN(dk_fantasy_points) as floor,
+          MAX(dk_fantasy_points) as ceiling,
+          AVG(CASE WHEN is_home = 1 THEN dk_fantasy_points END) as home_avg,
+          AVG(CASE WHEN is_home = 0 THEN dk_fantasy_points END) as away_avg,
+          AVG(CASE WHEN is_back_to_back = 1 THEN dk_fantasy_points END) as b2b_avg,
+          AVG(CASE WHEN is_back_to_back = 0 THEN dk_fantasy_points END) as rested_avg
+        FROM historical_games
+        WHERE player_name LIKE @playerName ${dateFilter}
+      `, params);
+
+      // Get last 3 games
+      last3 = await db.get(`
+        SELECT AVG(dk_fantasy_points) as avg_dk, COUNT(*) as games
+        FROM (
+          SELECT TOP 3 dk_fantasy_points
+          FROM historical_games
+          WHERE player_name LIKE @playerName ${dateFilter}
+          ORDER BY game_date DESC
+        ) sub
+      `, params);
+
+      // Get last 5 games for trend calculation
+      last5 = await db.get(`
+        SELECT AVG(dk_fantasy_points) as avg_dk, COUNT(*) as games
+        FROM (
+          SELECT TOP 5 dk_fantasy_points
+          FROM historical_games
+          WHERE player_name LIKE @playerName ${dateFilter}
+          ORDER BY game_date DESC
+        ) sub
+      `, params);
+    } else {
+      // SQLite
+      let dateFilter = '';
+      const params = [`%${playerName}%`];
+      if (slateDate) {
+        dateFilter = 'AND game_date < ?';
+        params.push(slateDate);
+      }
+
+      // Get season stats
+      seasonStats = await db.get(`
+        SELECT
+          COUNT(*) as games,
+          AVG(dk_fantasy_points) as avg_dk,
+          AVG(minutes) as avg_min,
+          MIN(dk_fantasy_points) as floor,
+          MAX(dk_fantasy_points) as ceiling,
+          AVG(CASE WHEN is_home = 1 THEN dk_fantasy_points END) as home_avg,
+          AVG(CASE WHEN is_home = 0 THEN dk_fantasy_points END) as away_avg,
+          AVG(CASE WHEN is_back_to_back = 1 THEN dk_fantasy_points END) as b2b_avg,
+          AVG(CASE WHEN is_back_to_back = 0 THEN dk_fantasy_points END) as rested_avg
+        FROM historical_games
+        WHERE player_name LIKE ? ${dateFilter}
+      `, ...params);
+
+      // Get last 3 games
+      last3 = await db.get(`
+        SELECT AVG(dk_fantasy_points) as avg_dk, COUNT(*) as games
+        FROM (
+          SELECT dk_fantasy_points
+          FROM historical_games
+          WHERE player_name LIKE ? ${dateFilter}
+          ORDER BY game_date DESC
+          LIMIT 3
+        )
+      `, ...params);
+
+      // Get last 5 games for trend calculation
+      last5 = await db.get(`
+        SELECT AVG(dk_fantasy_points) as avg_dk, COUNT(*) as games
+        FROM (
+          SELECT dk_fantasy_points
+          FROM historical_games
+          WHERE player_name LIKE ? ${dateFilter}
+          ORDER BY game_date DESC
+          LIMIT 5
+        )
+      `, ...params);
     }
-
-    // Get season stats
-    const seasonStats = db.prepare(`
-      SELECT
-        COUNT(*) as games,
-        AVG(dk_fantasy_points) as avg_dk,
-        AVG(minutes) as avg_min,
-        MIN(dk_fantasy_points) as floor,
-        MAX(dk_fantasy_points) as ceiling,
-        AVG(CASE WHEN is_home = 1 THEN dk_fantasy_points END) as home_avg,
-        AVG(CASE WHEN is_home = 0 THEN dk_fantasy_points END) as away_avg,
-        AVG(CASE WHEN is_back_to_back = 1 THEN dk_fantasy_points END) as b2b_avg,
-        AVG(CASE WHEN is_back_to_back = 0 THEN dk_fantasy_points END) as rested_avg
-      FROM historical_games
-      WHERE player_name LIKE ? ${dateFilter}
-    `).get(...params);
-
-    // Get last 3 games
-    const last3 = db.prepare(`
-      SELECT AVG(dk_fantasy_points) as avg_dk, COUNT(*) as games
-      FROM (
-        SELECT dk_fantasy_points
-        FROM historical_games
-        WHERE player_name LIKE ? ${dateFilter}
-        ORDER BY game_date DESC
-        LIMIT 3
-      )
-    `).get(...params);
-
-    // Get last 5 games for trend calculation
-    const last5 = db.prepare(`
-      SELECT AVG(dk_fantasy_points) as avg_dk, COUNT(*) as games
-      FROM (
-        SELECT dk_fantasy_points
-        FROM historical_games
-        WHERE player_name LIKE ? ${dateFilter}
-        ORDER BY game_date DESC
-        LIMIT 5
-      )
-    `).get(...params);
 
     const result = {
       seasonAvg: seasonStats?.avg_dk || 0,
@@ -158,24 +210,46 @@ class ProjectionService {
   /**
    * Get matchup-specific history (player vs opponent)
    */
-  getMatchupHistory(playerName, opponent, slateDate = null) {
-    let dateFilter = '';
-    const params = [`%${playerName}%`, opponent];
-    if (slateDate) {
-      dateFilter = 'AND game_date < ?';
-      params.push(slateDate);
-    }
+  async getMatchupHistory(playerName, opponent, slateDate = null) {
+    let matchup;
 
-    const matchup = db.prepare(`
-      SELECT
-        COUNT(*) as games,
-        AVG(dk_fantasy_points) as avg_dk,
-        AVG(minutes) as avg_min,
-        MAX(dk_fantasy_points) as best,
-        MIN(dk_fantasy_points) as worst
-      FROM historical_games
-      WHERE player_name LIKE ? AND opponent = ? ${dateFilter}
-    `).get(...params);
+    if (DATABASE_TYPE === 'azuresql') {
+      let dateFilter = '';
+      const params = { playerName: `%${playerName}%`, opponent };
+      if (slateDate) {
+        dateFilter = 'AND game_date < @slateDate';
+        params.slateDate = slateDate;
+      }
+
+      matchup = await db.get(`
+        SELECT
+          COUNT(*) as games,
+          AVG(dk_fantasy_points) as avg_dk,
+          AVG(minutes) as avg_min,
+          MAX(dk_fantasy_points) as best,
+          MIN(dk_fantasy_points) as worst
+        FROM historical_games
+        WHERE player_name LIKE @playerName AND opponent = @opponent ${dateFilter}
+      `, params);
+    } else {
+      let dateFilter = '';
+      const params = [`%${playerName}%`, opponent];
+      if (slateDate) {
+        dateFilter = 'AND game_date < ?';
+        params.push(slateDate);
+      }
+
+      matchup = await db.get(`
+        SELECT
+          COUNT(*) as games,
+          AVG(dk_fantasy_points) as avg_dk,
+          AVG(minutes) as avg_min,
+          MAX(dk_fantasy_points) as best,
+          MIN(dk_fantasy_points) as worst
+        FROM historical_games
+        WHERE player_name LIKE ? AND opponent = ? ${dateFilter}
+      `, ...params);
+    }
 
     return {
       games: matchup?.games || 0,
@@ -190,28 +264,53 @@ class ProjectionService {
    * Detect if there's a usage bump opportunity for this player
    * Checks if any high-usage teammates are missing from the slate
    */
-  detectUsageBump(playerName, team, slateRoster, slateDate = null) {
+  async detectUsageBump(playerName, team, slateRoster, slateDate = null) {
     // Get historical regular players for this team
-    let dateFilter = '';
-    const params = [team];
-    if (slateDate) {
-      dateFilter = 'AND game_date < ?';
-      params.push(slateDate);
-    }
+    let historicalRoster;
 
-    const historicalRoster = db.prepare(`
-      SELECT
-        player_name,
-        COUNT(*) as games,
-        AVG(dk_fantasy_points) as avg_dk,
-        AVG(minutes) as avg_min
-      FROM historical_games
-      WHERE team = ? ${dateFilter}
-        AND game_date >= date('now', '-30 days')
-      GROUP BY player_name
-      HAVING games >= 3 AND avg_dk >= 25
-      ORDER BY avg_dk DESC
-    `).all(...params);
+    if (DATABASE_TYPE === 'azuresql') {
+      let dateFilter = '';
+      const params = { team };
+      if (slateDate) {
+        dateFilter = 'AND game_date < @slateDate';
+        params.slateDate = slateDate;
+      }
+
+      historicalRoster = await db.all(`
+        SELECT
+          player_name,
+          COUNT(*) as games,
+          AVG(dk_fantasy_points) as avg_dk,
+          AVG(minutes) as avg_min
+        FROM historical_games
+        WHERE team = @team ${dateFilter}
+          AND game_date >= DATEADD(day, -30, GETDATE())
+        GROUP BY player_name
+        HAVING COUNT(*) >= 3 AND AVG(dk_fantasy_points) >= 25
+        ORDER BY avg_dk DESC
+      `, params);
+    } else {
+      let dateFilter = '';
+      const params = [team];
+      if (slateDate) {
+        dateFilter = 'AND game_date < ?';
+        params.push(slateDate);
+      }
+
+      historicalRoster = await db.all(`
+        SELECT
+          player_name,
+          COUNT(*) as games,
+          AVG(dk_fantasy_points) as avg_dk,
+          AVG(minutes) as avg_min
+        FROM historical_games
+        WHERE team = ? ${dateFilter}
+          AND game_date >= date('now', '-30 days')
+        GROUP BY player_name
+        HAVING games >= 3 AND avg_dk >= 25
+        ORDER BY avg_dk DESC
+      `, ...params);
+    }
 
     // Find missing high-usage players
     const missingPlayers = historicalRoster.filter(histPlayer => {
@@ -234,52 +333,88 @@ class ProjectionService {
     }
 
     // Calculate usage bump for this player when missing players are out
-    const playerNameNorm = this.normalizeName(playerName);
     let totalBump = 0;
     let bumpCount = 0;
     const bumpDetails = [];
 
     for (const missingPlayer of missingPlayers) {
       // Get games where missing player didn't play
-      const gamesWithoutParams = [team, missingPlayer.player_name, team];
-      if (slateDate) {
-        gamesWithoutParams.push(slateDate);
-      }
+      let gamesWithout;
 
-      const gamesWithout = db.prepare(`
-        SELECT DISTINCT game_date
-        FROM historical_games
-        WHERE team = ?
-          AND game_date NOT IN (
-            SELECT game_date FROM historical_games
-            WHERE player_name = ? AND team = ? AND minutes > 5
-          )
-          ${slateDate ? 'AND game_date < ?' : ''}
-        ORDER BY game_date DESC
-        LIMIT 15
-      `).all(...gamesWithoutParams);
+      if (DATABASE_TYPE === 'azuresql') {
+        let dateFilter = slateDate ? 'AND game_date < @slateDate' : '';
+        gamesWithout = await db.all(`
+          SELECT DISTINCT TOP 15 game_date
+          FROM historical_games
+          WHERE team = @team
+            AND game_date NOT IN (
+              SELECT game_date FROM historical_games
+              WHERE player_name = @missingPlayer AND team = @team AND minutes > 5
+            )
+            ${dateFilter}
+          ORDER BY game_date DESC
+        `, { team, missingPlayer: missingPlayer.player_name, slateDate });
+      } else {
+        let dateFilter = slateDate ? 'AND game_date < ?' : '';
+        const params = [team, missingPlayer.player_name, team];
+        if (slateDate) params.push(slateDate);
+
+        gamesWithout = await db.all(`
+          SELECT DISTINCT game_date
+          FROM historical_games
+          WHERE team = ?
+            AND game_date NOT IN (
+              SELECT game_date FROM historical_games
+              WHERE player_name = ? AND team = ? AND minutes > 5
+            )
+            ${dateFilter}
+          ORDER BY game_date DESC
+          LIMIT 15
+        `, ...params);
+      }
 
       if (gamesWithout.length < 2) continue;
 
       const gameDatesWithout = gamesWithout.map(g => g.game_date);
 
       // Get this player's stats when missing player is OUT
-      const statsWithoutParams = [`%${playerName}%`, team, ...gameDatesWithout];
-      const statsWithout = db.prepare(`
-        SELECT AVG(dk_fantasy_points) as avg_dk, COUNT(*) as games
-        FROM historical_games
-        WHERE player_name LIKE ? AND team = ?
-          AND game_date IN (${gameDatesWithout.map(() => '?').join(',')})
-      `).get(...statsWithoutParams);
+      let statsWithout, statsWith;
 
-      // Get stats when missing player is IN
-      const statsWithParams = [`%${playerName}%`, team, ...gameDatesWithout];
-      const statsWith = db.prepare(`
-        SELECT AVG(dk_fantasy_points) as avg_dk, COUNT(*) as games
-        FROM historical_games
-        WHERE player_name LIKE ? AND team = ?
-          AND game_date NOT IN (${gameDatesWithout.map(() => '?').join(',')})
-      `).get(...statsWithParams);
+      if (DATABASE_TYPE === 'azuresql') {
+        const placeholders = gameDatesWithout.map((_, i) => `@date${i}`).join(',');
+        const dateParams = {};
+        gameDatesWithout.forEach((d, i) => dateParams[`date${i}`] = d);
+
+        statsWithout = await db.get(`
+          SELECT AVG(dk_fantasy_points) as avg_dk, COUNT(*) as games
+          FROM historical_games
+          WHERE player_name LIKE @playerName AND team = @team
+            AND game_date IN (${placeholders})
+        `, { playerName: `%${playerName}%`, team, ...dateParams });
+
+        statsWith = await db.get(`
+          SELECT AVG(dk_fantasy_points) as avg_dk, COUNT(*) as games
+          FROM historical_games
+          WHERE player_name LIKE @playerName AND team = @team
+            AND game_date NOT IN (${placeholders})
+        `, { playerName: `%${playerName}%`, team, ...dateParams });
+      } else {
+        const placeholders = gameDatesWithout.map(() => '?').join(',');
+
+        statsWithout = await db.get(`
+          SELECT AVG(dk_fantasy_points) as avg_dk, COUNT(*) as games
+          FROM historical_games
+          WHERE player_name LIKE ? AND team = ?
+            AND game_date IN (${placeholders})
+        `, `%${playerName}%`, team, ...gameDatesWithout);
+
+        statsWith = await db.get(`
+          SELECT AVG(dk_fantasy_points) as avg_dk, COUNT(*) as games
+          FROM historical_games
+          WHERE player_name LIKE ? AND team = ?
+            AND game_date NOT IN (${placeholders})
+        `, `%${playerName}%`, team, ...gameDatesWithout);
+      }
 
       if (statsWithout?.games >= 2 && statsWith?.games >= 3 && statsWithout.avg_dk && statsWith.avg_dk) {
         const pctBump = ((statsWithout.avg_dk - statsWith.avg_dk) / statsWith.avg_dk) * 100;
@@ -320,9 +455,9 @@ class ProjectionService {
   /**
    * Load defense rankings into memory
    */
-  loadDefenseRankings() {
+  async loadDefenseRankings() {
     if (!this.defenseRankings) {
-      const rankings = teamDefenseModel.getAll();
+      const rankings = await teamDefenseModel.getAll();
       this.defenseRankings = {};
       for (const team of rankings) {
         this.defenseRankings[team.team] = team;
@@ -335,9 +470,9 @@ class ProjectionService {
   /**
    * Load position defense data into memory
    */
-  loadPositionDefenseData() {
+  async loadPositionDefenseData() {
     if (!this.positionDefenseData) {
-      const allData = teamDefenseVsPositionModel.getAll();
+      const allData = await teamDefenseVsPositionModel.getAll();
       this.positionDefenseData = {};
       for (const data of allData) {
         const key = `${data.team}_${data.position}`;
@@ -379,7 +514,7 @@ class ProjectionService {
    * @param {boolean} options.isHome - Whether player is at home
    * @param {boolean} options.isB2B - Whether this is a back-to-back game
    */
-  calculateEnhancedProjection(player, options = {}) {
+  async calculateEnhancedProjection(player, options = {}) {
     const {
       name,
       rotowire_projection,
@@ -403,17 +538,17 @@ class ProjectionService {
     const rotowireBaseline = rotowire_projection || projected_points || 0;
 
     // Get historical data
-    const historical = this.getPlayerHistoricalStats(name, slateDate);
-    const matchup = opponent ? this.getMatchupHistory(name, opponent, slateDate) : { games: 0, avgDk: 0 };
+    const historical = await this.getPlayerHistoricalStats(name, slateDate);
+    const matchup = opponent ? await this.getMatchupHistory(name, opponent, slateDate) : { games: 0, avgDk: 0 };
 
     // Detect usage bump opportunity
     const usageBump = slateRoster.length > 0
-      ? this.detectUsageBump(name, team, slateRoster, slateDate)
+      ? await this.detectUsageBump(name, team, slateRoster, slateDate)
       : { hasUsageBump: false, bump: 0, missingPlayers: [] };
 
     // If no historical data, fall back to original method
     if (historical.seasonGames < 3) {
-      const fallback = this.calculateAdjustedProjection(player);
+      const fallback = await this.calculateAdjustedProjection(player);
       return {
         ...fallback,
         enhanced: false,
@@ -513,8 +648,8 @@ class ProjectionService {
     }
 
     // 5. Defense/DVP/Pace/Vegas adjustments (from original method)
-    this.loadDefenseRankings();
-    this.loadPositionDefenseData();
+    await this.loadDefenseRankings();
+    await this.loadPositionDefenseData();
 
     adjustments.defense = this.getDefenseAdjustment(opponent, opp_def_eff);
     adjustments.dvp = this.getDvpAdjustment(opponent, position, dvp_pts_allowed);
@@ -590,7 +725,7 @@ class ProjectionService {
   /**
    * Batch calculate enhanced projections for all players in a slate
    */
-  calculateSlateEnhancedProjections(players, slateDate = null) {
+  async calculateSlateEnhancedProjections(players, slateDate = null) {
     console.log(`\n🧠 Calculating ENHANCED projections for ${players.length} players...`);
 
     // Build slate roster for usage bump detection
@@ -617,7 +752,7 @@ class ProjectionService {
       const isHome = player.is_home === 1 || player.is_home === true;
       const isB2B = player.rest_days === 0;
 
-      const result = this.calculateEnhancedProjection(player, {
+      const result = await this.calculateEnhancedProjection(player, {
         slateRoster,
         slateDate,
         isHome,
@@ -659,7 +794,7 @@ class ProjectionService {
    * @param {Object} player - Player data with RotoWire projection and matchup info
    * @returns {Object} - Adjusted projection with breakdown of factors
    */
-  calculateAdjustedProjection(player) {
+  async calculateAdjustedProjection(player) {
     const {
       name,
       rotowire_projection,  // Base projection from RotoWire
@@ -689,8 +824,8 @@ class ProjectionService {
     }
 
     // Load defense data
-    this.loadDefenseRankings();
-    this.loadPositionDefenseData();
+    await this.loadDefenseRankings();
+    await this.loadPositionDefenseData();
 
     // Calculate each adjustment
     const adjustments = {};
@@ -752,7 +887,7 @@ class ProjectionService {
 
     // Fallback: lookup from rankings
     const normalizedTeam = normalizeForRankings(opponent);
-    const rankings = this.loadDefenseRankings();
+    const rankings = this.defenseRankings || {};
     const oppDefense = rankings[normalizedTeam];
 
     if (!oppDefense || !oppDefense.def_eff) {
@@ -783,7 +918,7 @@ class ProjectionService {
 
     // Fallback: lookup from position defense data
     const normalizedTeam = normalizeForVsPosition(opponent);
-    const positionData = this.loadPositionDefenseData();
+    const positionData = this.positionDefenseData || {};
     const key = `${normalizedTeam}_${primaryPosition}`;
     const defenseVsPos = positionData[key];
 
@@ -800,7 +935,7 @@ class ProjectionService {
    * Combined pace of both teams affects fantasy opportunity
    */
   getPaceAdjustment(opponent, playerTeam) {
-    const rankings = this.loadDefenseRankings();
+    const rankings = this.defenseRankings || {};
 
     const normalizedOpp = normalizeForRankings(opponent);
     const normalizedTeam = normalizeForRankings(playerTeam);
@@ -907,7 +1042,7 @@ class ProjectionService {
   /**
    * Batch calculate projections for all players in a slate
    */
-  calculateSlateProjections(players) {
+  async calculateSlateProjections(players) {
     console.log(`\n🧮 Calculating adjusted projections for ${players.length} players...`);
 
     const results = [];
@@ -916,7 +1051,7 @@ class ProjectionService {
     let adjustedDown = 0;
 
     for (const player of players) {
-      const result = this.calculateAdjustedProjection(player);
+      const result = await this.calculateAdjustedProjection(player);
 
       results.push({
         ...player,

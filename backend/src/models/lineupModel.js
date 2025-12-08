@@ -1,38 +1,60 @@
-import db from '../config/database.js';
+import db, { DATABASE_TYPE } from '../config/database.js';
 
 class LineupModel {
-  create(lineupData) {
-    const stmt = db.prepare(`
-      INSERT INTO lineups (slate_id, name, total_salary, projected_points)
-      VALUES (?, ?, ?, ?)
-    `);
-
-    const result = stmt.run(
-      lineupData.slateId,
-      lineupData.name,
-      lineupData.totalSalary,
-      lineupData.projectedPoints
-    );
-
-    return result.lastInsertRowid;
+  async create(lineupData) {
+    if (DATABASE_TYPE === 'azuresql') {
+      // Azure SQL: Use OUTPUT to get the inserted ID
+      const result = await db.get(`
+        INSERT INTO lineups (slate_id, name, total_salary, projected_points)
+        OUTPUT INSERTED.id
+        VALUES (@slateId, @name, @totalSalary, @projectedPoints)
+      `, {
+        slateId: lineupData.slateId,
+        name: lineupData.name,
+        totalSalary: lineupData.totalSalary,
+        projectedPoints: lineupData.projectedPoints
+      });
+      return result?.id;
+    } else {
+      const result = await db.run(`
+        INSERT INTO lineups (slate_id, name, total_salary, projected_points)
+        VALUES (?, ?, ?, ?)
+      `,
+        lineupData.slateId,
+        lineupData.name,
+        lineupData.totalSalary,
+        lineupData.projectedPoints
+      );
+      return result.lastInsertRowid;
+    }
   }
 
-  addPlayers(lineupId, players) {
-    const insertPlayer = db.prepare(`
-      INSERT INTO lineup_players (lineup_id, player_id, position_slot)
-      VALUES (?, ?, ?)
-    `);
-
-    const insertMany = db.transaction((playersData) => {
-      for (const player of playersData) {
-        insertPlayer.run(lineupId, player.playerId, player.positionSlot);
+  async addPlayers(lineupId, players) {
+    if (DATABASE_TYPE === 'azuresql') {
+      for (const player of players) {
+        await db.run(`
+          INSERT INTO lineup_players (lineup_id, player_id, position_slot)
+          VALUES (@lineupId, @playerId, @positionSlot)
+        `, {
+          lineupId,
+          playerId: player.playerId,
+          positionSlot: player.positionSlot
+        });
       }
-    });
-
-    insertMany(players);
+    } else {
+      const insertMany = db.transaction((playersData) => {
+        for (const player of playersData) {
+          db.run(`
+            INSERT INTO lineup_players (lineup_id, player_id, position_slot)
+            VALUES (?, ?, ?)
+          `, lineupId, player.playerId, player.positionSlot);
+        }
+      });
+      insertMany(players);
+    }
   }
 
-  getAll(slateId = null) {
+  async getAll(slateId = null) {
     let query = `
       SELECT
         l.*,
@@ -49,17 +71,15 @@ class LineupModel {
 
     query += ` GROUP BY l.id ORDER BY l.created_at DESC`;
 
-    const stmt = db.prepare(query);
-    return stmt.all(...params);
+    return db.all(query, ...params);
   }
 
-  getById(id) {
-    const lineupStmt = db.prepare(`SELECT * FROM lineups WHERE id = ?`);
-    const lineup = lineupStmt.get(id);
+  async getById(id) {
+    const lineup = await db.get(`SELECT * FROM lineups WHERE id = ?`, id);
 
     if (!lineup) return null;
 
-    const playersStmt = db.prepare(`
+    lineup.players = await db.all(`
       SELECT
         lp.position_slot,
         p.*
@@ -67,30 +87,39 @@ class LineupModel {
       JOIN players p ON lp.player_id = p.id
       WHERE lp.lineup_id = ?
       ORDER BY lp.position_slot
-    `);
+    `, id);
 
-    lineup.players = playersStmt.all(id);
     return lineup;
   }
 
-  update(id, lineupData) {
-    const stmt = db.prepare(`
-      UPDATE lineups
-      SET name = ?, total_salary = ?, projected_points = ?, updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `);
-
-    return stmt.run(
-      lineupData.name,
-      lineupData.totalSalary,
-      lineupData.projectedPoints,
-      id
-    );
+  async update(id, lineupData) {
+    if (DATABASE_TYPE === 'azuresql') {
+      return db.run(`
+        UPDATE lineups
+        SET name = @name, total_salary = @totalSalary, projected_points = @projectedPoints, updated_at = GETDATE()
+        WHERE id = @id
+      `, {
+        name: lineupData.name,
+        totalSalary: lineupData.totalSalary,
+        projectedPoints: lineupData.projectedPoints,
+        id
+      });
+    } else {
+      return db.run(`
+        UPDATE lineups
+        SET name = ?, total_salary = ?, projected_points = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `,
+        lineupData.name,
+        lineupData.totalSalary,
+        lineupData.projectedPoints,
+        id
+      );
+    }
   }
 
-  delete(id) {
-    const stmt = db.prepare(`DELETE FROM lineups WHERE id = ?`);
-    return stmt.run(id);
+  async delete(id) {
+    return db.run(`DELETE FROM lineups WHERE id = ?`, id);
   }
 }
 

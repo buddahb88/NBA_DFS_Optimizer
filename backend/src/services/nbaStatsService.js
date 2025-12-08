@@ -10,6 +10,8 @@ import axios from 'axios';
 import pLimit from 'p-limit';
 import db from '../config/database.js';
 
+const DATABASE_TYPE = process.env.DATABASE_TYPE || 'sqlite';
+
 class NBAStatsService {
   constructor() {
     // NBA.com stats API endpoints
@@ -267,28 +269,39 @@ class NBAStatsService {
   /**
    * Bulk insert games into database
    */
-  bulkInsertGames(games) {
+  async bulkInsertGames(games) {
     if (games.length === 0) return 0;
 
-    const stmt = db.prepare(`
-      INSERT OR REPLACE INTO historical_games (
-        player_id, player_name, team, opponent, position, game_id, game_date, season, is_home,
-        minutes, points, rebounds, assists, steals, blocks, turnovers,
-        fg_made, fg_attempted, fg3_made, fg3_attempted, ft_made, ft_attempted,
-        oreb, dreb, plus_minus, dk_fantasy_points, rest_days, is_back_to_back
-      ) VALUES (
-        @player_id, @player_name, @team, @opponent, @position, @game_id, @game_date, @season, @is_home,
-        @minutes, @points, @rebounds, @assists, @steals, @blocks, @turnovers,
-        @fg_made, @fg_attempted, @fg3_made, @fg3_attempted, @ft_made, @ft_attempted,
-        @oreb, @dreb, @plus_minus, @dk_fantasy_points, @rest_days, @is_back_to_back
-      )
-    `);
+    let inserted = 0;
 
-    const insertMany = db.transaction((gameList) => {
-      let inserted = 0;
-      for (const game of gameList) {
+    if (DATABASE_TYPE === 'azuresql') {
+      // Azure SQL: Use individual MERGE statements (no transactions needed for simple inserts)
+      for (const game of games) {
         try {
-          stmt.run({
+          await db.run(`
+            MERGE INTO historical_games AS target
+            USING (SELECT @player_id AS player_id, @game_id AS game_id) AS source
+            ON target.player_id = source.player_id AND target.game_id = source.game_id
+            WHEN MATCHED THEN
+              UPDATE SET
+                player_name = @player_name, team = @team, opponent = @opponent, position = @position,
+                game_date = @game_date, season = @season, is_home = @is_home,
+                minutes = @minutes, points = @points, rebounds = @rebounds, assists = @assists,
+                steals = @steals, blocks = @blocks, turnovers = @turnovers,
+                fg_made = @fg_made, fg_attempted = @fg_attempted, fg3_made = @fg3_made,
+                fg3_attempted = @fg3_attempted, ft_made = @ft_made, ft_attempted = @ft_attempted,
+                oreb = @oreb, dreb = @dreb, plus_minus = @plus_minus,
+                dk_fantasy_points = @dk_fantasy_points, rest_days = @rest_days, is_back_to_back = @is_back_to_back
+            WHEN NOT MATCHED THEN
+              INSERT (player_id, player_name, team, opponent, position, game_id, game_date, season, is_home,
+                      minutes, points, rebounds, assists, steals, blocks, turnovers,
+                      fg_made, fg_attempted, fg3_made, fg3_attempted, ft_made, ft_attempted,
+                      oreb, dreb, plus_minus, dk_fantasy_points, rest_days, is_back_to_back)
+              VALUES (@player_id, @player_name, @team, @opponent, @position, @game_id, @game_date, @season, @is_home,
+                      @minutes, @points, @rebounds, @assists, @steals, @blocks, @turnovers,
+                      @fg_made, @fg_attempted, @fg3_made, @fg3_attempted, @ft_made, @ft_attempted,
+                      @oreb, @dreb, @plus_minus, @dk_fantasy_points, @rest_days, @is_back_to_back);
+          `, {
             player_id: game.player_id,
             player_name: game.player_name,
             team: game.team,
@@ -320,17 +333,76 @@ class NBAStatsService {
           });
           inserted++;
         } catch (e) {
-          // Log the first few errors to help debug
           if (inserted === 0) {
             console.error(`❌ Insert error for ${game.player_name}:`, e.message);
-            console.error('Game data:', JSON.stringify(game, null, 2));
           }
         }
       }
-      return inserted;
-    });
+    } else {
+      // SQLite: Use transaction with prepared statement
+      const stmt = db.prepare(`
+        INSERT OR REPLACE INTO historical_games (
+          player_id, player_name, team, opponent, position, game_id, game_date, season, is_home,
+          minutes, points, rebounds, assists, steals, blocks, turnovers,
+          fg_made, fg_attempted, fg3_made, fg3_attempted, ft_made, ft_attempted,
+          oreb, dreb, plus_minus, dk_fantasy_points, rest_days, is_back_to_back
+        ) VALUES (
+          @player_id, @player_name, @team, @opponent, @position, @game_id, @game_date, @season, @is_home,
+          @minutes, @points, @rebounds, @assists, @steals, @blocks, @turnovers,
+          @fg_made, @fg_attempted, @fg3_made, @fg3_attempted, @ft_made, @ft_attempted,
+          @oreb, @dreb, @plus_minus, @dk_fantasy_points, @rest_days, @is_back_to_back
+        )
+      `);
 
-    return insertMany(games);
+      const insertMany = db.transaction((gameList) => {
+        let count = 0;
+        for (const game of gameList) {
+          try {
+            stmt.run({
+              player_id: game.player_id,
+              player_name: game.player_name,
+              team: game.team,
+              opponent: game.opponent,
+              position: game.position || null,
+              game_id: game.game_id,
+              game_date: game.game_date,
+              season: game.season,
+              is_home: game.is_home,
+              minutes: game.minutes,
+              points: game.points,
+              rebounds: game.rebounds,
+              assists: game.assists,
+              steals: game.steals,
+              blocks: game.blocks,
+              turnovers: game.turnovers,
+              fg_made: game.fg_made,
+              fg_attempted: game.fg_attempted,
+              fg3_made: game.fg3_made,
+              fg3_attempted: game.fg3_attempted,
+              ft_made: game.ft_made,
+              ft_attempted: game.ft_attempted,
+              oreb: game.oreb,
+              dreb: game.dreb,
+              plus_minus: game.plus_minus,
+              dk_fantasy_points: game.dk_fantasy_points,
+              rest_days: game.rest_days || null,
+              is_back_to_back: game.is_back_to_back || 0
+            });
+            count++;
+          } catch (e) {
+            if (count === 0) {
+              console.error(`❌ Insert error for ${game.player_name}:`, e.message);
+              console.error('Game data:', JSON.stringify(game, null, 2));
+            }
+          }
+        }
+        return count;
+      });
+
+      inserted = insertMany(games);
+    }
+
+    return inserted;
   }
 
   /**
@@ -381,7 +453,7 @@ class NBAStatsService {
 
         if (games.length > 0) {
           const gamesWithRest = this.calculateRestDays(games);
-          const inserted = this.bulkInsertGames(gamesWithRest);
+          const inserted = await this.bulkInsertGames(gamesWithRest);
           totalGames += inserted;
           console.log(`✅ ${player.name}: ${games.length} fetched, ${inserted} inserted`);
         }
@@ -422,24 +494,24 @@ class NBAStatsService {
    * @param {string} startDate - Optional start date filter (YYYY-MM-DD)
    * @param {string} endDate - Optional end date filter (YYYY-MM-DD)
    */
-  getHistoricalSummary(startDate = null, endDate = null) {
+  async getHistoricalSummary(startDate = null, endDate = null) {
     let whereClause = '';
     const params = [];
 
     if (startDate || endDate) {
       const conditions = [];
       if (startDate) {
-        conditions.push('game_date >= ?');
+        conditions.push(DATABASE_TYPE === 'azuresql' ? 'game_date >= @startDate' : 'game_date >= ?');
         params.push(startDate);
       }
       if (endDate) {
-        conditions.push('game_date <= ?');
+        conditions.push(DATABASE_TYPE === 'azuresql' ? 'game_date <= @endDate' : 'game_date <= ?');
         params.push(endDate);
       }
       whereClause = 'WHERE ' + conditions.join(' AND ');
     }
 
-    const summary = db.prepare(`
+    const query = `
       SELECT
         COUNT(*) as total_games,
         COUNT(DISTINCT player_name) as unique_players,
@@ -450,49 +522,65 @@ class NBAStatsService {
         AVG(minutes) as avg_minutes
       FROM historical_games
       ${whereClause}
-    `).get(...params);
+    `;
 
-    return summary;
+    if (DATABASE_TYPE === 'azuresql') {
+      const namedParams = {};
+      if (startDate) namedParams.startDate = startDate;
+      if (endDate) namedParams.endDate = endDate;
+      return await db.get(query, namedParams);
+    } else {
+      return await db.get(query, ...params);
+    }
   }
 
   /**
    * Get player historical performance for AI analysis
    */
-  getPlayerHistory(playerName, limit = 20) {
-    const games = db.prepare(`
+  async getPlayerHistory(playerName, limit = 20) {
+    const query = `
       SELECT
         game_date, opponent, is_home, minutes, points, rebounds, assists,
         steals, blocks, turnovers, dk_fantasy_points, rest_days, is_back_to_back
       FROM historical_games
-      WHERE player_name LIKE ?
+      WHERE player_name LIKE ${DATABASE_TYPE === 'azuresql' ? '@playerName' : '?'}
       ORDER BY game_date DESC
-      LIMIT ?
-    `).all(`%${playerName}%`, limit);
+      ${DATABASE_TYPE === 'azuresql' ? 'OFFSET 0 ROWS FETCH NEXT @limit ROWS ONLY' : 'LIMIT ?'}
+    `;
 
-    return games;
+    if (DATABASE_TYPE === 'azuresql') {
+      return await db.all(query, { playerName: `%${playerName}%`, limit });
+    } else {
+      return await db.all(query, `%${playerName}%`, limit);
+    }
   }
 
   /**
    * Get matchup history (player vs specific team)
    */
-  getMatchupHistory(playerName, opponent) {
-    const games = db.prepare(`
+  async getMatchupHistory(playerName, opponent) {
+    const query = `
       SELECT
         game_date, is_home, minutes, points, rebounds, assists,
         steals, blocks, turnovers, dk_fantasy_points
       FROM historical_games
-      WHERE player_name LIKE ? AND opponent = ?
+      WHERE player_name LIKE ${DATABASE_TYPE === 'azuresql' ? '@playerName' : '?'}
+        AND opponent = ${DATABASE_TYPE === 'azuresql' ? '@opponent' : '?'}
       ORDER BY game_date DESC
-    `).all(`%${playerName}%`, opponent);
+    `;
 
-    return games;
+    if (DATABASE_TYPE === 'azuresql') {
+      return await db.all(query, { playerName: `%${playerName}%`, opponent });
+    } else {
+      return await db.all(query, `%${playerName}%`, opponent);
+    }
   }
 
   /**
    * Get performance trends (for ML features)
    */
-  getPerformanceTrends(playerName) {
-    const trends = db.prepare(`
+  async getPerformanceTrends(playerName) {
+    const query = `
       SELECT
         AVG(dk_fantasy_points) as avg_dk_pts,
         AVG(CASE WHEN is_back_to_back = 1 THEN dk_fantasy_points END) as avg_b2b_pts,
@@ -504,10 +592,14 @@ class NBAStatsService {
         MAX(dk_fantasy_points) as ceiling,
         MIN(dk_fantasy_points) as floor
       FROM historical_games
-      WHERE player_name LIKE ?
-    `).get(`%${playerName}%`);
+      WHERE player_name LIKE ${DATABASE_TYPE === 'azuresql' ? '@playerName' : '?'}
+    `;
 
-    return trends;
+    if (DATABASE_TYPE === 'azuresql') {
+      return await db.get(query, { playerName: `%${playerName}%` });
+    } else {
+      return await db.get(query, `%${playerName}%`);
+    }
   }
 
   /**
@@ -517,24 +609,21 @@ class NBAStatsService {
    * @param {string} startDate - Optional start date filter (YYYY-MM-DD)
    * @param {string} endDate - Optional end date filter (YYYY-MM-DD)
    */
-  getTopPerformers(limit = 20, minGames = 10, startDate = null, endDate = null) {
+  async getTopPerformers(limit = 20, minGames = 10, startDate = null, endDate = null) {
     let whereClause = '';
-    const params = [];
+    const conditions = [];
 
-    if (startDate || endDate) {
-      const conditions = [];
-      if (startDate) {
-        conditions.push('game_date >= ?');
-        params.push(startDate);
-      }
-      if (endDate) {
-        conditions.push('game_date <= ?');
-        params.push(endDate);
-      }
+    if (startDate) {
+      conditions.push(DATABASE_TYPE === 'azuresql' ? 'game_date >= @startDate' : 'game_date >= ?');
+    }
+    if (endDate) {
+      conditions.push(DATABASE_TYPE === 'azuresql' ? 'game_date <= @endDate' : 'game_date <= ?');
+    }
+    if (conditions.length > 0) {
       whereClause = 'WHERE ' + conditions.join(' AND ');
     }
 
-    const performers = db.prepare(`
+    const query = `
       SELECT
         player_name,
         team,
@@ -545,20 +634,31 @@ class NBAStatsService {
         MIN(dk_fantasy_points) as worst_game
       FROM historical_games
       ${whereClause}
-      GROUP BY player_name
-      HAVING games >= ?
+      GROUP BY player_name, team
+      HAVING COUNT(*) >= ${DATABASE_TYPE === 'azuresql' ? '@minGames' : '?'}
       ORDER BY avg_dk_pts DESC
-      LIMIT ?
-    `).all(...params, minGames, limit);
+      ${DATABASE_TYPE === 'azuresql' ? 'OFFSET 0 ROWS FETCH NEXT @limit ROWS ONLY' : 'LIMIT ?'}
+    `;
 
-    return performers;
+    if (DATABASE_TYPE === 'azuresql') {
+      const params = { minGames, limit };
+      if (startDate) params.startDate = startDate;
+      if (endDate) params.endDate = endDate;
+      return await db.all(query, params);
+    } else {
+      const params = [];
+      if (startDate) params.push(startDate);
+      if (endDate) params.push(endDate);
+      params.push(minGames, limit);
+      return await db.all(query, ...params);
+    }
   }
 
   /**
    * Analyze back-to-back impact across all players
    */
-  analyzeB2BImpact() {
-    const analysis = db.prepare(`
+  async analyzeB2BImpact() {
+    const query = `
       SELECT
         CASE WHEN is_back_to_back = 1 THEN 'B2B' ELSE 'Rested' END as rest_status,
         COUNT(*) as games,
@@ -567,18 +667,19 @@ class NBAStatsService {
         ROUND(AVG(points), 2) as avg_points
       FROM historical_games
       GROUP BY is_back_to_back
-    `).all();
+    `;
 
-    return analysis;
+    return await db.all(query);
   }
 
   /**
    * Get player's performance when a specific teammate is OUT
    * Compares their stats in games where teammate played vs didn't play
    */
-  getUsageWithoutTeammate(playerName, teammateName, team = null) {
-    // First find games where both players were on the same team
-    // Then compare player's stats when teammate played (minutes > 0) vs didn't play (no record or 0 min)
+  async getUsageWithoutTeammate(playerName, teammateName, team = null) {
+    const teamCondition = team
+      ? (DATABASE_TYPE === 'azuresql' ? 'AND team = @team' : 'AND team = ?')
+      : '';
 
     const query = `
       WITH player_games AS (
@@ -593,16 +694,16 @@ class NBAStatsService {
           rebounds,
           assists
         FROM historical_games
-        WHERE player_name LIKE ?
-        ${team ? 'AND team = ?' : ''}
+        WHERE player_name LIKE ${DATABASE_TYPE === 'azuresql' ? '@playerName' : '?'}
+        ${teamCondition}
       ),
       teammate_games AS (
         SELECT
           game_id,
           minutes as teammate_minutes
         FROM historical_games
-        WHERE player_name LIKE ?
-        ${team ? 'AND team = ?' : ''}
+        WHERE player_name LIKE ${DATABASE_TYPE === 'azuresql' ? '@teammateName' : '?'}
+        ${teamCondition}
       )
       SELECT
         pg.game_id,
@@ -621,11 +722,17 @@ class NBAStatsService {
       ORDER BY pg.game_date DESC
     `;
 
-    const params = team
-      ? [`%${playerName}%`, team, `%${teammateName}%`, team]
-      : [`%${playerName}%`, `%${teammateName}%`];
-
-    const games = db.prepare(query).all(...params);
+    let games;
+    if (DATABASE_TYPE === 'azuresql') {
+      const params = { playerName: `%${playerName}%`, teammateName: `%${teammateName}%` };
+      if (team) params.team = team;
+      games = await db.all(query, params);
+    } else {
+      const params = team
+        ? [`%${playerName}%`, team, `%${teammateName}%`, team]
+        : [`%${playerName}%`, `%${teammateName}%`];
+      games = await db.all(query, ...params);
+    }
 
     if (games.length === 0) {
       return { success: false, message: 'No games found for this player/teammate combination' };
@@ -684,34 +791,37 @@ class NBAStatsService {
    * Analyze roster context - find historical games with similar active roster
    * Given a list of active players for tonight, find games where similar combinations played
    */
-  analyzeRosterContext(team, activePlayers, absentPlayers = []) {
+  async analyzeRosterContext(team, activePlayers, absentPlayers = []) {
     // Get all games for this team
-    const teamGames = db.prepare(`
+    const teamGames = await db.all(`
       SELECT DISTINCT game_id, game_date
       FROM historical_games
-      WHERE team = ?
+      WHERE team = ${DATABASE_TYPE === 'azuresql' ? '@team' : '?'}
       ORDER BY game_date DESC
-    `).all(team);
+    `, DATABASE_TYPE === 'azuresql' ? { team } : team);
 
     if (teamGames.length === 0) {
       return { success: false, message: `No historical games found for ${team}` };
     }
 
     // For each game, determine which players played
-    const gameRosters = teamGames.map(game => {
-      const players = db.prepare(`
+    const gameRosters = [];
+    for (const game of teamGames) {
+      const players = await db.all(`
         SELECT player_name, minutes, dk_fantasy_points
         FROM historical_games
-        WHERE team = ? AND game_id = ? AND minutes > 0
-      `).all(team, game.game_id);
+        WHERE team = ${DATABASE_TYPE === 'azuresql' ? '@team' : '?'}
+          AND game_id = ${DATABASE_TYPE === 'azuresql' ? '@gameId' : '?'}
+          AND minutes > 0
+      `, DATABASE_TYPE === 'azuresql' ? { team, gameId: game.game_id } : team, game.game_id);
 
-      return {
+      gameRosters.push({
         game_id: game.game_id,
         game_date: game.game_date,
         activePlayers: players.map(p => p.player_name),
         playerStats: players
-      };
-    });
+      });
+    }
 
     // Find games where absent players didn't play (or played 0 minutes)
     // This simulates "tonight's scenario"
@@ -761,18 +871,19 @@ class NBAStatsService {
 
     // Get overall averages for comparison
     const playerOverallStats = {};
-    Object.keys(playerBoosts).forEach(playerName => {
-      const overall = db.prepare(`
+    for (const playerName of Object.keys(playerBoosts)) {
+      const overall = await db.get(`
         SELECT
           AVG(dk_fantasy_points) as avg_dk,
           AVG(minutes) as avg_min,
           COUNT(*) as total_games
         FROM historical_games
-        WHERE player_name = ? AND team = ?
-      `).get(playerName, team);
+        WHERE player_name = ${DATABASE_TYPE === 'azuresql' ? '@playerName' : '?'}
+          AND team = ${DATABASE_TYPE === 'azuresql' ? '@team' : '?'}
+      `, DATABASE_TYPE === 'azuresql' ? { playerName, team } : playerName, team);
 
       playerOverallStats[playerName] = overall;
-    });
+    }
 
     // Calculate usage bumps
     const usageBumps = Object.entries(playerBoosts)
@@ -813,20 +924,24 @@ class NBAStatsService {
   /**
    * Find all teammates for a player based on historical games
    */
-  getTeammates(playerName) {
-    const teammates = db.prepare(`
+  async getTeammates(playerName) {
+    const query = `
       SELECT DISTINCT h2.player_name, h2.team, COUNT(*) as games_together
       FROM historical_games h1
       JOIN historical_games h2 ON h1.game_id = h2.game_id AND h1.team = h2.team
-      WHERE h1.player_name LIKE ?
-        AND h2.player_name NOT LIKE ?
+      WHERE h1.player_name LIKE ${DATABASE_TYPE === 'azuresql' ? '@playerName' : '?'}
+        AND h2.player_name NOT LIKE ${DATABASE_TYPE === 'azuresql' ? '@playerName' : '?'}
         AND h1.minutes > 0
         AND h2.minutes > 0
-      GROUP BY h2.player_name
+      GROUP BY h2.player_name, h2.team
       ORDER BY games_together DESC
-    `).all(`%${playerName}%`, `%${playerName}%`);
+    `;
 
-    return teammates;
+    if (DATABASE_TYPE === 'azuresql') {
+      return await db.all(query, { playerName: `%${playerName}%` });
+    } else {
+      return await db.all(query, `%${playerName}%`, `%${playerName}%`);
+    }
   }
 
   /**
@@ -835,7 +950,7 @@ class NBAStatsService {
    * @param {Object} game - Box score game object from blob storage
    * @returns {boolean} - Whether the game was inserted (false if already exists)
    */
-  insertGameFromBoxScore(game) {
+  async insertGameFromBoxScore(game) {
     // Map blob storage fields to database fields
     const gameData = {
       player_id: null, // Not available from Basketball Reference
@@ -877,25 +992,42 @@ class NBAStatsService {
     };
 
     try {
-      const stmt = db.prepare(`
-        INSERT OR IGNORE INTO historical_games (
-          player_id, player_name, team, opponent, position, game_id, game_date, season, is_home,
-          minutes, points, rebounds, assists, steals, blocks, turnovers,
-          fg_made, fg_attempted, fg3_made, fg3_attempted, ft_made, ft_attempted,
-          oreb, dreb, plus_minus, dk_fantasy_points, rest_days, is_back_to_back
-        ) VALUES (
-          @player_id, @player_name, @team, @opponent, @position, @game_id, @game_date, @season, @is_home,
-          @minutes, @points, @rebounds, @assists, @steals, @blocks, @turnovers,
-          @fg_made, @fg_attempted, @fg3_made, @fg3_attempted, @ft_made, @ft_attempted,
-          @oreb, @dreb, @plus_minus, @dk_fantasy_points, @rest_days, @is_back_to_back
-        )
-      `);
-
-      const result = stmt.run(gameData);
-      return result.changes > 0;
+      if (DATABASE_TYPE === 'azuresql') {
+        // Use MERGE for Azure SQL - insert only if not exists
+        const result = await db.run(`
+          MERGE INTO historical_games AS target
+          USING (SELECT @game_id AS game_id, @player_name AS player_name) AS source
+          ON target.game_id = source.game_id AND target.player_name = source.player_name
+          WHEN NOT MATCHED THEN
+            INSERT (player_id, player_name, team, opponent, position, game_id, game_date, season, is_home,
+                    minutes, points, rebounds, assists, steals, blocks, turnovers,
+                    fg_made, fg_attempted, fg3_made, fg3_attempted, ft_made, ft_attempted,
+                    oreb, dreb, plus_minus, dk_fantasy_points, rest_days, is_back_to_back)
+            VALUES (@player_id, @player_name, @team, @opponent, @position, @game_id, @game_date, @season, @is_home,
+                    @minutes, @points, @rebounds, @assists, @steals, @blocks, @turnovers,
+                    @fg_made, @fg_attempted, @fg3_made, @fg3_attempted, @ft_made, @ft_attempted,
+                    @oreb, @dreb, @plus_minus, @dk_fantasy_points, @rest_days, @is_back_to_back);
+        `, gameData);
+        return result && result.rowsAffected > 0;
+      } else {
+        const result = await db.run(`
+          INSERT OR IGNORE INTO historical_games (
+            player_id, player_name, team, opponent, position, game_id, game_date, season, is_home,
+            minutes, points, rebounds, assists, steals, blocks, turnovers,
+            fg_made, fg_attempted, fg3_made, fg3_attempted, ft_made, ft_attempted,
+            oreb, dreb, plus_minus, dk_fantasy_points, rest_days, is_back_to_back
+          ) VALUES (
+            @player_id, @player_name, @team, @opponent, @position, @game_id, @game_date, @season, @is_home,
+            @minutes, @points, @rebounds, @assists, @steals, @blocks, @turnovers,
+            @fg_made, @fg_attempted, @fg3_made, @fg3_attempted, @ft_made, @ft_attempted,
+            @oreb, @dreb, @plus_minus, @dk_fantasy_points, @rest_days, @is_back_to_back
+          )
+        `, gameData);
+        return result.changes > 0;
+      }
     } catch (error) {
       // If it's a duplicate key error, return false (game already exists)
-      if (error.message.includes('UNIQUE constraint failed')) {
+      if (error.message.includes('UNIQUE constraint failed') || error.message.includes('duplicate')) {
         return false;
       }
       throw error;
@@ -905,16 +1037,16 @@ class NBAStatsService {
   /**
    * Check if historical data exists and return status
    */
-  getDataStatus() {
+  async getDataStatus() {
     try {
-      const result = db.prepare(`
+      const result = await db.get(`
         SELECT
           COUNT(*) as totalGames,
           COUNT(DISTINCT player_name) as uniquePlayers,
           MIN(game_date) as earliestGame,
           MAX(game_date) as latestGame
         FROM historical_games
-      `).get();
+      `);
 
       return {
         hasData: result.totalGames > 0,
@@ -977,7 +1109,7 @@ class NBAStatsService {
 
           if (newGames.length > 0) {
             const gamesWithRest = this.calculateRestDays(newGames);
-            const inserted = this.bulkInsertGames(gamesWithRest);
+            const inserted = await this.bulkInsertGames(gamesWithRest);
             totalGames += inserted;
             newGamesFound += newGames.length;
             console.log(`✅ ${player.name}: ${newGames.length} new games inserted`);
@@ -1018,8 +1150,8 @@ class NBAStatsService {
   /**
    * Get players on a specific team from historical data
    */
-  getTeamRoster(team) {
-    const roster = db.prepare(`
+  async getTeamRoster(team) {
+    const query = `
       SELECT
         player_name,
         COUNT(*) as games,
@@ -1027,13 +1159,17 @@ class NBAStatsService {
         ROUND(AVG(dk_fantasy_points), 1) as avg_dk,
         ROUND(AVG(minutes), 1) as avg_min
       FROM historical_games
-      WHERE team = ?
+      WHERE team = ${DATABASE_TYPE === 'azuresql' ? '@team' : '?'}
       GROUP BY player_name
-      HAVING games >= 3
+      HAVING COUNT(*) >= 3
       ORDER BY avg_dk DESC
-    `).all(team);
+    `;
 
-    return roster;
+    if (DATABASE_TYPE === 'azuresql') {
+      return await db.all(query, { team });
+    } else {
+      return await db.all(query, team);
+    }
   }
 
   /**
@@ -1043,25 +1179,22 @@ class NBAStatsService {
    * @param {string} startDate - Optional start date filter (YYYY-MM-DD)
    * @param {string} endDate - Optional end date filter (YYYY-MM-DD)
    */
-  getHotStreaks(limit = 20, minGames = 5, startDate = null, endDate = null) {
+  async getHotStreaks(limit = 20, minGames = 5, startDate = null, endDate = null) {
     let whereClause = '';
-    const params = [];
+    const conditions = [];
 
-    if (startDate || endDate) {
-      const conditions = [];
-      if (startDate) {
-        conditions.push('game_date >= ?');
-        params.push(startDate);
-      }
-      if (endDate) {
-        conditions.push('game_date <= ?');
-        params.push(endDate);
-      }
+    if (startDate) {
+      conditions.push(DATABASE_TYPE === 'azuresql' ? 'game_date >= @startDate' : 'game_date >= ?');
+    }
+    if (endDate) {
+      conditions.push(DATABASE_TYPE === 'azuresql' ? 'game_date <= @endDate' : 'game_date <= ?');
+    }
+    if (conditions.length > 0) {
       whereClause = 'WHERE ' + conditions.join(' AND ');
     }
 
     // Get all players with enough games in date range
-    const players = db.prepare(`
+    const playersQuery = `
       SELECT
         player_name,
         team,
@@ -1070,47 +1203,82 @@ class NBAStatsService {
         MAX(game_date) as last_game
       FROM historical_games
       ${whereClause}
-      GROUP BY player_name
-      HAVING total_games >= ?
-    `).all(...params, minGames);
+      GROUP BY player_name, team
+      HAVING COUNT(*) >= ${DATABASE_TYPE === 'azuresql' ? '@minGames' : '?'}
+    `;
+
+    let players;
+    if (DATABASE_TYPE === 'azuresql') {
+      const params = { minGames };
+      if (startDate) params.startDate = startDate;
+      if (endDate) params.endDate = endDate;
+      players = await db.all(playersQuery, params);
+    } else {
+      const params = [];
+      if (startDate) params.push(startDate);
+      if (endDate) params.push(endDate);
+      params.push(minGames);
+      players = await db.all(playersQuery, ...params);
+    }
 
     // Calculate last 3 average for each (within date range)
-    const hotStreaks = players.map(p => {
-      const last3Query = startDate || endDate
-        ? `SELECT AVG(dk_fantasy_points) as avg
-           FROM (
-             SELECT dk_fantasy_points FROM historical_games
-             WHERE player_name = ? ${startDate ? 'AND game_date >= ?' : ''} ${endDate ? 'AND game_date <= ?' : ''}
-             ORDER BY game_date DESC LIMIT 3
-           )`
-        : `SELECT AVG(dk_fantasy_points) as avg
-           FROM (
-             SELECT dk_fantasy_points FROM historical_games
-             WHERE player_name = ?
-             ORDER BY game_date DESC LIMIT 3
-           )`;
+    const hotStreaks = [];
+    for (const p of players) {
+      let last3Query, last3Params;
 
-      const last3Params = [p.player_name];
-      if (startDate) last3Params.push(startDate);
-      if (endDate) last3Params.push(endDate);
+      if (DATABASE_TYPE === 'azuresql') {
+        let dateFilter = '';
+        if (startDate) dateFilter += ' AND game_date >= @startDate';
+        if (endDate) dateFilter += ' AND game_date <= @endDate';
 
-      const last3 = db.prepare(last3Query).get(...last3Params);
+        last3Query = `
+          SELECT AVG(dk_fantasy_points) as avg
+          FROM (
+            SELECT TOP 3 dk_fantasy_points FROM historical_games
+            WHERE player_name = @playerName ${dateFilter}
+            ORDER BY game_date DESC
+          ) sub
+        `;
+        last3Params = { playerName: p.player_name };
+        if (startDate) last3Params.startDate = startDate;
+        if (endDate) last3Params.endDate = endDate;
+      } else {
+        let dateFilter = '';
+        const paramsList = [p.player_name];
+        if (startDate) { dateFilter += ' AND game_date >= ?'; paramsList.push(startDate); }
+        if (endDate) { dateFilter += ' AND game_date <= ?'; paramsList.push(endDate); }
+
+        last3Query = `
+          SELECT AVG(dk_fantasy_points) as avg
+          FROM (
+            SELECT dk_fantasy_points FROM historical_games
+            WHERE player_name = ? ${dateFilter}
+            ORDER BY game_date DESC LIMIT 3
+          )
+        `;
+        last3Params = paramsList;
+      }
+
+      const last3 = DATABASE_TYPE === 'azuresql'
+        ? await db.get(last3Query, last3Params)
+        : await db.get(last3Query, ...last3Params);
 
       const last3Avg = last3?.avg || p.season_avg;
       const hotStreakPct = ((last3Avg - p.season_avg) / p.season_avg) * 100;
 
-      return {
-        ...p,
-        last3_avg: Math.round(last3Avg * 10) / 10,
-        hot_streak_diff: Math.round((last3Avg - p.season_avg) * 10) / 10,
-        hot_streak_pct: Math.round(hotStreakPct * 10) / 10
-      };
-    })
-    .filter(p => p.hot_streak_pct >= 10) // At least 10% above average
-    .sort((a, b) => b.hot_streak_pct - a.hot_streak_pct)
-    .slice(0, limit);
+      if (hotStreakPct >= 10) { // At least 10% above average
+        hotStreaks.push({
+          ...p,
+          last3_avg: Math.round(last3Avg * 10) / 10,
+          hot_streak_diff: Math.round((last3Avg - p.season_avg) * 10) / 10,
+          hot_streak_pct: Math.round(hotStreakPct * 10) / 10
+        });
+      }
+    }
 
-    return hotStreaks;
+    return hotStreaks
+      .sort((a, b) => b.hot_streak_pct - a.hot_streak_pct)
+      .slice(0, limit);
   }
 
   /**
@@ -1120,25 +1288,22 @@ class NBAStatsService {
    * @param {string} startDate - Optional start date filter (YYYY-MM-DD)
    * @param {string} endDate - Optional end date filter (YYYY-MM-DD)
    */
-  getColdStreaks(limit = 20, minGames = 5, startDate = null, endDate = null) {
+  async getColdStreaks(limit = 20, minGames = 5, startDate = null, endDate = null) {
     let whereClause = '';
-    const params = [];
+    const conditions = [];
 
-    if (startDate || endDate) {
-      const conditions = [];
-      if (startDate) {
-        conditions.push('game_date >= ?');
-        params.push(startDate);
-      }
-      if (endDate) {
-        conditions.push('game_date <= ?');
-        params.push(endDate);
-      }
+    if (startDate) {
+      conditions.push(DATABASE_TYPE === 'azuresql' ? 'game_date >= @startDate' : 'game_date >= ?');
+    }
+    if (endDate) {
+      conditions.push(DATABASE_TYPE === 'azuresql' ? 'game_date <= @endDate' : 'game_date <= ?');
+    }
+    if (conditions.length > 0) {
       whereClause = 'WHERE ' + conditions.join(' AND ');
     }
 
     // Get all players with enough games in date range
-    const players = db.prepare(`
+    const playersQuery = `
       SELECT
         player_name,
         team,
@@ -1147,47 +1312,82 @@ class NBAStatsService {
         MAX(game_date) as last_game
       FROM historical_games
       ${whereClause}
-      GROUP BY player_name
-      HAVING total_games >= ?
-    `).all(...params, minGames);
+      GROUP BY player_name, team
+      HAVING COUNT(*) >= ${DATABASE_TYPE === 'azuresql' ? '@minGames' : '?'}
+    `;
+
+    let players;
+    if (DATABASE_TYPE === 'azuresql') {
+      const params = { minGames };
+      if (startDate) params.startDate = startDate;
+      if (endDate) params.endDate = endDate;
+      players = await db.all(playersQuery, params);
+    } else {
+      const params = [];
+      if (startDate) params.push(startDate);
+      if (endDate) params.push(endDate);
+      params.push(minGames);
+      players = await db.all(playersQuery, ...params);
+    }
 
     // Calculate last 3 average for each (within date range)
-    const coldStreaks = players.map(p => {
-      const last3Query = startDate || endDate
-        ? `SELECT AVG(dk_fantasy_points) as avg
-           FROM (
-             SELECT dk_fantasy_points FROM historical_games
-             WHERE player_name = ? ${startDate ? 'AND game_date >= ?' : ''} ${endDate ? 'AND game_date <= ?' : ''}
-             ORDER BY game_date DESC LIMIT 3
-           )`
-        : `SELECT AVG(dk_fantasy_points) as avg
-           FROM (
-             SELECT dk_fantasy_points FROM historical_games
-             WHERE player_name = ?
-             ORDER BY game_date DESC LIMIT 3
-           )`;
+    const coldStreaks = [];
+    for (const p of players) {
+      let last3Query, last3Params;
 
-      const last3Params = [p.player_name];
-      if (startDate) last3Params.push(startDate);
-      if (endDate) last3Params.push(endDate);
+      if (DATABASE_TYPE === 'azuresql') {
+        let dateFilter = '';
+        if (startDate) dateFilter += ' AND game_date >= @startDate';
+        if (endDate) dateFilter += ' AND game_date <= @endDate';
 
-      const last3 = db.prepare(last3Query).get(...last3Params);
+        last3Query = `
+          SELECT AVG(dk_fantasy_points) as avg
+          FROM (
+            SELECT TOP 3 dk_fantasy_points FROM historical_games
+            WHERE player_name = @playerName ${dateFilter}
+            ORDER BY game_date DESC
+          ) sub
+        `;
+        last3Params = { playerName: p.player_name };
+        if (startDate) last3Params.startDate = startDate;
+        if (endDate) last3Params.endDate = endDate;
+      } else {
+        let dateFilter = '';
+        const paramsList = [p.player_name];
+        if (startDate) { dateFilter += ' AND game_date >= ?'; paramsList.push(startDate); }
+        if (endDate) { dateFilter += ' AND game_date <= ?'; paramsList.push(endDate); }
+
+        last3Query = `
+          SELECT AVG(dk_fantasy_points) as avg
+          FROM (
+            SELECT dk_fantasy_points FROM historical_games
+            WHERE player_name = ? ${dateFilter}
+            ORDER BY game_date DESC LIMIT 3
+          )
+        `;
+        last3Params = paramsList;
+      }
+
+      const last3 = DATABASE_TYPE === 'azuresql'
+        ? await db.get(last3Query, last3Params)
+        : await db.get(last3Query, ...last3Params);
 
       const last3Avg = last3?.avg || p.season_avg;
       const coldStreakPct = ((last3Avg - p.season_avg) / p.season_avg) * 100;
 
-      return {
-        ...p,
-        last3_avg: Math.round(last3Avg * 10) / 10,
-        cold_streak_diff: Math.round((last3Avg - p.season_avg) * 10) / 10,
-        cold_streak_pct: Math.round(coldStreakPct * 10) / 10
-      };
-    })
-    .filter(p => p.cold_streak_pct <= -15) // At least 15% below average
-    .sort((a, b) => a.cold_streak_pct - b.cold_streak_pct)
-    .slice(0, limit);
+      if (coldStreakPct <= -15) { // At least 15% below average
+        coldStreaks.push({
+          ...p,
+          last3_avg: Math.round(last3Avg * 10) / 10,
+          cold_streak_diff: Math.round((last3Avg - p.season_avg) * 10) / 10,
+          cold_streak_pct: Math.round(coldStreakPct * 10) / 10
+        });
+      }
+    }
 
-    return coldStreaks;
+    return coldStreaks
+      .sort((a, b) => a.cold_streak_pct - b.cold_streak_pct)
+      .slice(0, limit);
   }
 
   /**
@@ -1197,25 +1397,22 @@ class NBAStatsService {
    * @param {string} startDate - Optional start date filter (YYYY-MM-DD)
    * @param {string} endDate - Optional end date filter (YYYY-MM-DD)
    */
-  getConsistencyLeaders(limit = 20, minGames = 8, startDate = null, endDate = null) {
+  async getConsistencyLeaders(limit = 20, minGames = 8, startDate = null, endDate = null) {
     let whereClause = '';
-    const params = [];
+    const conditions = [];
 
-    if (startDate || endDate) {
-      const conditions = [];
-      if (startDate) {
-        conditions.push('game_date >= ?');
-        params.push(startDate);
-      }
-      if (endDate) {
-        conditions.push('game_date <= ?');
-        params.push(endDate);
-      }
+    if (startDate) {
+      conditions.push(DATABASE_TYPE === 'azuresql' ? 'game_date >= @startDate' : 'game_date >= ?');
+    }
+    if (endDate) {
+      conditions.push(DATABASE_TYPE === 'azuresql' ? 'game_date <= @endDate' : 'game_date <= ?');
+    }
+    if (conditions.length > 0) {
       whereClause = 'WHERE ' + conditions.join(' AND ');
     }
 
     // SQLite doesn't have STDDEV, so we calculate it manually
-    const players = db.prepare(`
+    const playersQuery = `
       SELECT
         player_name,
         team,
@@ -1226,34 +1423,63 @@ class NBAStatsService {
         MAX(game_date) as last_game
       FROM historical_games
       ${whereClause}
-      GROUP BY player_name
-      HAVING games >= ? AND avg_dk >= 20
+      GROUP BY player_name, team
+      HAVING COUNT(*) >= ${DATABASE_TYPE === 'azuresql' ? '@minGames' : '?'} AND AVG(dk_fantasy_points) >= 20
       ORDER BY (MAX(dk_fantasy_points) - MIN(dk_fantasy_points)) / AVG(dk_fantasy_points) ASC
-      LIMIT ?
-    `).all(...params, minGames, limit);
+      ${DATABASE_TYPE === 'azuresql' ? 'OFFSET 0 ROWS FETCH NEXT @limit ROWS ONLY' : 'LIMIT ?'}
+    `;
+
+    let players;
+    if (DATABASE_TYPE === 'azuresql') {
+      const params = { minGames, limit };
+      if (startDate) params.startDate = startDate;
+      if (endDate) params.endDate = endDate;
+      players = await db.all(playersQuery, params);
+    } else {
+      const params = [];
+      if (startDate) params.push(startDate);
+      if (endDate) params.push(endDate);
+      params.push(minGames, limit);
+      players = await db.all(playersQuery, ...params);
+    }
 
     // Calculate actual standard deviation for each (within date range)
-    return players.map(p => {
-      const gamesQuery = startDate || endDate
-        ? `SELECT dk_fantasy_points FROM historical_games WHERE player_name = ? ${startDate ? 'AND game_date >= ?' : ''} ${endDate ? 'AND game_date <= ?' : ''}`
-        : `SELECT dk_fantasy_points FROM historical_games WHERE player_name = ?`;
+    const result = [];
+    for (const p of players) {
+      let gamesQuery, gamesParams;
 
-      const gamesParams = [p.player_name];
-      if (startDate) gamesParams.push(startDate);
-      if (endDate) gamesParams.push(endDate);
+      if (DATABASE_TYPE === 'azuresql') {
+        let dateFilter = '';
+        if (startDate) dateFilter += ' AND game_date >= @startDate';
+        if (endDate) dateFilter += ' AND game_date <= @endDate';
+        gamesQuery = `SELECT dk_fantasy_points FROM historical_games WHERE player_name = @playerName ${dateFilter}`;
+        gamesParams = { playerName: p.player_name };
+        if (startDate) gamesParams.startDate = startDate;
+        if (endDate) gamesParams.endDate = endDate;
+      } else {
+        let dateFilter = '';
+        gamesParams = [p.player_name];
+        if (startDate) { dateFilter += ' AND game_date >= ?'; gamesParams.push(startDate); }
+        if (endDate) { dateFilter += ' AND game_date <= ?'; gamesParams.push(endDate); }
+        gamesQuery = `SELECT dk_fantasy_points FROM historical_games WHERE player_name = ? ${dateFilter}`;
+      }
 
-      const games = db.prepare(gamesQuery).all(...gamesParams);
+      const games = DATABASE_TYPE === 'azuresql'
+        ? await db.all(gamesQuery, gamesParams)
+        : await db.all(gamesQuery, ...gamesParams);
 
       const mean = games.reduce((sum, g) => sum + g.dk_fantasy_points, 0) / games.length;
       const variance = games.reduce((sum, g) => sum + Math.pow(g.dk_fantasy_points - mean, 2), 0) / games.length;
       const stdDev = Math.sqrt(variance);
 
-      return {
+      result.push({
         ...p,
         std_dev: Math.round(stdDev * 10) / 10,
         consistency_score: Math.round((1 / (stdDev / mean)) * 100) / 10 // Higher = more consistent
-      };
-    }).sort((a, b) => b.consistency_score - a.consistency_score);
+      });
+    }
+
+    return result.sort((a, b) => b.consistency_score - a.consistency_score);
   }
 
   /**
@@ -1263,24 +1489,21 @@ class NBAStatsService {
    * @param {string} startDate - Optional start date filter (YYYY-MM-DD)
    * @param {string} endDate - Optional end date filter (YYYY-MM-DD)
    */
-  getBoomBustPlayers(limit = 20, minGames = 8, startDate = null, endDate = null) {
+  async getBoomBustPlayers(limit = 20, minGames = 8, startDate = null, endDate = null) {
     let whereClause = '';
-    const params = [];
+    const conditions = [];
 
-    if (startDate || endDate) {
-      const conditions = [];
-      if (startDate) {
-        conditions.push('game_date >= ?');
-        params.push(startDate);
-      }
-      if (endDate) {
-        conditions.push('game_date <= ?');
-        params.push(endDate);
-      }
+    if (startDate) {
+      conditions.push(DATABASE_TYPE === 'azuresql' ? 'game_date >= @startDate' : 'game_date >= ?');
+    }
+    if (endDate) {
+      conditions.push(DATABASE_TYPE === 'azuresql' ? 'game_date <= @endDate' : 'game_date <= ?');
+    }
+    if (conditions.length > 0) {
       whereClause = 'WHERE ' + conditions.join(' AND ');
     }
 
-    const players = db.prepare(`
+    const playersQuery = `
       SELECT
         player_name,
         team,
@@ -1291,22 +1514,49 @@ class NBAStatsService {
         MAX(game_date) as last_game
       FROM historical_games
       ${whereClause}
-      GROUP BY player_name
-      HAVING games >= ? AND avg_dk >= 15
+      GROUP BY player_name, team
+      HAVING COUNT(*) >= ${DATABASE_TYPE === 'azuresql' ? '@minGames' : '?'} AND AVG(dk_fantasy_points) >= 15
       ORDER BY (MAX(dk_fantasy_points) - MIN(dk_fantasy_points)) DESC
-      LIMIT ?
-    `).all(...params, minGames, limit * 2);
+      ${DATABASE_TYPE === 'azuresql' ? 'OFFSET 0 ROWS FETCH NEXT @limit ROWS ONLY' : 'LIMIT ?'}
+    `;
 
-    return players.map(p => {
-      const gamesQuery = startDate || endDate
-        ? `SELECT dk_fantasy_points FROM historical_games WHERE player_name = ? ${startDate ? 'AND game_date >= ?' : ''} ${endDate ? 'AND game_date <= ?' : ''}`
-        : `SELECT dk_fantasy_points FROM historical_games WHERE player_name = ?`;
+    let players;
+    if (DATABASE_TYPE === 'azuresql') {
+      const params = { minGames, limit: limit * 2 };
+      if (startDate) params.startDate = startDate;
+      if (endDate) params.endDate = endDate;
+      players = await db.all(playersQuery, params);
+    } else {
+      const params = [];
+      if (startDate) params.push(startDate);
+      if (endDate) params.push(endDate);
+      params.push(minGames, limit * 2);
+      players = await db.all(playersQuery, ...params);
+    }
 
-      const gamesParams = [p.player_name];
-      if (startDate) gamesParams.push(startDate);
-      if (endDate) gamesParams.push(endDate);
+    const result = [];
+    for (const p of players) {
+      let gamesQuery, gamesParams;
 
-      const games = db.prepare(gamesQuery).all(...gamesParams);
+      if (DATABASE_TYPE === 'azuresql') {
+        let dateFilter = '';
+        if (startDate) dateFilter += ' AND game_date >= @startDate';
+        if (endDate) dateFilter += ' AND game_date <= @endDate';
+        gamesQuery = `SELECT dk_fantasy_points FROM historical_games WHERE player_name = @playerName ${dateFilter}`;
+        gamesParams = { playerName: p.player_name };
+        if (startDate) gamesParams.startDate = startDate;
+        if (endDate) gamesParams.endDate = endDate;
+      } else {
+        let dateFilter = '';
+        gamesParams = [p.player_name];
+        if (startDate) { dateFilter += ' AND game_date >= ?'; gamesParams.push(startDate); }
+        if (endDate) { dateFilter += ' AND game_date <= ?'; gamesParams.push(endDate); }
+        gamesQuery = `SELECT dk_fantasy_points FROM historical_games WHERE player_name = ? ${dateFilter}`;
+      }
+
+      const games = DATABASE_TYPE === 'azuresql'
+        ? await db.all(gamesQuery, gamesParams)
+        : await db.all(gamesQuery, ...gamesParams);
 
       const mean = games.reduce((sum, g) => sum + g.dk_fantasy_points, 0) / games.length;
       const variance = games.reduce((sum, g) => sum + Math.pow(g.dk_fantasy_points - mean, 2), 0) / games.length;
@@ -1316,14 +1566,16 @@ class NBAStatsService {
       const boomGames = games.filter(g => g.dk_fantasy_points >= 50).length;
       const bustGames = games.filter(g => g.dk_fantasy_points < 15).length;
 
-      return {
+      result.push({
         ...p,
         std_dev: Math.round(stdDev * 10) / 10,
         boom_rate: Math.round((boomGames / games.length) * 1000) / 10,
         bust_rate: Math.round((bustGames / games.length) * 1000) / 10,
         upside_score: Math.round((p.ceiling - p.avg_dk) * 10) / 10
-      };
-    }).sort((a, b) => b.std_dev - a.std_dev).slice(0, limit);
+      });
+    }
+
+    return result.sort((a, b) => b.std_dev - a.std_dev).slice(0, limit);
   }
 
   /**
@@ -1332,17 +1584,17 @@ class NBAStatsService {
    * @param {string} startDate - Optional start date filter (YYYY-MM-DD)
    * @param {string} endDate - Optional end date filter (YYYY-MM-DD)
    */
-  getSlateInsights(slatePlayers, startDate = null, endDate = null) {
+  async getSlateInsights(slatePlayers, startDate = null, endDate = null) {
     // Build date filter conditions
     let dateCondition = '';
-    const dateParams = [];
+    const dateParams = {};
     if (startDate) {
-      dateCondition += ' AND game_date >= ?';
-      dateParams.push(startDate);
+      dateCondition += DATABASE_TYPE === 'azuresql' ? ' AND game_date >= @startDate' : ' AND game_date >= ?';
+      dateParams.startDate = startDate;
     }
     if (endDate) {
-      dateCondition += ' AND game_date <= ?';
-      dateParams.push(endDate);
+      dateCondition += DATABASE_TYPE === 'azuresql' ? ' AND game_date <= @endDate' : ' AND game_date <= ?';
+      dateParams.endDate = endDate;
     }
 
     const insights = {
@@ -1362,50 +1614,110 @@ class NBAStatsService {
       const team = player.team;
 
       // Get historical stats for this player (with date filter)
-      const statsQuery = `
-        SELECT
-          COUNT(*) as games,
-          AVG(dk_fantasy_points) as season_avg,
-          AVG(minutes) as avg_min,
-          MIN(dk_fantasy_points) as floor,
-          MAX(dk_fantasy_points) as ceiling,
-          MAX(game_date) as last_game
-        FROM historical_games
-        WHERE player_name LIKE ?${dateCondition}
-      `;
-      const stats = db.prepare(statsQuery).get(`%${playerName}%`, ...dateParams);
+      let stats;
+      if (DATABASE_TYPE === 'azuresql') {
+        const statsQuery = `
+          SELECT
+            COUNT(*) as games,
+            AVG(dk_fantasy_points) as season_avg,
+            AVG(minutes) as avg_min,
+            MIN(dk_fantasy_points) as floor,
+            MAX(dk_fantasy_points) as ceiling,
+            MAX(game_date) as last_game
+          FROM historical_games
+          WHERE player_name LIKE @playerName${dateCondition}
+        `;
+        stats = await db.get(statsQuery, { playerName: `%${playerName}%`, ...dateParams });
+      } else {
+        const statsQuery = `
+          SELECT
+            COUNT(*) as games,
+            AVG(dk_fantasy_points) as season_avg,
+            AVG(minutes) as avg_min,
+            MIN(dk_fantasy_points) as floor,
+            MAX(dk_fantasy_points) as ceiling,
+            MAX(game_date) as last_game
+          FROM historical_games
+          WHERE player_name LIKE ?${dateCondition.replace(/@\w+/g, '?')}
+        `;
+        const paramsList = [`%${playerName}%`];
+        if (startDate) paramsList.push(startDate);
+        if (endDate) paramsList.push(endDate);
+        stats = await db.get(statsQuery, ...paramsList);
+      }
 
       if (!stats || stats.games < 3) continue;
 
       // Get last 3 games average (within date range)
-      const last3Query = `
-        SELECT AVG(dk_fantasy_points) as avg, GROUP_CONCAT(dk_fantasy_points) as scores
-        FROM (
-          SELECT dk_fantasy_points FROM historical_games
-          WHERE player_name LIKE ?${dateCondition}
-          ORDER BY game_date DESC LIMIT 3
-        )
-      `;
-      const last3 = db.prepare(last3Query).get(`%${playerName}%`, ...dateParams);
+      let last3;
+      if (DATABASE_TYPE === 'azuresql') {
+        const last3Query = `
+          SELECT AVG(dk_fantasy_points) as avg, STRING_AGG(CAST(dk_fantasy_points AS VARCHAR), ',') as scores
+          FROM (
+            SELECT TOP 3 dk_fantasy_points FROM historical_games
+            WHERE player_name LIKE @playerName${dateCondition}
+            ORDER BY game_date DESC
+          ) sub
+        `;
+        last3 = await db.get(last3Query, { playerName: `%${playerName}%`, ...dateParams });
+      } else {
+        const last3Query = `
+          SELECT AVG(dk_fantasy_points) as avg, GROUP_CONCAT(dk_fantasy_points) as scores
+          FROM (
+            SELECT dk_fantasy_points FROM historical_games
+            WHERE player_name LIKE ?${dateCondition.replace(/@\w+/g, '?')}
+            ORDER BY game_date DESC LIMIT 3
+          )
+        `;
+        const paramsList = [`%${playerName}%`];
+        if (startDate) paramsList.push(startDate);
+        if (endDate) paramsList.push(endDate);
+        last3 = await db.get(last3Query, ...paramsList);
+      }
 
       // Get matchup history vs opponent (with date filter)
-      const matchupQuery = `
-        SELECT
-          COUNT(*) as games_vs,
-          AVG(dk_fantasy_points) as avg_vs,
-          MAX(dk_fantasy_points) as best_vs
-        FROM historical_games
-        WHERE player_name LIKE ? AND opponent = ?${dateCondition}
-      `;
-      const matchupHistory = db.prepare(matchupQuery).get(`%${playerName}%`, opponent, ...dateParams);
+      let matchupHistory;
+      if (DATABASE_TYPE === 'azuresql') {
+        const matchupQuery = `
+          SELECT
+            COUNT(*) as games_vs,
+            AVG(dk_fantasy_points) as avg_vs,
+            MAX(dk_fantasy_points) as best_vs
+          FROM historical_games
+          WHERE player_name LIKE @playerName AND opponent = @opponent${dateCondition}
+        `;
+        matchupHistory = await db.get(matchupQuery, { playerName: `%${playerName}%`, opponent, ...dateParams });
+      } else {
+        const matchupQuery = `
+          SELECT
+            COUNT(*) as games_vs,
+            AVG(dk_fantasy_points) as avg_vs,
+            MAX(dk_fantasy_points) as best_vs
+          FROM historical_games
+          WHERE player_name LIKE ? AND opponent = ?${dateCondition.replace(/@\w+/g, '?')}
+        `;
+        const paramsList = [`%${playerName}%`, opponent];
+        if (startDate) paramsList.push(startDate);
+        if (endDate) paramsList.push(endDate);
+        matchupHistory = await db.get(matchupQuery, ...paramsList);
+      }
 
       const last3Avg = last3?.avg || stats.season_avg;
       const seasonAvg = stats.season_avg;
       const hotStreakPct = ((last3Avg - seasonAvg) / seasonAvg) * 100;
 
       // Calculate std dev for this player (within date range)
-      const allGamesQuery = `SELECT dk_fantasy_points FROM historical_games WHERE player_name LIKE ?${dateCondition}`;
-      const allGames = db.prepare(allGamesQuery).all(`%${playerName}%`, ...dateParams);
+      let allGames;
+      if (DATABASE_TYPE === 'azuresql') {
+        const allGamesQuery = `SELECT dk_fantasy_points FROM historical_games WHERE player_name LIKE @playerName${dateCondition}`;
+        allGames = await db.all(allGamesQuery, { playerName: `%${playerName}%`, ...dateParams });
+      } else {
+        const allGamesQuery = `SELECT dk_fantasy_points FROM historical_games WHERE player_name LIKE ?${dateCondition.replace(/@\w+/g, '?')}`;
+        const paramsList = [`%${playerName}%`];
+        if (startDate) paramsList.push(startDate);
+        if (endDate) paramsList.push(endDate);
+        allGames = await db.all(allGamesQuery, ...paramsList);
+      }
 
       let stdDev = 0;
       if (allGames.length > 1) {
@@ -1498,7 +1810,7 @@ class NBAStatsService {
    * @param {number} minGames - Minimum games for a player to be considered "regular"
    * @param {number} minAvgDk - Minimum avg DK points to be considered "high-usage"
    */
-  detectUsageBumps(slatePlayers, minGames = 8, minAvgDk = 25) {
+  async detectUsageBumps(slatePlayers, minGames = 8, minAvgDk = 25) {
     // Group slate players by team
     const slateByTeam = {};
     for (const player of slatePlayers) {
@@ -1513,20 +1825,38 @@ class NBAStatsService {
     // For each team on the slate, check for missing high-usage players
     for (const [team, slateRoster] of Object.entries(slateByTeam)) {
       // Get historical regular players for this team (played recently and significant minutes)
-      const historicalRoster = db.prepare(`
-        SELECT
-          player_name,
-          COUNT(*) as games,
-          ROUND(AVG(dk_fantasy_points), 1) as avg_dk,
-          ROUND(AVG(minutes), 1) as avg_min,
-          MAX(game_date) as last_game
-        FROM historical_games
-        WHERE team = ?
-          AND game_date >= date('now', '-30 days')
-        GROUP BY player_name
-        HAVING games >= ? AND avg_dk >= ?
-        ORDER BY avg_dk DESC
-      `).all(team, Math.min(minGames, 5), minAvgDk);
+      let historicalRoster;
+      if (DATABASE_TYPE === 'azuresql') {
+        historicalRoster = await db.all(`
+          SELECT
+            player_name,
+            COUNT(*) as games,
+            ROUND(AVG(dk_fantasy_points), 1) as avg_dk,
+            ROUND(AVG(minutes), 1) as avg_min,
+            MAX(game_date) as last_game
+          FROM historical_games
+          WHERE team = @team
+            AND game_date >= DATEADD(day, -30, GETDATE())
+          GROUP BY player_name
+          HAVING COUNT(*) >= @minGames AND ROUND(AVG(dk_fantasy_points), 1) >= @minAvgDk
+          ORDER BY avg_dk DESC
+        `, { team, minGames: Math.min(minGames, 5), minAvgDk });
+      } else {
+        historicalRoster = await db.all(`
+          SELECT
+            player_name,
+            COUNT(*) as games,
+            ROUND(AVG(dk_fantasy_points), 1) as avg_dk,
+            ROUND(AVG(minutes), 1) as avg_min,
+            MAX(game_date) as last_game
+          FROM historical_games
+          WHERE team = ?
+            AND game_date >= date('now', '-30 days')
+          GROUP BY player_name
+          HAVING games >= ? AND avg_dk >= ?
+          ORDER BY avg_dk DESC
+        `, team, Math.min(minGames, 5), minAvgDk);
+      }
 
       // Find missing high-usage players (in historical but not on slate)
       const missingPlayers = historicalRoster.filter(histPlayer => {
@@ -1549,17 +1879,31 @@ class NBAStatsService {
       // For each missing player, find who benefits when they're out
       for (const missingPlayer of missingPlayers) {
         // Get game dates where this player didn't play (0 minutes or not in game)
-        const gamesWithout = db.prepare(`
-          SELECT DISTINCT game_date
-          FROM historical_games
-          WHERE team = ?
-            AND game_date NOT IN (
-              SELECT game_date FROM historical_games
-              WHERE player_name = ? AND team = ? AND minutes > 5
-            )
-          ORDER BY game_date DESC
-          LIMIT 20
-        `).all(team, missingPlayer.player_name, team);
+        let gamesWithout;
+        if (DATABASE_TYPE === 'azuresql') {
+          gamesWithout = await db.all(`
+            SELECT DISTINCT TOP 20 game_date
+            FROM historical_games
+            WHERE team = @team
+              AND game_date NOT IN (
+                SELECT game_date FROM historical_games
+                WHERE player_name = @playerName AND team = @team AND minutes > 5
+              )
+            ORDER BY game_date DESC
+          `, { team, playerName: missingPlayer.player_name });
+        } else {
+          gamesWithout = await db.all(`
+            SELECT DISTINCT game_date
+            FROM historical_games
+            WHERE team = ?
+              AND game_date NOT IN (
+                SELECT game_date FROM historical_games
+                WHERE player_name = ? AND team = ? AND minutes > 5
+              )
+            ORDER BY game_date DESC
+            LIMIT 20
+          `, team, missingPlayer.player_name, team);
+        }
 
         if (gamesWithout.length < 2) continue;
 
@@ -1572,10 +1916,16 @@ class NBAStatsService {
           const slateLastName = slateNameNorm.split(' ').pop();
 
           // Get all potential matches from historical data
-          const potentialMatches = db.prepare(`
-            SELECT DISTINCT player_name FROM historical_games
-            WHERE team = ?
-          `).all(team);
+          let potentialMatches;
+          if (DATABASE_TYPE === 'azuresql') {
+            potentialMatches = await db.all(`
+              SELECT DISTINCT player_name FROM historical_games WHERE team = @team
+            `, { team });
+          } else {
+            potentialMatches = await db.all(`
+              SELECT DISTINCT player_name FROM historical_games WHERE team = ?
+            `, team);
+          }
 
           // Find the best match using normalized names
           const matchedPlayer = potentialMatches.find(p => {
@@ -1592,24 +1942,50 @@ class NBAStatsService {
           const playerName = matchedPlayer.player_name;
 
           // Stats when missing player is OUT
-          const statsWithout = db.prepare(`
-            SELECT
-              COUNT(*) as games,
-              AVG(dk_fantasy_points) as avg_dk,
-              AVG(minutes) as avg_min
-            FROM historical_games
-            WHERE player_name = ? AND team = ? AND game_date IN (${gameDatesWithout.map(() => '?').join(',')})
-          `).get(playerName, team, ...gameDatesWithout);
+          let statsWithout, statsWith;
+          if (DATABASE_TYPE === 'azuresql') {
+            const placeholders = gameDatesWithout.map((_, i) => `@date${i}`).join(',');
+            const dateParams = {};
+            gameDatesWithout.forEach((d, i) => dateParams[`date${i}`] = d);
 
-          // Stats when missing player is IN (all other games)
-          const statsWith = db.prepare(`
-            SELECT
-              COUNT(*) as games,
-              AVG(dk_fantasy_points) as avg_dk,
-              AVG(minutes) as avg_min
-            FROM historical_games
-            WHERE player_name = ? AND team = ? AND game_date NOT IN (${gameDatesWithout.map(() => '?').join(',')})
-          `).get(playerName, team, ...gameDatesWithout);
+            statsWithout = await db.get(`
+              SELECT
+                COUNT(*) as games,
+                AVG(dk_fantasy_points) as avg_dk,
+                AVG(minutes) as avg_min
+              FROM historical_games
+              WHERE player_name = @playerName AND team = @team AND game_date IN (${placeholders})
+            `, { playerName, team, ...dateParams });
+
+            statsWith = await db.get(`
+              SELECT
+                COUNT(*) as games,
+                AVG(dk_fantasy_points) as avg_dk,
+                AVG(minutes) as avg_min
+              FROM historical_games
+              WHERE player_name = @playerName AND team = @team AND game_date NOT IN (${placeholders})
+            `, { playerName, team, ...dateParams });
+          } else {
+            const placeholders = gameDatesWithout.map(() => '?').join(',');
+
+            statsWithout = await db.get(`
+              SELECT
+                COUNT(*) as games,
+                AVG(dk_fantasy_points) as avg_dk,
+                AVG(minutes) as avg_min
+              FROM historical_games
+              WHERE player_name = ? AND team = ? AND game_date IN (${placeholders})
+            `, playerName, team, ...gameDatesWithout);
+
+            statsWith = await db.get(`
+              SELECT
+                COUNT(*) as games,
+                AVG(dk_fantasy_points) as avg_dk,
+                AVG(minutes) as avg_min
+              FROM historical_games
+              WHERE player_name = ? AND team = ? AND game_date NOT IN (${placeholders})
+            `, playerName, team, ...gameDatesWithout);
+          }
 
           // Calculate the bump
           if (statsWithout?.games >= 2 && statsWith?.games >= 3 && statsWithout.avg_dk && statsWith.avg_dk) {
@@ -1632,7 +2008,7 @@ class NBAStatsService {
               // Get additional slate player data
               const projectedMinutes = slatePlayer?.projected_minutes || null;
               const position = slatePlayer?.position || slatePlayer?.roster_position || null;
-              const opponent = slatePlayer?.opponent || null;
+              const opponentTeam = slatePlayer?.opponent || null;
 
               // Calculate expected DK with bump applied to projection
               const projectedDk = slatePlayer?.projected_points || 0;
@@ -1654,7 +2030,7 @@ class NBAStatsService {
                 player: slateName,
                 team,
                 position,
-                opponent,
+                opponent: opponentTeam,
                 salary,
                 projection: projectedDk,
                 projectedMinutes,
@@ -1717,7 +2093,7 @@ class NBAStatsService {
   /**
    * Get a summary of missing players for each team on the slate
    */
-  getMissingPlayersReport(slatePlayers, minGames = 5, minAvgDk = 20) {
+  async getMissingPlayersReport(slatePlayers, minGames = 5, minAvgDk = 20) {
     // Group slate players by team
     const slateByTeam = {};
     for (const player of slatePlayers) {
@@ -1731,20 +2107,38 @@ class NBAStatsService {
 
     for (const [team, slateRoster] of Object.entries(slateByTeam)) {
       // Get historical regular players for this team
-      const historicalRoster = db.prepare(`
-        SELECT
-          player_name,
-          COUNT(*) as games,
-          ROUND(AVG(dk_fantasy_points), 1) as avg_dk,
-          ROUND(AVG(minutes), 1) as avg_min,
-          MAX(game_date) as last_game
-        FROM historical_games
-        WHERE team = ?
-          AND game_date >= date('now', '-30 days')
-        GROUP BY player_name
-        HAVING games >= ? AND avg_dk >= ?
-        ORDER BY avg_dk DESC
-      `).all(team, minGames, minAvgDk);
+      let historicalRoster;
+      if (DATABASE_TYPE === 'azuresql') {
+        historicalRoster = await db.all(`
+          SELECT
+            player_name,
+            COUNT(*) as games,
+            ROUND(AVG(dk_fantasy_points), 1) as avg_dk,
+            ROUND(AVG(minutes), 1) as avg_min,
+            MAX(game_date) as last_game
+          FROM historical_games
+          WHERE team = @team
+            AND game_date >= DATEADD(day, -30, GETDATE())
+          GROUP BY player_name
+          HAVING COUNT(*) >= @minGames AND ROUND(AVG(dk_fantasy_points), 1) >= @minAvgDk
+          ORDER BY avg_dk DESC
+        `, { team, minGames, minAvgDk });
+      } else {
+        historicalRoster = await db.all(`
+          SELECT
+            player_name,
+            COUNT(*) as games,
+            ROUND(AVG(dk_fantasy_points), 1) as avg_dk,
+            ROUND(AVG(minutes), 1) as avg_min,
+            MAX(game_date) as last_game
+          FROM historical_games
+          WHERE team = ?
+            AND game_date >= date('now', '-30 days')
+          GROUP BY player_name
+          HAVING games >= ? AND avg_dk >= ?
+          ORDER BY avg_dk DESC
+        `, team, minGames, minAvgDk);
+      }
 
       // Find missing players (using normalized names to handle diacritics like Dončić vs Doncic)
       const missingPlayers = historicalRoster.filter(histPlayer => {

@@ -5,7 +5,7 @@ import yaml from 'js-yaml';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import db from '../config/database.js';
+import db, { DATABASE_TYPE } from '../config/database.js';
 import optimizerService from './optimizerService.js';
 import nbaStatsService from './nbaStatsService.js';
 
@@ -192,168 +192,6 @@ ${schemaDoc}
 - Salary cap: $50,000
 - Each player can only be used once per lineup
 
-**Advanced Projection Metrics (NEW):**
-You now have access to advanced variance and risk analysis metrics for sophisticated DFS strategy:
-
-1. **floor** - 25th percentile projection (worst-case reasonable outcome)
-   - Use for CASH GAMES to find safe plays
-   - Target: floor >= 30 for cash game cores
-
-2. **ceiling** - 75th percentile projection (best-case reasonable outcome)
-   - Use for GPP TOURNAMENTS to identify boom potential
-   - Target: ceiling >= 50 for tournament upside
-
-3. **volatility** - Coefficient of variation (std_dev / mean)
-   - <0.15 = Consistent/safe (CASH)
-   - 0.15-0.30 = Moderate variance
-   - >0.30 = High variance boom/bust (GPP with low ownership)
-
-4. **boom_probability** - % chance of exceeding value by 10+ fantasy points
-   - ≥30% = High boom potential (great for GPP)
-   - 10-30% = Moderate
-   - <10% = Low upside
-
-5. **bust_probability** - % chance of failing to meet value threshold
-   - <20% = Safe (good for cash)
-   - >40% = High bust risk (avoid in cash)
-
-6. **leverage_score** - GPP leverage: (boom_probability × 100) / (ownership + 1)
-   - ≥3.0 = HIGH LEVERAGE (ideal GPP play - low owned + high boom)
-   - 1.0-3.0 = Moderate leverage
-   - <1.0 = Low leverage (chalky)
-   - **PRIMARY GPP METRIC**: Sort by leverage_score DESC for best tournament plays
-
-7. **fppm** - Weighted fantasy points per minute (40% L3, 30% L5, 30% season)
-   - Captures current efficiency better than season averages
-
-8. **blowout_risk** - Risk magnitude when spreads > 10 points
-   - Favorites: early pull risk
-   - Underdogs: garbage time variance
-
-**Key DFS Strategies:**
-1. **Cash Games**:
-   - Prioritize: high floor, low volatility, low bust_probability
-   - SQL: WHERE floor >= 30 AND volatility < 0.20 AND bust_probability < 25
-
-2. **GPP/Tournaments**:
-   - Prioritize: high leverage_score, high ceiling, high boom_probability
-   - SQL: WHERE leverage_score >= 3.0 AND ceiling >= 50 AND boom_probability >= 25
-
-3. **Elite Leverage Plays**:
-   - Low ownership + high boom = maximum leverage
-   - SQL: WHERE leverage_score >= 3.0 AND rostership <= 10
-
-4. **Stacking**: Pair players from same team in high-scoring games (use vegas_implied_total)
-5. **Correlation**: Consider game environments (both teams from same matchup)
-6. **Punt Plays**: Use minimum salary players to afford studs
-7. **News Reactions**: Injury replacements often underpriced with low ownership
-
-**Historical Data Analysis (NEW):**
-You have access to historical game data synced from NBA.com. Use these tools to provide data-driven insights:
-
-1. **get_player_history** - Get a player's recent game log and performance trends
-   - Shows: recent games, avg DK points, ceiling/floor, home/away splits, B2B impact
-   - Use when: analyzing a player's form, consistency, or recent performance
-
-2. **get_matchup_history** - Get how a player performs vs a specific opponent
-   - Shows: all games vs that team, averages, individual game stats
-   - Use when: user asks about matchup-specific analysis
-
-3. **get_historical_summary** - Get overall data summary and top performers
-   - Shows: data range, league averages, B2B impact analysis, top fantasy scorers
-   - Use when: user wants to understand what historical data is available
-
-4. **get_usage_without_teammate** - Analyze player production when a teammate is OUT
-   - Shows: stats WITH teammate vs WITHOUT, usage bump %, recent games without
-   - Use when: user asks "How does X do when Y is out?" or when finding injury replacement value
-   - Example: "How does Kyrie do when Luka is out?" → get_usage_without_teammate(Kyrie, Luka, DAL)
-
-5. **analyze_roster_context** - Find historical games with similar roster configurations
-   - Shows: games where same players were out, who benefited most, usage bumps
-   - Use when: user asks about tonight's specific lineup scenario
-   - Example: "Lakers tonight without AD and LeBron - who benefits?" → analyze_roster_context(LAL, [active players], [AD, LeBron])
-
-6. **get_team_roster** - Get all players on a team with their averages
-   - Shows: full roster with games played, avg DK points, avg minutes
-   - Use when: need to know who's on a team or find teammates
-
-**When to use historical tools:**
-- "How has [player] been playing lately?" → get_player_history
-- "How does [player] do against [team]?" → get_matchup_history
-- "Who are the best fantasy players this season?" → get_historical_summary
-- "How does [player] do when [teammate] is out?" → get_usage_without_teammate
-- "Looking at [team] tonight with [player] out, who benefits?" → analyze_roster_context
-- "Who plays for [team]?" → get_team_roster
-- Support lineup recommendations with historical trends when relevant
-
-**ENHANCED PROJECTIONS & USAGE BUMP ANALYSIS:**
-
-When users ask for value plays, enhanced projections, or usage bump opportunities, YOU MUST follow this workflow:
-
-**STEP 1: Identify the current slate**
-\`\`\`sql
-SELECT slate_id, name, start_time FROM slates ORDER BY created_at DESC LIMIT 1;
-\`\`\`
-
-**STEP 2: Check for injured/OUT players**
-\`\`\`sql
-SELECT name, team, injury_status FROM players
-WHERE slate_id = '[slate_id]' AND injury_status = 'OUT'
-ORDER BY team;
-\`\`\`
-
-**STEP 3: For each team with OUT players, use historical tools:**
-- Use \`get_team_roster\` to see who's on the team
-- Use \`analyze_roster_context\` with activePlayers and absentPlayers arrays
-- This will automatically show you usage bump beneficiaries
-
-**STEP 4: Query players with enhanced metrics:**
-\`\`\`sql
-SELECT name, team, opponent, position, salary, projected_points,
-       floor, ceiling, boom_probability, bust_probability,
-       leverage_score, rostership, value
-FROM players
-WHERE slate_id = '[slate_id]'
-AND (injury_status IS NULL OR injury_status = '')
-ORDER BY leverage_score DESC
-LIMIT 20;
-\`\`\`
-
-**STEP 5: Combine historical usage bumps with current metrics:**
-- Cross-reference usage bump candidates from Step 3 with high leverage scores from Step 4
-- Highlight players who have BOTH:
-  - High leverage_score (≥3.0)
-  - Usage bump opportunity (from historical analysis)
-
-**IMPORTANT: When users ask for "enhanced projections" or "usage bumps":**
-- DO NOT say "I need more information"
-- Instead, AUTOMATICALLY execute Steps 1-5 above
-- The data is already in the database - you just need to query it!
-- Injured players are marked with injury_status = 'OUT'
-- All active players have their current projections with advanced metrics
-
-**Example User Request:** "Show me usage bump plays for today"
-**Your Response Flow:**
-1. Query slates → Get slate_id
-2. Query players → Find OUT players by team
-3. For each team with OUT players → analyze_roster_context
-4. Query players → Get high leverage scores
-5. Synthesize: Show usage bump candidates ranked by (usage_bump_% × leverage_score × value)
-
-**DON'T ASK - JUST DO IT!** You have all the tools and data needed to answer these questions proactively.
-
-**When Building Lineups:**
-- Always check current slate_id first if not provided
-- Parse player names carefully (handle variations like "LeBron James" vs "Lebron")
-- Use the lineup_builder tool with locked player IDs when user requests specific players
-- Consider game theory: in GPP, differentiation matters more than raw projections
-- Factor in Vegas lines: high totals = more fantasy points
-- **IMPORTANT: injury_status filtering:**
-  - Healthy players have NULL or empty injury_status
-  - NEVER filter for injury_status = 'ACTIVE' (this value doesn't exist!)
-  - Use: WHERE (injury_status IS NULL OR injury_status = '')
-  - Valid injury statuses: GTD, Questionable, Doubtful, OUT, Probable
-
 **Communication Style:**
 - Be conversational and insightful
 - Provide data-driven reasoning for recommendations
@@ -361,33 +199,11 @@ LIMIT 20;
 - Format lineup results clearly with positions, salaries, and projections
 - Include strategic rationale: WHY you made certain selections
 
-**Response Format for Tables and Lineups:**
-⚠️ **CRITICAL TABLE FORMATTING RULES:**
-- NEVER wrap tables in code blocks (no triple-backtick fences around tables)
-- ALWAYS use raw markdown table syntax directly in your response
-- Tables MUST use this exact format:
-
-| Position | Player | Team | Salary | Proj |
-|----------|--------|------|--------|------|
-| PG       | Name   | LAL  | $8,500 | 45.2 |
-| SG       | Name   | BOS  | $7,200 | 38.1 |
-
-**Example of CORRECT table formatting (copy this pattern):**
-
-| Player | Team | Salary | Projected Points | Value |
-|--------|------|--------|------------------|-------|
-| Luka Doncic | DAL | $11,000 | 58.5 | 5.32 |
-| LeBron James | LAL | $9,500 | 48.2 | 5.07 |
-
-**WRONG - Do NOT wrap the table in code block fences!**
-The table must be in plain text, NOT inside code block markers!
-
 **Important Notes:**
 - ALWAYS use tools to get actual data - never make up stats or player names
 - When users ask to "lock" or "build around" players, extract their names and use the lineup_builder tool
 - Show your work: explain SQL queries and optimization parameters
-- If data is missing or unclear, ask clarifying questions
-- Consider recency bias: recent performance (last 3-7 games) often matters more than season averages`;
+- If data is missing or unclear, ask clarifying questions`;
   }
 
   /**
@@ -408,8 +224,7 @@ The table must be in plain text, NOT inside code block markers!
             console.log(`\n📊 Executing SQL: ${explanation}`);
             console.log(`Query: ${query}`);
 
-            const stmt = db.prepare(query);
-            const results = stmt.all();
+            const results = await db.all(query);
 
             console.log(`✅ Returned ${results.length} rows`);
             return JSON.stringify({
@@ -459,8 +274,7 @@ The table must be in plain text, NOT inside code block markers!
 
               query += ' ORDER BY projected_points DESC LIMIT 5';
 
-              const stmt = db.prepare(query);
-              const results = stmt.all(...params);
+              const results = await db.all(query, ...params);
 
               if (results.length > 0) {
                 foundPlayers.push(...results);
@@ -505,8 +319,7 @@ The table must be in plain text, NOT inside code block markers!
             }
 
             // Get all players for this slate
-            const stmt = db.prepare('SELECT * FROM players WHERE slate_id = ?');
-            const players = stmt.all(slateId);
+            const players = await db.all('SELECT * FROM players WHERE slate_id = ?', slateId);
 
             if (players.length === 0) {
               return JSON.stringify({
@@ -578,13 +391,12 @@ The table must be in plain text, NOT inside code block markers!
           try {
             console.log('\n📅 Getting current slate...');
 
-            const stmt = db.prepare(`
+            const slate = await db.get(`
               SELECT slate_id, name, start_time, created_at
               FROM slates
               ORDER BY created_at DESC
               LIMIT 1
             `);
-            const slate = stmt.get();
 
             if (!slate) {
               return JSON.stringify({
@@ -618,8 +430,8 @@ The table must be in plain text, NOT inside code block markers!
           try {
             console.log(`\n📊 Getting historical data for: ${playerName}`);
 
-            const games = nbaStatsService.getPlayerHistory(playerName, Math.min(limit, 50));
-            const trends = nbaStatsService.getPerformanceTrends(playerName);
+            const games = await nbaStatsService.getPlayerHistory(playerName, Math.min(limit, 50));
+            const trends = await nbaStatsService.getPerformanceTrends(playerName);
 
             if (games.length === 0) {
               return JSON.stringify({
@@ -676,7 +488,7 @@ The table must be in plain text, NOT inside code block markers!
           try {
             console.log(`\n🏀 Getting matchup history: ${playerName} vs ${opponent}`);
 
-            const games = nbaStatsService.getMatchupHistory(playerName, opponent.toUpperCase());
+            const games = await nbaStatsService.getMatchupHistory(playerName, opponent.toUpperCase());
 
             if (games.length === 0) {
               return JSON.stringify({
@@ -730,9 +542,9 @@ The table must be in plain text, NOT inside code block markers!
           try {
             console.log('\n📈 Getting historical data summary...');
 
-            const summary = nbaStatsService.getHistoricalSummary();
-            const topPerformers = nbaStatsService.getTopPerformers(topN, 5);
-            const b2bAnalysis = nbaStatsService.analyzeB2BImpact();
+            const summary = await nbaStatsService.getHistoricalSummary();
+            const topPerformers = await nbaStatsService.getTopPerformers(topN, 5);
+            const b2bAnalysis = await nbaStatsService.analyzeB2BImpact();
 
             console.log(`✅ Summary: ${summary.total_games} games, ${summary.unique_players} players`);
 
@@ -766,20 +578,20 @@ The table must be in plain text, NOT inside code block markers!
         },
       }),
 
-      // Teammate Impact Tool - Usage without specific teammate
+      // Teammate Impact Tool
       new DynamicStructuredTool({
         name: 'get_usage_without_teammate',
-        description: 'Analyze how a player\'s usage and fantasy production changes when a specific teammate is OUT. Great for finding value when stars are injured or resting. Shows stats WITH vs WITHOUT the teammate.',
+        description: 'Analyze how a player\'s usage and fantasy production changes when a specific teammate is OUT.',
         schema: z.object({
           playerName: z.string().describe('The player to analyze (e.g., "Kyrie Irving")'),
           teammateName: z.string().describe('The teammate who is OUT (e.g., "Luka Doncic")'),
-          team: z.string().optional().describe('Team abbreviation to filter by (e.g., "DAL") - optional but helps accuracy'),
+          team: z.string().optional().describe('Team abbreviation to filter by (e.g., "DAL")'),
         }),
         func: async ({ playerName, teammateName, team }) => {
           try {
             console.log(`\n🔄 Analyzing ${playerName} usage without ${teammateName}...`);
 
-            const result = nbaStatsService.getUsageWithoutTeammate(playerName, teammateName, team);
+            const result = await nbaStatsService.getUsageWithoutTeammate(playerName, teammateName, team);
 
             if (!result.success) {
               return JSON.stringify(result);
@@ -809,14 +621,14 @@ The table must be in plain text, NOT inside code block markers!
         },
       }),
 
-      // Roster Context Analysis Tool - Tonight's lineup analysis
+      // Roster Context Analysis Tool
       new DynamicStructuredTool({
         name: 'analyze_roster_context',
-        description: 'Analyze historical games with similar roster configurations to tonight. Given which players are active and which are OUT, find games where the same situation occurred and identify who benefited most. Use this to find hidden value plays based on tonight\'s specific lineup.',
+        description: 'Analyze historical games with similar roster configurations.',
         schema: z.object({
           team: z.string().describe('Team abbreviation (e.g., "LAL", "DAL", "BOS")'),
           activePlayers: z.array(z.string()).describe('Array of player names expected to play tonight'),
-          absentPlayers: z.array(z.string()).describe('Array of player names who are OUT tonight (injured, resting, etc.)'),
+          absentPlayers: z.array(z.string()).describe('Array of player names who are OUT tonight'),
         }),
         func: async ({ team, activePlayers, absentPlayers }) => {
           try {
@@ -824,7 +636,7 @@ The table must be in plain text, NOT inside code block markers!
             console.log(`Active: ${activePlayers.join(', ')}`);
             console.log(`Absent: ${absentPlayers.join(', ')}`);
 
-            const result = nbaStatsService.analyzeRosterContext(team, activePlayers, absentPlayers);
+            const result = await nbaStatsService.analyzeRosterContext(team, activePlayers, absentPlayers);
 
             if (!result.success) {
               return JSON.stringify(result);
@@ -861,7 +673,7 @@ The table must be in plain text, NOT inside code block markers!
       // Get Team Roster Tool
       new DynamicStructuredTool({
         name: 'get_team_roster',
-        description: 'Get the historical roster and player averages for a specific team. Useful for seeing who plays for a team and their typical production.',
+        description: 'Get the historical roster and player averages for a specific team.',
         schema: z.object({
           team: z.string().describe('Team abbreviation (e.g., "LAL", "DAL", "BOS")'),
         }),
@@ -869,7 +681,7 @@ The table must be in plain text, NOT inside code block markers!
           try {
             console.log(`\n📋 Getting roster for ${team}...`);
 
-            const roster = nbaStatsService.getTeamRoster(team.toUpperCase());
+            const roster = await nbaStatsService.getTeamRoster(team.toUpperCase());
 
             if (roster.length === 0) {
               return JSON.stringify({
@@ -1071,21 +883,26 @@ The table must be in plain text, NOT inside code block markers!
   /**
    * Create new chat session
    */
-  createSession(slateId = null, title = null) {
+  async createSession(slateId = null, title = null) {
     try {
-      const stmt = db.prepare(`
-        INSERT INTO chat_sessions (slate_id, title)
-        VALUES (?, ?)
-      `);
+      if (DATABASE_TYPE === 'azuresql') {
+        const result = await db.get(`
+          INSERT INTO chat_sessions (slate_id, title)
+          OUTPUT INSERTED.id
+          VALUES (@slateId, @title)
+        `, { slateId, title: title || 'New Chat' });
 
-      const result = stmt.run(slateId, title || 'New Chat');
+        console.log(`✅ Created chat session ${result?.id}`);
+        return { success: true, sessionId: result?.id };
+      } else {
+        const result = await db.run(`
+          INSERT INTO chat_sessions (slate_id, title)
+          VALUES (?, ?)
+        `, slateId, title || 'New Chat');
 
-      console.log(`✅ Created chat session ${result.lastInsertRowid}`);
-
-      return {
-        success: true,
-        sessionId: result.lastInsertRowid,
-      };
+        console.log(`✅ Created chat session ${result.lastInsertRowid}`);
+        return { success: true, sessionId: result.lastInsertRowid };
+      }
     } catch (error) {
       console.error('❌ Create Session Error:', error);
       return { success: false, error: error.message };
@@ -1095,32 +912,46 @@ The table must be in plain text, NOT inside code block markers!
   /**
    * Save message to database
    */
-  saveMessage(sessionId, role, content, metadata = null) {
+  async saveMessage(sessionId, role, content, metadata = null) {
     try {
-      const stmt = db.prepare(`
-        INSERT INTO chat_messages (session_id, role, content, metadata)
-        VALUES (?, ?, ?, ?)
-      `);
+      if (DATABASE_TYPE === 'azuresql') {
+        const result = await db.get(`
+          INSERT INTO chat_messages (session_id, role, content, metadata)
+          OUTPUT INSERTED.id
+          VALUES (@sessionId, @role, @content, @metadata)
+        `, {
+          sessionId,
+          role,
+          content,
+          metadata: metadata ? JSON.stringify(metadata) : null
+        });
 
-      const result = stmt.run(
-        sessionId,
-        role,
-        content,
-        metadata ? JSON.stringify(metadata) : null
-      );
+        await db.run(`
+          UPDATE chat_sessions
+          SET updated_at = GETDATE()
+          WHERE id = @sessionId
+        `, { sessionId });
 
-      // Update session timestamp
-      const updateStmt = db.prepare(`
-        UPDATE chat_sessions
-        SET updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-      `);
-      updateStmt.run(sessionId);
+        return { success: true, messageId: result?.id };
+      } else {
+        const result = await db.run(`
+          INSERT INTO chat_messages (session_id, role, content, metadata)
+          VALUES (?, ?, ?, ?)
+        `,
+          sessionId,
+          role,
+          content,
+          metadata ? JSON.stringify(metadata) : null
+        );
 
-      return {
-        success: true,
-        messageId: result.lastInsertRowid,
-      };
+        await db.run(`
+          UPDATE chat_sessions
+          SET updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `, sessionId);
+
+        return { success: true, messageId: result.lastInsertRowid };
+      }
     } catch (error) {
       console.error('❌ Save Message Error:', error);
       return { success: false, error: error.message };
@@ -1130,17 +961,15 @@ The table must be in plain text, NOT inside code block markers!
   /**
    * Get chat history for session
    */
-  getChatHistory(sessionId, limit = 50) {
+  async getChatHistory(sessionId, limit = 50) {
     try {
-      const stmt = db.prepare(`
+      const messages = await db.all(`
         SELECT id, role, content, metadata, created_at
         FROM chat_messages
         WHERE session_id = ?
         ORDER BY created_at ASC
         LIMIT ?
-      `);
-
-      const messages = stmt.all(sessionId, limit);
+      `, sessionId, limit);
 
       return {
         success: true,
@@ -1158,9 +987,9 @@ The table must be in plain text, NOT inside code block markers!
   /**
    * Get all chat sessions
    */
-  getAllSessions(limit = 20) {
+  async getAllSessions(limit = 20) {
     try {
-      const stmt = db.prepare(`
+      const sessions = await db.all(`
         SELECT
           cs.id,
           cs.title,
@@ -1173,14 +1002,9 @@ The table must be in plain text, NOT inside code block markers!
         GROUP BY cs.id
         ORDER BY cs.updated_at DESC
         LIMIT ?
-      `);
+      `, limit);
 
-      const sessions = stmt.all(limit);
-
-      return {
-        success: true,
-        sessions,
-      };
+      return { success: true, sessions };
     } catch (error) {
       console.error('❌ Get Sessions Error:', error);
       return { success: false, error: error.message, sessions: [] };
@@ -1190,13 +1014,10 @@ The table must be in plain text, NOT inside code block markers!
   /**
    * Delete chat session
    */
-  deleteSession(sessionId) {
+  async deleteSession(sessionId) {
     try {
-      const stmt = db.prepare('DELETE FROM chat_sessions WHERE id = ?');
-      stmt.run(sessionId);
-
+      await db.run('DELETE FROM chat_sessions WHERE id = ?', sessionId);
       console.log(`✅ Deleted chat session ${sessionId}`);
-
       return { success: true };
     } catch (error) {
       console.error('❌ Delete Session Error:', error);

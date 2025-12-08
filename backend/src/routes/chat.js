@@ -24,7 +24,7 @@ router.post('/', async (req, res) => {
     // Create new session if not provided
     let activeSessionId = sessionId;
     if (!activeSessionId) {
-      const sessionResult = aiChatService.createSession(slateId);
+      const sessionResult = await aiChatService.createSession(slateId);
       if (!sessionResult.success) {
         return res.status(500).json(sessionResult);
       }
@@ -32,11 +32,11 @@ router.post('/', async (req, res) => {
     }
 
     // Get chat history for context
-    const historyResult = aiChatService.getChatHistory(activeSessionId);
+    const historyResult = await aiChatService.getChatHistory(activeSessionId);
     const chatHistory = historyResult.success ? historyResult.messages : [];
 
     // Save user message
-    aiChatService.saveMessage(activeSessionId, 'user', message);
+    await aiChatService.saveMessage(activeSessionId, 'user', message);
 
     // Get AI response
     const response = await aiChatService.chat(message, activeSessionId, chatHistory);
@@ -46,7 +46,7 @@ router.post('/', async (req, res) => {
     }
 
     // Save assistant message
-    aiChatService.saveMessage(activeSessionId, 'assistant', response.message, {
+    await aiChatService.saveMessage(activeSessionId, 'assistant', response.message, {
       toolsUsed: response.toolsUsed,
     });
 
@@ -73,7 +73,7 @@ router.post('/', async (req, res) => {
 router.get('/sessions', async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 20;
-    const result = aiChatService.getAllSessions(limit);
+    const result = await aiChatService.getAllSessions(limit);
     res.json(result);
   } catch (error) {
     console.error('❌ Get sessions error:', error);
@@ -93,7 +93,7 @@ router.get('/sessions/:sessionId', async (req, res) => {
     const { sessionId } = req.params;
     const limit = parseInt(req.query.limit) || 50;
 
-    const result = aiChatService.getChatHistory(parseInt(sessionId), limit);
+    const result = await aiChatService.getChatHistory(parseInt(sessionId), limit);
     res.json(result);
   } catch (error) {
     console.error('❌ Get history error:', error);
@@ -112,7 +112,7 @@ router.get('/sessions/:sessionId', async (req, res) => {
 router.post('/sessions', async (req, res) => {
   try {
     const { slateId, title } = req.body;
-    const result = aiChatService.createSession(slateId, title);
+    const result = await aiChatService.createSession(slateId, title);
     res.json(result);
   } catch (error) {
     console.error('❌ Create session error:', error);
@@ -130,7 +130,7 @@ router.post('/sessions', async (req, res) => {
 router.delete('/sessions/:sessionId', async (req, res) => {
   try {
     const { sessionId } = req.params;
-    const result = aiChatService.deleteSession(parseInt(sessionId));
+    const result = await aiChatService.deleteSession(parseInt(sessionId));
     res.json(result);
   } catch (error) {
     console.error('❌ Delete session error:', error);

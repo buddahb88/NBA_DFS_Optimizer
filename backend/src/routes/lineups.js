@@ -30,7 +30,7 @@ function validateLineup(players) {
 router.get('/', async (req, res) => {
   try {
     const { slateId } = req.query;
-    const lineups = lineupModel.getAll(slateId);
+    const lineups = await lineupModel.getAll(slateId);
     res.json(lineups);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -40,7 +40,7 @@ router.get('/', async (req, res) => {
 // Get a specific lineup with players
 router.get('/:id', async (req, res) => {
   try {
-    const lineup = lineupModel.getById(req.params.id);
+    const lineup = await lineupModel.getById(req.params.id);
     if (!lineup) {
       return res.status(404).json({ error: 'Lineup not found' });
     }
@@ -77,7 +77,7 @@ router.post('/', async (req, res) => {
     );
 
     // Create lineup
-    const lineupId = lineupModel.create({
+    const lineupId = await lineupModel.create({
       slateId,
       name,
       totalSalary: validation.totalSalary,
@@ -90,10 +90,10 @@ router.post('/', async (req, res) => {
       positionSlot: player.positionSlot || DK_CONSTRAINTS.POSITIONS[index]
     }));
 
-    lineupModel.addPlayers(lineupId, lineupPlayers);
+    await lineupModel.addPlayers(lineupId, lineupPlayers);
 
     // Return the created lineup
-    const lineup = lineupModel.getById(lineupId);
+    const lineup = await lineupModel.getById(lineupId);
     res.status(201).json(lineup);
   } catch (error) {
     console.error('Create lineup error:', error);
@@ -106,13 +106,13 @@ router.put('/:id', async (req, res) => {
   try {
     const { name, totalSalary, projectedPoints } = req.body;
 
-    lineupModel.update(req.params.id, {
+    await lineupModel.update(req.params.id, {
       name,
       totalSalary,
       projectedPoints
     });
 
-    const lineup = lineupModel.getById(req.params.id);
+    const lineup = await lineupModel.getById(req.params.id);
     res.json(lineup);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -122,7 +122,7 @@ router.put('/:id', async (req, res) => {
 // Delete a lineup
 router.delete('/:id', async (req, res) => {
   try {
-    lineupModel.delete(req.params.id);
+    await lineupModel.delete(req.params.id);
     res.json({ message: 'Lineup deleted successfully' });
   } catch (error) {
     res.status(500).json({ error: error.message });

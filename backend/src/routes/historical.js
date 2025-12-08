@@ -22,9 +22,9 @@ let isSyncing = false;
  * Check if historical data exists and if updates are needed
  * Use this to determine whether to show "Full Populate" or "Update" button
  */
-router.get('/status', (req, res) => {
+router.get('/status', async (req, res) => {
   try {
-    const status = nbaStatsService.getDataStatus();
+    const status = await nbaStatsService.getDataStatus();
     res.json({
       success: true,
       ...status,
@@ -43,10 +43,10 @@ router.get('/status', (req, res) => {
  * GET /api/historical/summary
  * Get summary of historical data in database
  */
-router.get('/summary', (req, res) => {
+router.get('/summary', async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
-    const summary = nbaStatsService.getHistoricalSummary(startDate, endDate);
+    const summary = await nbaStatsService.getHistoricalSummary(startDate, endDate);
     res.json({
       success: true,
       summary: {
@@ -82,7 +82,7 @@ router.post('/sync', async (req, res) => {
   }
 
   // Check current data status
-  const status = nbaStatsService.getDataStatus();
+  const status = await nbaStatsService.getDataStatus();
 
   // Start sync in background
   isSyncing = true;
@@ -137,7 +137,7 @@ router.post('/sync', async (req, res) => {
       for (let i = 0; i < boxScores.length; i++) {
         const game = boxScores[i];
         try {
-          const wasInserted = nbaStatsService.insertGameFromBoxScore(game);
+          const wasInserted = await nbaStatsService.insertGameFromBoxScore(game);
           if (wasInserted) {
             imported++;
           } else {
@@ -198,13 +198,13 @@ router.get('/sync/status', (req, res) => {
  * GET /api/historical/player/:name
  * Get historical game log for a player
  */
-router.get('/player/:name', (req, res) => {
+router.get('/player/:name', async (req, res) => {
   try {
     const { name } = req.params;
     const { limit = 20 } = req.query;
 
-    const games = nbaStatsService.getPlayerHistory(name, parseInt(limit));
-    const trends = nbaStatsService.getPerformanceTrends(name);
+    const games = await nbaStatsService.getPlayerHistory(name, parseInt(limit));
+    const trends = await nbaStatsService.getPerformanceTrends(name);
 
     res.json({
       success: true,
@@ -221,11 +221,11 @@ router.get('/player/:name', (req, res) => {
  * GET /api/historical/matchup/:player/:opponent
  * Get player's history vs specific opponent
  */
-router.get('/matchup/:player/:opponent', (req, res) => {
+router.get('/matchup/:player/:opponent', async (req, res) => {
   try {
     const { player, opponent } = req.params;
 
-    const games = nbaStatsService.getMatchupHistory(player, opponent.toUpperCase());
+    const games = await nbaStatsService.getMatchupHistory(player, opponent.toUpperCase());
 
     if (games.length === 0) {
       return res.json({
@@ -259,11 +259,11 @@ router.get('/matchup/:player/:opponent', (req, res) => {
  * GET /api/historical/top-performers
  * Get top performers by average DK fantasy points
  */
-router.get('/top-performers', (req, res) => {
+router.get('/top-performers', async (req, res) => {
   try {
     const { limit = 20, minGames = 10, startDate, endDate } = req.query;
 
-    const performers = nbaStatsService.getTopPerformers(
+    const performers = await nbaStatsService.getTopPerformers(
       parseInt(limit),
       parseInt(minGames),
       startDate,
@@ -284,9 +284,9 @@ router.get('/top-performers', (req, res) => {
  * GET /api/historical/b2b-analysis
  * Analyze back-to-back impact on performance
  */
-router.get('/b2b-analysis', (req, res) => {
+router.get('/b2b-analysis', async (req, res) => {
   try {
-    const analysis = nbaStatsService.analyzeB2BImpact();
+    const analysis = await nbaStatsService.analyzeB2BImpact();
 
     res.json({
       success: true,
@@ -304,22 +304,22 @@ router.get('/b2b-analysis', (req, res) => {
  * GET /api/historical/ai-context
  * Get formatted historical context for AI chat
  */
-router.get('/ai-context', (req, res) => {
+router.get('/ai-context', async (req, res) => {
   try {
     const { playerNames } = req.query;
 
-    const summary = nbaStatsService.getHistoricalSummary();
-    const b2bAnalysis = nbaStatsService.analyzeB2BImpact();
-    const topPerformers = nbaStatsService.getTopPerformers(10, 10);
+    const summary = await nbaStatsService.getHistoricalSummary();
+    const b2bAnalysis = await nbaStatsService.analyzeB2BImpact();
+    const topPerformers = await nbaStatsService.getTopPerformers(10, 10);
 
     let playerContexts = [];
     if (playerNames) {
       const names = playerNames.split(',').map(n => n.trim());
-      playerContexts = names.map(name => ({
+      playerContexts = await Promise.all(names.map(async name => ({
         name,
-        trends: nbaStatsService.getPerformanceTrends(name),
-        recentGames: nbaStatsService.getPlayerHistory(name, 5)
-      }));
+        trends: await nbaStatsService.getPerformanceTrends(name),
+        recentGames: await nbaStatsService.getPlayerHistory(name, 5)
+      })));
     }
 
     res.json({
@@ -349,12 +349,12 @@ router.get('/ai-context', (req, res) => {
  * GET /api/historical/teammate-impact/:player/:teammate
  * Analyze player performance when a teammate is OUT
  */
-router.get('/teammate-impact/:player/:teammate', (req, res) => {
+router.get('/teammate-impact/:player/:teammate', async (req, res) => {
   try {
     const { player, teammate } = req.params;
     const { team } = req.query;
 
-    const result = nbaStatsService.getUsageWithoutTeammate(player, teammate, team);
+    const result = await nbaStatsService.getUsageWithoutTeammate(player, teammate, team);
 
     if (!result.success) {
       return res.json(result);
@@ -382,7 +382,7 @@ router.get('/teammate-impact/:player/:teammate', (req, res) => {
  * POST /api/historical/roster-context
  * Analyze historical games with similar roster configurations
  */
-router.post('/roster-context', (req, res) => {
+router.post('/roster-context', async (req, res) => {
   try {
     const { team, activePlayers, absentPlayers } = req.body;
 
@@ -392,7 +392,7 @@ router.post('/roster-context', (req, res) => {
       });
     }
 
-    const result = nbaStatsService.analyzeRosterContext(
+    const result = await nbaStatsService.analyzeRosterContext(
       team.toUpperCase(),
       activePlayers,
       absentPlayers || []
@@ -424,11 +424,11 @@ router.post('/roster-context', (req, res) => {
  * GET /api/historical/team-roster/:team
  * Get historical roster and averages for a team
  */
-router.get('/team-roster/:team', (req, res) => {
+router.get('/team-roster/:team', async (req, res) => {
   try {
     const { team } = req.params;
 
-    const roster = nbaStatsService.getTeamRoster(team.toUpperCase());
+    const roster = await nbaStatsService.getTeamRoster(team.toUpperCase());
 
     if (roster.length === 0) {
       return res.json({
@@ -458,11 +458,11 @@ router.get('/team-roster/:team', (req, res) => {
  * GET /api/historical/teammates/:player
  * Get all teammates for a player based on historical games
  */
-router.get('/teammates/:player', (req, res) => {
+router.get('/teammates/:player', async (req, res) => {
   try {
     const { player } = req.params;
 
-    const teammates = nbaStatsService.getTeammates(player);
+    const teammates = await nbaStatsService.getTeammates(player);
 
     res.json({
       success: true,
@@ -480,7 +480,7 @@ router.get('/teammates/:player', (req, res) => {
  * Analyze all players in the current slate against historical data
  * Returns KPIs: hot streaks, usage bumps, matchup advantages, etc.
  */
-router.post('/slate-insights', (req, res) => {
+router.post('/slate-insights', async (req, res) => {
   try {
     const { players, startDate, endDate } = req.body;
 
@@ -488,7 +488,7 @@ router.post('/slate-insights', (req, res) => {
       return res.status(400).json({ error: 'players array is required' });
     }
 
-    const insights = nbaStatsService.getSlateInsights(players, startDate, endDate);
+    const insights = await nbaStatsService.getSlateInsights(players, startDate, endDate);
 
     res.json({
       success: true,
@@ -504,11 +504,11 @@ router.post('/slate-insights', (req, res) => {
  * GET /api/historical/hot-streaks
  * Get players currently on hot streaks (above average recent performance)
  */
-router.get('/hot-streaks', (req, res) => {
+router.get('/hot-streaks', async (req, res) => {
   try {
     const { limit = 20, minGames = 5, startDate, endDate } = req.query;
 
-    const hotStreaks = nbaStatsService.getHotStreaks(parseInt(limit), parseInt(minGames), startDate, endDate);
+    const hotStreaks = await nbaStatsService.getHotStreaks(parseInt(limit), parseInt(minGames), startDate, endDate);
 
     res.json({
       success: true,
@@ -524,11 +524,11 @@ router.get('/hot-streaks', (req, res) => {
  * GET /api/historical/cold-streaks
  * Get players currently underperforming (below average recent performance)
  */
-router.get('/cold-streaks', (req, res) => {
+router.get('/cold-streaks', async (req, res) => {
   try {
     const { limit = 20, minGames = 5, startDate, endDate } = req.query;
 
-    const coldStreaks = nbaStatsService.getColdStreaks(parseInt(limit), parseInt(minGames), startDate, endDate);
+    const coldStreaks = await nbaStatsService.getColdStreaks(parseInt(limit), parseInt(minGames), startDate, endDate);
 
     res.json({
       success: true,
@@ -544,11 +544,11 @@ router.get('/cold-streaks', (req, res) => {
  * GET /api/historical/consistency-leaders
  * Get most consistent performers (low variance in DK points)
  */
-router.get('/consistency-leaders', (req, res) => {
+router.get('/consistency-leaders', async (req, res) => {
   try {
     const { limit = 20, minGames = 8, startDate, endDate } = req.query;
 
-    const leaders = nbaStatsService.getConsistencyLeaders(parseInt(limit), parseInt(minGames), startDate, endDate);
+    const leaders = await nbaStatsService.getConsistencyLeaders(parseInt(limit), parseInt(minGames), startDate, endDate);
 
     res.json({
       success: true,
@@ -564,11 +564,11 @@ router.get('/consistency-leaders', (req, res) => {
  * GET /api/historical/boom-bust-players
  * Get high-variance players good for GPP tournaments
  */
-router.get('/boom-bust-players', (req, res) => {
+router.get('/boom-bust-players', async (req, res) => {
   try {
     const { limit = 20, minGames = 8, startDate, endDate } = req.query;
 
-    const players = nbaStatsService.getBoomBustPlayers(parseInt(limit), parseInt(minGames), startDate, endDate);
+    const players = await nbaStatsService.getBoomBustPlayers(parseInt(limit), parseInt(minGames), startDate, endDate);
 
     res.json({
       success: true,
@@ -585,7 +585,7 @@ router.get('/boom-bust-players', (req, res) => {
  * Detect players who may benefit from missing teammates
  * Compares tonight's slate roster against historical data to find missing high-usage players
  */
-router.post('/usage-bumps', (req, res) => {
+router.post('/usage-bumps', async (req, res) => {
   try {
     const { players, minGames = 8, minAvgDk = 25 } = req.body;
 
@@ -593,7 +593,7 @@ router.post('/usage-bumps', (req, res) => {
       return res.status(400).json({ error: 'players array is required' });
     }
 
-    const usageBumps = nbaStatsService.detectUsageBumps(
+    const usageBumps = await nbaStatsService.detectUsageBumps(
       players,
       parseInt(minGames),
       parseInt(minAvgDk)
@@ -614,7 +614,7 @@ router.post('/usage-bumps', (req, res) => {
  * POST /api/historical/missing-players
  * Get report of high-usage players missing from tonight's slate
  */
-router.post('/missing-players', (req, res) => {
+router.post('/missing-players', async (req, res) => {
   try {
     const { players, minGames = 5, minAvgDk = 20 } = req.body;
 
@@ -622,7 +622,7 @@ router.post('/missing-players', (req, res) => {
       return res.status(400).json({ error: 'players array is required' });
     }
 
-    const report = nbaStatsService.getMissingPlayersReport(
+    const report = await nbaStatsService.getMissingPlayersReport(
       players,
       parseInt(minGames),
       parseInt(minAvgDk)

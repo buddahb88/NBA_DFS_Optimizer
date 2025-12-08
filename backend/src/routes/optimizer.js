@@ -32,7 +32,7 @@ router.post('/generate', async (req, res) => {
     console.log(`🎯 Optimizing ${numLineups} lineup(s) for slate ${slateId} (${mode} mode)`);
 
     // Get all players for the slate
-    const players = playerModel.getBySlateId(slateId);
+    const players = await playerModel.getBySlateId(slateId);
 
     if (!players || players.length === 0) {
       return res.status(404).json({ error: 'No players found for this slate' });
@@ -76,7 +76,7 @@ router.post('/auto-tune', async (req, res) => {
     console.log(`🤖 Auto-tuning settings for slate ${slateId} (${mode} mode)`);
 
     // Get all players for the slate
-    const players = playerModel.getBySlateId(slateId);
+    const players = await playerModel.getBySlateId(slateId);
 
     if (!players || players.length === 0) {
       return res.status(404).json({ error: 'No players found for this slate' });
@@ -119,7 +119,7 @@ router.post('/slate-breakdown', async (req, res) => {
     console.log(`🤖 Generating AI slate breakdown for slate ${slateId} (${mode} mode)`);
 
     // Get all players for the slate
-    const players = playerModel.getBySlateId(slateId);
+    const players = await playerModel.getBySlateId(slateId);
 
     if (!players || players.length === 0) {
       return res.status(404).json({ error: 'No players found for this slate' });
@@ -158,7 +158,7 @@ router.post('/review-lineup', async (req, res) => {
     console.log(`🤖 AI reviewing lineup for slate ${slateId} (${mode} mode)`);
 
     // Get all players for context
-    const players = playerModel.getBySlateId(slateId);
+    const players = await playerModel.getBySlateId(slateId);
 
     if (!players || players.length === 0) {
       return res.status(404).json({ error: 'No players found for this slate' });

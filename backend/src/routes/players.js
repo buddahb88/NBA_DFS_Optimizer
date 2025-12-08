@@ -20,7 +20,7 @@ router.get('/:slateId', async (req, res) => {
     if (maxSalary) filters.maxSalary = parseInt(maxSalary);
     if (team) filters.team = team;
 
-    const players = playerModel.getBySlateId(slateId, filters);
+    const players = await playerModel.getBySlateId(slateId, filters);
     res.json(players);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -62,11 +62,11 @@ router.post('/:slateId/sync', async (req, res) => {
 
     // Clear all existing slates and players (single active slate model)
     console.log(`  🗑️  Clearing existing slate data...`);
-    playerModel.deleteAll();
-    slateModel.deleteAll();
+    await playerModel.deleteAll();
+    await slateModel.deleteAll();
 
     // Create the new slate
-    slateModel.createOrUpdate({
+    await slateModel.createOrUpdate({
       slateId,
       name: req.body.name || `NBA Slate ${slateId}`,
       sport: 'NBA',
@@ -74,11 +74,11 @@ router.post('/:slateId/sync', async (req, res) => {
     });
 
     // Bulk insert players (with defense-adjusted projections)
-    playerModel.bulkCreateOrUpdate(slateId, players);
+    await playerModel.bulkCreateOrUpdate(slateId, players);
 
     console.log(`✅ Complete! Synced ${players.length} players with matchup-adjusted projections (overall defense + pace + position defense)`);
 
-    const syncedPlayers = playerModel.getBySlateId(slateId);
+    const syncedPlayers = await playerModel.getBySlateId(slateId);
     res.json({
       message: 'Players synced successfully',
       count: players.length,
@@ -93,7 +93,7 @@ router.post('/:slateId/sync', async (req, res) => {
 // Get a specific player
 router.get('/player/:id', async (req, res) => {
   try {
-    const player = playerModel.getById(req.params.id);
+    const player = await playerModel.getById(req.params.id);
     if (!player) {
       return res.status(404).json({ error: 'Player not found' });
     }
@@ -120,7 +120,7 @@ router.post('/:slateId/recalculate-projections', async (req, res) => {
     console.log(`═══════════════════════════════════════════════════════`);
 
     // Get all players with full data
-    const players = playerModel.getAllForProjections(slateId);
+    const players = await playerModel.getAllForProjections(slateId);
 
     if (!players || players.length === 0) {
       return res.status(404).json({ error: 'No players found for this slate' });
@@ -134,7 +134,7 @@ router.post('/:slateId/recalculate-projections', async (req, res) => {
     let totalAdjusted = 0;
 
     for (const player of players) {
-      const result = projectionService.calculateAdjustedProjection(player);
+      const result = await projectionService.calculateAdjustedProjection(player);
 
       projectionResults.push({
         player_id: player.player_id,
@@ -162,7 +162,7 @@ router.post('/:slateId/recalculate-projections', async (req, res) => {
     }
 
     // Update database with new projections
-    const updated = playerModel.bulkUpdateProjections(slateId, projectionResults);
+    const updated = await playerModel.bulkUpdateProjections(slateId, projectionResults);
 
     console.log(`\n✅ Projection recalculation complete!`);
     console.log(`   📊 Players updated: ${updated}`);
@@ -224,7 +224,7 @@ router.post('/:slateId/reset-projections', async (req, res) => {
 
     console.log(`🔄 Resetting projections to RotoWire baseline for slate ${slateId}`);
 
-    const result = playerModel.resetProjections(slateId);
+    const result = await playerModel.resetProjections(slateId);
 
     res.json({
       success: true,
@@ -244,14 +244,14 @@ router.get('/:slateId/projection/:playerId', async (req, res) => {
   try {
     const { slateId, playerId } = req.params;
 
-    const players = playerModel.getAllForProjections(slateId);
+    const players = await playerModel.getAllForProjections(slateId);
     const player = players.find(p => p.player_id === playerId);
 
     if (!player) {
       return res.status(404).json({ error: 'Player not found' });
     }
 
-    const result = projectionService.calculateAdjustedProjection(player);
+    const result = await projectionService.calculateAdjustedProjection(player);
 
     res.json({
       player: {
@@ -303,7 +303,7 @@ router.post('/:slateId/enhanced-projections', async (req, res) => {
     projectionService.clearCache();
 
     // Get all players with full data
-    const players = playerModel.getAllForProjections(slateId);
+    const players = await playerModel.getAllForProjections(slateId);
 
     if (!players || players.length === 0) {
       return res.status(404).json({ error: 'No players found for this slate' });
@@ -312,7 +312,7 @@ router.post('/:slateId/enhanced-projections', async (req, res) => {
     console.log(`📊 Found ${players.length} players to process`);
 
     // Calculate enhanced projections
-    const enhancedResults = projectionService.calculateSlateEnhancedProjections(players, slateDate);
+    const enhancedResults = await projectionService.calculateSlateEnhancedProjections(players, slateDate);
 
     // Optionally update database
     if (updateDb) {
@@ -323,7 +323,7 @@ router.post('/:slateId/enhanced-projections', async (req, res) => {
         floor: r.historical?.floor || r.enhanced_projection * 0.7,
         ceiling: r.historical?.ceiling || r.enhanced_projection * 1.3
       }));
-      playerModel.bulkUpdateProjections(slateId, projectionsToUpdate);
+      await playerModel.bulkUpdateProjections(slateId, projectionsToUpdate);
     }
 
     // Calculate summary stats
@@ -463,7 +463,7 @@ router.get('/:slateId/enhanced-projection/:playerId', async (req, res) => {
     const { slateId, playerId } = req.params;
     const { slateDate = null } = req.query;
 
-    const players = playerModel.getAllForProjections(slateId);
+    const players = await playerModel.getAllForProjections(slateId);
     const player = players.find(p => p.player_id === playerId);
 
     if (!player) {
@@ -473,7 +473,7 @@ router.get('/:slateId/enhanced-projection/:playerId', async (req, res) => {
     // Get slate roster for usage bump detection
     const slateRoster = players.map(p => p.name);
 
-    const result = projectionService.calculateEnhancedProjection(player, {
+    const result = await projectionService.calculateEnhancedProjection(player, {
       slateRoster,
       slateDate,
       isHome: player.is_home === 1 || player.is_home === true,

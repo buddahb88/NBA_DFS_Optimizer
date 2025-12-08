@@ -18,7 +18,7 @@ router.get('/list', async (req, res) => {
 // Get the current active slate (most recent one)
 router.get('/active', async (req, res) => {
   try {
-    const slates = slateModel.getAll();
+    const slates = await slateModel.getAll();
     if (slates.length === 0) {
       return res.json(null);
     }
@@ -32,7 +32,7 @@ router.get('/active', async (req, res) => {
 // Get all slates
 router.get('/', async (req, res) => {
   try {
-    const slates = slateModel.getAll();
+    const slates = await slateModel.getAll();
     res.json(slates);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -42,7 +42,7 @@ router.get('/', async (req, res) => {
 // Get a specific slate
 router.get('/:slateId', async (req, res) => {
   try {
-    const slate = slateModel.getById(req.params.slateId);
+    const slate = await slateModel.getById(req.params.slateId);
     if (!slate) {
       return res.status(404).json({ error: 'Slate not found' });
     }
@@ -61,14 +61,14 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'slateId and name are required' });
     }
 
-    slateModel.createOrUpdate({
+    await slateModel.createOrUpdate({
       slateId,
       name,
       sport: sport || 'NBA',
       startTime
     });
 
-    const slate = slateModel.getById(slateId);
+    const slate = await slateModel.getById(slateId);
     res.json(slate);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -78,7 +78,7 @@ router.post('/', async (req, res) => {
 // Delete a slate
 router.delete('/:slateId', async (req, res) => {
   try {
-    slateModel.delete(req.params.slateId);
+    await slateModel.delete(req.params.slateId);
     res.json({ message: 'Slate deleted successfully' });
   } catch (error) {
     res.status(500).json({ error: error.message });
