@@ -1,0 +1,71 @@
+/*
+ * Design tokens. Values are RGB channels so Tailwind can apply alpha.
+ * Light is the base; `.dark` on <html> switches to the dark palette.
+ * `.theme-light` re-scopes a subtree to light tokens (used to host legacy
+ * pages that were designed for a light background inside the dark shell).
+ */
+:root,
+.theme-light {
+  --canvas: 244 245 247;
+  --surface: 255 255 255;
+  --surface-raised: 248 249 251;
+  --surface-sunken: 239 241 244;
+  --line: 226 229 234;
+  --line-strong: 203 208 216;
+
+  --fg: 17 20 26;
+  --fg-muted: 82 90 104;
+  --fg-subtle: 130 138 152;
+  --fg-inverted: 255 255 255;
+
+  --accent: 37 99 235;
+  --accent-hover: 29 78 216;
+  --accent-fg: 255 255 255;
+  --accent-soft: 219 234 254;
+
+  --positive: 4 145 92;
+  --positive-soft: 209 250 229;
+  --negative: 220 38 38;
+  --negative-soft: 254 226 226;
+  --caution: 180 113 6;
+  --caution-soft: 254 243 199;
+  --info: 8 132 168;
+  --info-soft: 207 250 254;
+
+  color-scheme: light;
+}
+
+.dark {
+  --canvas: 11 13 17;
+  --surface: 19 22 28;
+  --surface-raised: 27 31 39;
+  --surface-sunken: 14 16 21;
+  --line: 38 43 53;
+  --line-strong: 56 63 76;
+
+  --fg: 230 233 239;
+  --fg-muted: 150 158 172;
+  --fg-subtle: 104 112 127;
+  --fg-inverted: 11 13 17;
+
+  --accent: 77 141 255;
+  --accent-hover: 110 162 255;
+  --accent-fg: 255 255 255;
+  --accent-soft: 26 41 71;
+
+  --positive: 52 211 140;
+  --positive-soft: 15 48 37;
+  --negative: 248 98 98;
+  --negative-soft: 62 22 26;
+  --caution: 245 179 66;
+  --caution-soft: 58 42 14;
+  --info: 56 199 230;
+  --info-soft: 12 44 54;
+
+  color-scheme: dark;
+}
+
+/* .theme-light must win over an ancestor .dark */
+.dark .theme-light {
+  color-scheme: light;
+}
