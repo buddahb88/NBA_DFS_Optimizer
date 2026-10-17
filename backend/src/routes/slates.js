@@ -1,6 +1,8 @@
 import express from 'express';
 import slateModel from '../models/slateModel.js';
 import rotowireService from '../services/rotowireService.js';
+import { importSalaries } from '../services/salaryImportService.js';
+import { parseMultipart } from '../utils/multipart.js';
 
 const router = express.Router();
 
@@ -12,6 +14,30 @@ router.get('/list', async (req, res) => {
   } catch (error) {
     console.error('Error fetching slate list:', error);
     res.status(500).json({ error: error.message });
+  }
+});
+
+// Import a site's official player/salary CSV (multipart: file, optional site, slateId, slateName)
+router.post('/import-salaries', express.raw({ type: 'multipart/form-data', limit: '10mb' }), async (req, res) => {
+  try {
+    if (!req.is('multipart/form-data')) {
+      return res.status(400).json({ error: 'Expected multipart/form-data with a "file" field' });
+    }
+    const { fields, files } = parseMultipart(req.body, req.headers['content-type']);
+    if (!files.file || files.file.buffer.length === 0) {
+      return res.status(400).json({ error: 'No file uploaded (field name "file")' });
+    }
+
+    const result = await importSalaries({
+      csvText: files.file.buffer.toString('utf8'),
+      site: fields.site || null,
+      slateId: fields.slateId || null,
+      slateName: fields.slateName || null
+    });
+    res.json(result);
+  } catch (error) {
+    if (!error.status) console.error('Salary import error:', error);
+    res.status(error.status || 500).json({ error: error.message });
   }
 });
 

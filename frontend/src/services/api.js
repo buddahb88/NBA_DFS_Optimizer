@@ -17,6 +17,15 @@ export const slatesAPI = {
   getById: (slateId) => api.get(`/slates/${slateId}`),
   create: (data) => api.post('/slates', data),
   delete: (slateId) => api.delete(`/slates/${slateId}`),
+  // Upload a site's official salary CSV; site/slateId are optional (site is auto-detected)
+  importSalaries: (file, { site, slateId } = {}) => {
+    const form = new FormData();
+    form.append('file', file);
+    if (site) form.append('site', site);
+    if (slateId) form.append('slateId', slateId);
+    // Overrides the instance's JSON content type; the browser adds the boundary
+    return api.post('/slates/import-salaries', form, { headers: { 'Content-Type': 'multipart/form-data' } });
+  },
 };
 
 // Players API

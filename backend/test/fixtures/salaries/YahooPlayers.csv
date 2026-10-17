@@ -1,0 +1,5 @@
+ID,First Name,Last Name,Position,Team,Opponent,Game,Time,Salary,FPPG,Injury Status,Starting
+nba.p.6014,Luka,Doncic,PG,LAL,DAL,DAL@LAL,10:00PM EDT,58,55.1,,Yes
+nba.p.3704,LeBron,James,SF,LAL,DAL,DAL@LAL,10:00PM EDT,49,47.0,,Yes
+nba.p.6611,Jaren,Jackson Jr.,PF/C,MEM,BKN,MEM@BKN,7:30PM EDT,41,39.8,,Yes
+nba.p.9999,Zyxw,Qwerty,SG,DAL,LAL,DAL@LAL,10:00PM EDT,10,8.0,INJ,No
