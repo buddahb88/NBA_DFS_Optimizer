@@ -54,6 +54,12 @@ export const optimizerAPI = {
   reviewLineup: (slateId, lineup, mode) => api.post('/optimizer/review-lineup', { slateId, lineup, mode }),
 };
 
+// Export API (site upload CSVs)
+export const exportAPI = {
+  // { site, slateId, lineups: [{ players: [{ slot, playerId }] }] } -> { csv, filename, count, warnings }
+  lineups: (data) => api.post('/export/lineups', data),
+};
+
 // Chat API
 export const chatAPI = {
   sendMessage: (message, sessionId = null, slateId = null) =>

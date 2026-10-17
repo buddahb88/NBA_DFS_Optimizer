@@ -1,26 +1,27 @@
 import express from 'express';
 import lineupModel from '../models/lineupModel.js';
+import { getSiteConfig } from '../config/sites.js';
 
 const router = express.Router();
 
-// DraftKings NBA lineup constraints
-const DK_CONSTRAINTS = {
-  SALARY_CAP: 50000,
-  POSITIONS: ['PG', 'SG', 'SF', 'PF', 'C', 'G', 'F', 'UTIL'],
-  POSITION_COUNT: 8
-};
-
-// Validate lineup helper
-function validateLineup(players) {
+// Lineup rules (roster size, salary cap) come from the DFS site; DraftKings when omitted
+export function validateLineup(players, site) {
   const errors = [];
+  let config;
+  try {
+    config = getSiteConfig(site);
+  } catch (error) {
+    return { isValid: false, errors: [error.message], totalSalary: 0 };
+  }
+  const rosterSize = config.rosterSlots.length;
 
-  if (players.length !== DK_CONSTRAINTS.POSITION_COUNT) {
-    errors.push(`Lineup must have exactly ${DK_CONSTRAINTS.POSITION_COUNT} players`);
+  if (players.length !== rosterSize) {
+    errors.push(`Lineup must have exactly ${rosterSize} players`);
   }
 
   const totalSalary = players.reduce((sum, p) => sum + (p.salary || 0), 0);
-  if (totalSalary > DK_CONSTRAINTS.SALARY_CAP) {
-    errors.push(`Total salary ($${totalSalary}) exceeds cap ($${DK_CONSTRAINTS.SALARY_CAP})`);
+  if (totalSalary > config.salaryCap) {
+    errors.push(`Total salary ($${totalSalary}) exceeds cap ($${config.salaryCap})`);
   }
 
   return { isValid: errors.length === 0, errors, totalSalary };
@@ -53,7 +54,7 @@ router.get('/:id', async (req, res) => {
 // Create a new lineup
 router.post('/', async (req, res) => {
   try {
-    const { slateId, name, players } = req.body;
+    const { slateId, name, players, site } = req.body;
 
     if (!slateId || !name || !players || !Array.isArray(players)) {
       return res.status(400).json({
@@ -62,7 +63,7 @@ router.post('/', async (req, res) => {
     }
 
     // Validate lineup
-    const validation = validateLineup(players);
+    const validation = validateLineup(players, site);
     if (!validation.isValid) {
       return res.status(400).json({
         error: 'Invalid lineup',
@@ -87,7 +88,7 @@ router.post('/', async (req, res) => {
     // Add players to lineup
     const lineupPlayers = players.map((player, index) => ({
       playerId: player.id,
-      positionSlot: player.positionSlot || DK_CONSTRAINTS.POSITIONS[index]
+      positionSlot: player.positionSlot || getSiteConfig(site).rosterSlots[index]?.slot
     }));
 
     await lineupModel.addPlayers(lineupId, lineupPlayers);
@@ -132,13 +133,13 @@ router.delete('/:id', async (req, res) => {
 // Validate lineup endpoint
 router.post('/validate', async (req, res) => {
   try {
-    const { players } = req.body;
+    const { players, site } = req.body;
 
     if (!players || !Array.isArray(players)) {
       return res.status(400).json({ error: 'players array is required' });
     }
 
-    const validation = validateLineup(players);
+    const validation = validateLineup(players, site);
     res.json(validation);
   } catch (error) {
     res.status(500).json({ error: error.message });
