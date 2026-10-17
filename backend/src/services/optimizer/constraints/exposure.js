@@ -58,8 +58,8 @@
  * return HTTP 400 with { error }.
  */
 
-import solver from 'javascript-lp-solver';
 import optimizerService from '../../optimizerService.js';
+import { solveWithHighs } from '../solvers/highs.js';
 
 export const ROSTER_SIZE = optimizerService.ROSTER_SLOTS.length;
 const EPS = 1e-9;
@@ -484,12 +484,14 @@ export function buildExposureSummary(lineups, players, plan) {
  * Build a batch of N lineups with exposure / uniqueness / randomness enforced.
  * `players` is the slate pool (DB rows); `body` is the request body (contract above).
  * The single-lineup model + extraction come from optimizerService so scoring and
- * roster rules stay identical to the single-lineup optimizer.
+ * roster rules stay identical to the single-lineup optimizer. Models are solved with
+ * HiGHS by default (~1s per lineup on a 400-player slate vs ~17s+ for
+ * javascript-lp-solver); pass `solve` to swap solvers.
  */
 export function generateLineupBatch(
   players,
   body = {},
-  { optimizer = optimizerService, rng = Math.random, solveTimeoutMs = 10000 } = {}
+  { optimizer = optimizerService, rng = Math.random, solveTimeoutMs = 60000, solve = solveWithHighs } = {}
 ) {
   const startTime = Date.now();
   const config = parseExposureSettings(body);
@@ -531,26 +533,52 @@ export function generateLineupBatch(
   const solveOnce = (index, { lookahead = true, ...opts } = {}) => {
     const { forced, forbidden } = getSolveRestrictions(plan, state, index, opts);
     const noisy = applyRandomness(pool, config.randomness, rng);
-    const model = optimizer.buildLPModel(noisy, {
-      mode,
-      lockedPlayers: [...forced],
-      excludedPlayers: [...forbidden],
-      minSalary,
-    });
-    addUniquenessConstraints(model, state.lineups, config.minUniqueness);
-    if (lookahead) {
-      addLookaheadConstraints(model, templateVars, plan, state, N - index - 1, {
-        salaryCap: optimizer.SALARY_CAP,
+    const rest = N - index - 1;
+    const buildModel = (withLookahead) => {
+      const model = optimizer.buildLPModel(noisy, {
+        mode,
+        lockedPlayers: [...forced],
+        excludedPlayers: [...forbidden],
         minSalary,
-        slots: optimizer.ROSTER_SLOTS,
       });
+      addUniquenessConstraints(model, state.lineups, config.minUniqueness);
+      if (withLookahead) {
+        addLookaheadConstraints(model, templateVars, plan, state, rest, {
+          salaryCap: optimizer.SALARY_CAP,
+          minSalary,
+          slots: optimizer.ROSTER_SLOTS,
+        });
+      }
+      // Bound branch-and-bound so a hard/infeasible solve fails over to the next fallback
+      model.options = { ...model.options, timeout: solveTimeoutMs };
+      return model;
+    };
+    const run = (model) => {
+      const result = solve(model);
+      if (!result?.feasible) return null;
+      const lineup = optimizer.extractLineupFromSolution(result, pool, mode);
+      return lineup?.isValid ? lineup : null;
+    };
+
+    if (!lookahead || rest <= 0) return run(buildModel(false));
+
+    // Fast path: the lookahead variables make the MIP several times slower, and most
+    // solves don't need them. Solve without, then check the rest of the batch is still
+    // feasible (LP with this lineup fixed); only re-solve with lookahead if it isn't.
+    const fast = run(buildModel(false));
+    if (fast && restStillFeasible(fast)) return fast;
+    return run(buildModel(true));
+
+    function restStillFeasible(lineup) {
+      const chosen = new Set(lineup.players.map((s) => Number(s.player.id)));
+      const check = buildModel(true);
+      Object.keys(check.constraints).forEach((name) => {
+        if (!name.startsWith('player_')) return;
+        check.constraints[name] = chosen.has(Number(name.slice(7))) ? { equal: 1 } : { max: 0 };
+      });
+      check.ints = {};
+      return !!solve(check)?.feasible;
     }
-    // Bound branch-and-bound so a hard/infeasible solve fails over to the next fallback
-    model.options = { ...model.options, timeout: solveTimeoutMs };
-    const result = solver.Solve(model);
-    if (!result?.feasible) return null;
-    const lineup = optimizer.extractLineupFromSolution(result, pool, mode);
-    return lineup?.isValid ? lineup : null;
   };
 
   for (let i = 0; i < N; i++) {
