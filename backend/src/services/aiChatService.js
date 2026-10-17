@@ -49,10 +49,11 @@ class AIChatService {
       }
 
       // Initialize OpenAI client with Azure configuration
+      const apiVersion = process.env.AZURE_OPENAI_API_VERSION || '2024-04-01-preview';
       this.client = new OpenAI({
         apiKey: process.env.AZURE_OPENAI_KEY,
         baseURL: `${process.env.AZURE_OPENAI_ENDPOINT}/openai/deployments/${process.env.AZURE_OPENAI_MODEL || 'gpt-4.1-mini'}`,
-        defaultQuery: { 'api-version': '2024-02-15-preview' },
+        defaultQuery: { 'api-version': apiVersion },
         defaultHeaders: { 'api-key': process.env.AZURE_OPENAI_KEY },
       });
 
