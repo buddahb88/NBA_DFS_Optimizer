@@ -1,10 +1,14 @@
 import { useState, useEffect } from 'react';
 import { lineupsAPI } from '../services/api';
+import ExportLineupsModal from '../components/ExportLineupsModal';
 
 function LineupsPage() {
   const [lineups, setLineups] = useState([]);
   const [selectedLineup, setSelectedLineup] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [checkedIds, setCheckedIds] = useState([]);
+  // Lineup ids the export dialog is open for (null = closed)
+  const [exportIds, setExportIds] = useState(null);
 
   useEffect(() => {
     loadLineups();
@@ -39,6 +43,7 @@ function LineupsPage() {
     try {
       await lineupsAPI.delete(lineupId);
       setLineups(lineups.filter(l => l.id !== lineupId));
+      setCheckedIds(ids => ids.filter(id => id !== lineupId));
       if (selectedLineup && selectedLineup.id === lineupId) {
         setSelectedLineup(null);
       }
@@ -47,32 +52,15 @@ function LineupsPage() {
     }
   };
 
-  const exportToCSV = (lineup) => {
-    if (!lineup || !lineup.players) return;
+  const toggleChecked = (lineupId) => {
+    setCheckedIds(ids => (ids.includes(lineupId) ? ids.filter(id => id !== lineupId) : [...ids, lineupId]));
+  };
 
-    const headers = ['Position', 'Name', 'Team', 'Salary', 'Projected Points'];
-    const rows = lineup.players.map(player => [
-      player.position_slot,
-      player.name,
-      player.team,
-      player.salary,
-      player.projected_points
-    ]);
+  const allChecked = lineups.length > 0 && checkedIds.length === lineups.length;
 
-    const csvContent = [
-      headers.join(','),
-      ...rows.map(row => row.join(','))
-    ].join('\n');
-
-    const blob = new Blob([csvContent], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${lineup.name.replace(/\s+/g, '_')}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    window.URL.revokeObjectURL(url);
+  // Export the checked lineups, or all of them when none are checked
+  const openBulkExport = () => {
+    setExportIds(checkedIds.length > 0 ? lineups.filter(l => checkedIds.includes(l.id)).map(l => l.id) : lineups.map(l => l.id));
   };
 
   return (
@@ -81,13 +69,33 @@ function LineupsPage() {
       <div className="lg:col-span-1 space-y-4">
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold text-gray-900">My Lineups</h1>
-          <button
-            onClick={loadLineups}
-            className="px-3 py-1 text-sm bg-gray-200 rounded-md hover:bg-gray-300"
-          >
-            Refresh
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={openBulkExport}
+              disabled={lineups.length === 0}
+              className="px-3 py-1 text-sm bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50"
+            >
+              {checkedIds.length > 0 ? `Export ${checkedIds.length}` : 'Export all'}
+            </button>
+            <button
+              onClick={loadLineups}
+              className="px-3 py-1 text-sm bg-gray-200 rounded-md hover:bg-gray-300"
+            >
+              Refresh
+            </button>
+          </div>
         </div>
+
+        {lineups.length > 0 && (
+          <label className="flex items-center gap-2 text-sm text-gray-600">
+            <input
+              type="checkbox"
+              checked={allChecked}
+              onChange={() => setCheckedIds(allChecked ? [] : lineups.map(l => l.id))}
+            />
+            Select all
+          </label>
+        )}
 
         {loading ? (
           <div className="bg-white rounded-lg shadow p-6 text-center text-gray-500">
@@ -106,7 +114,15 @@ function LineupsPage() {
                 onClick={() => handleViewLineup(lineup.id)}
               >
                 <div className="flex items-center justify-between mb-2">
-                  <h3 className="font-semibold text-gray-900">{lineup.name}</h3>
+                  <label className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={checkedIds.includes(lineup.id)}
+                      onChange={() => toggleChecked(lineup.id)}
+                      aria-label={`Select ${lineup.name}`}
+                    />
+                    <h3 className="font-semibold text-gray-900">{lineup.name}</h3>
+                  </label>
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -142,7 +158,7 @@ function LineupsPage() {
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-2xl font-bold text-gray-900">{selectedLineup.name}</h2>
               <button
-                onClick={() => exportToCSV(selectedLineup)}
+                onClick={() => setExportIds([selectedLineup.id])}
                 className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"
               >
                 Export CSV
@@ -242,6 +258,12 @@ function LineupsPage() {
           </div>
         )}
       </div>
+
+      <ExportLineupsModal
+        open={exportIds !== null}
+        onClose={() => setExportIds(null)}
+        lineupIds={exportIds || []}
+      />
     </div>
   );
 }

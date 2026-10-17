@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { optimizerAPI, lineupsAPI, slatesAPI, playersAPI } from '../services/api';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import ExportLineupsModal from '../components/ExportLineupsModal';
 
 function OptimizerPage() {
   const [activeSlate, setActiveSlate] = useState(null);
@@ -14,6 +15,7 @@ function OptimizerPage() {
   const [results, setResults] = useState(null);
   const [selectedLineupIndex, setSelectedLineupIndex] = useState(0);
   const [message, setMessage] = useState('');
+  const [showExport, setShowExport] = useState(false);
 
   // Core Settings
   const [mode, setMode] = useState('gpp');
@@ -650,6 +652,12 @@ function OptimizerPage() {
                   >
                     Save Lineup
                   </button>
+                  <button
+                    onClick={() => setShowExport(true)}
+                    className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 font-medium"
+                  >
+                    {results.lineups.length > 1 ? `Export All (${results.lineups.length})` : 'Export'}
+                  </button>
                 </div>
               </div>
 
@@ -764,6 +772,13 @@ function OptimizerPage() {
           )}
         </div>
       </div>
+
+      <ExportLineupsModal
+        open={showExport}
+        onClose={() => setShowExport(false)}
+        lineups={(results?.lineups || []).map((l, i) => ({ name: `${mode.toUpperCase()} #${l.lineupNumber ?? i + 1}`, players: l.players }))}
+        defaultSite={activeSlate?.site}
+      />
     </>
   );
 }
