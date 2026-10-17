@@ -11,6 +11,7 @@ import lineupsRouter from './routes/lineups.js';
 import optimizerRouter from './routes/optimizer.js';
 import chatRouter from './routes/chat.js';
 import historicalRouter from './routes/historical.js';
+import simRouter from './routes/sim.js';
 
 // Get directory paths for ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -40,6 +41,7 @@ app.use('/api/lineups', lineupsRouter);
 app.use('/api/optimizer', optimizerRouter);
 app.use('/api/chat', chatRouter);
 app.use('/api/historical', historicalRouter);
+app.use('/api/sim', simRouter);
 
 // Health check
 app.get('/api/health', (req, res) => {
