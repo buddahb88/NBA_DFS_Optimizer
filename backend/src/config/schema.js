@@ -1,4 +1,5 @@
 import { DATABASE_TYPE } from './database.js';
+import { migrateSiteColumns } from './siteMigrations.js';
 
 /**
  * Create all database tables
@@ -14,6 +15,9 @@ export const createTables = async (db) => {
   } else {
     await createSqliteTables(db);
   }
+
+  // Multi-site columns (slates.site, players.site_player_id/roster_positions)
+  await migrateSiteColumns(db);
 };
 
 /**

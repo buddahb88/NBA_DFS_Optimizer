@@ -15,7 +15,8 @@
     "backfill": "node scripts/backfill-advanced-metrics.js",
     "enhanced-projections": "node scripts/backfill-enhanced-projections.js",
     "enhanced-projections:update": "node scripts/backfill-enhanced-projections.js --update-db",
-    "enhanced-projections:verbose": "node scripts/backfill-enhanced-projections.js --verbose"
+    "enhanced-projections:verbose": "node scripts/backfill-enhanced-projections.js --verbose",
+    "test": "node --test \"test/**/*.test.js\""
   },
   "keywords": [],
   "author": "",
