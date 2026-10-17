@@ -15,6 +15,7 @@ import { generateCandidatePool } from './candidatePool.js';
 import { resolveOwnership, generateField, createDupeModel, impliedLineupSalary, FIELD_DEFAULTS } from './fieldGenerator.js';
 import { transposeScores, simulateContest, optimalRates } from './contestSim.js';
 import { selectPortfolio } from './portfolioSelector.js';
+import { scoreDistributions } from './scoreDistribution.js';
 import { resolveContest, createPayoutLookup, CONTEST_PRESETS } from './payouts.js';
 
 export { CONTEST_PRESETS };
@@ -304,6 +305,10 @@ export function buildPortfolio(slatePlayers, rawOptions = {}, { historicalStats,
   });
 
   const entries = lineups.length;
+  const scoreDistribution = scoreDistributions(
+    T, P, N,
+    selection.selected.map((c) => pool.lineups.subarray(c * ROSTER_SIZE, (c + 1) * ROSTER_SIZE))
+  );
   const playersOut = players
     .map((p, i) => {
       const optimalRate = optimal.rates[i] * 100;
@@ -356,6 +361,7 @@ export function buildPortfolio(slatePlayers, rawOptions = {}, { historicalStats,
     portfolio: {
       lineups,
       metrics: selection.metrics,
+      scoreDistribution,
       warnings:
         entries < opts.numLineups
           ? [`Only ${entries}/${opts.numLineups} lineups satisfied exposure/uniqueness limits; loosen maxExposure or minUnique`]

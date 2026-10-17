@@ -60,6 +60,16 @@ export const exportAPI = {
   lineups: (data) => api.post('/export/lineups', data),
 };
 
+// GPP portfolio builder (background contest-sim jobs)
+export const portfolioAPI = {
+  getPresets: () => api.get('/portfolio/presets'),
+  // { slateId, contest, numLineups, poolSize, iterations, ... } -> 202 { jobId, status }
+  build: (data) => api.post('/portfolio/build', data),
+  // Job status; `result` once completed. candidates: how many ranked candidates to include
+  getJob: (jobId, candidates = 0) => api.get(`/portfolio/${jobId}`, { params: { candidates } }),
+  cancel: (jobId) => api.delete(`/portfolio/${jobId}`),
+};
+
 // Chat API
 export const chatAPI = {
   sendMessage: (message, sessionId = null, slateId = null) =>

@@ -8,6 +8,7 @@ import { resolveOwnership, generateField, tiltToSalary, impliedLineupSalary } fr
 import { transposeScores, simulateContest, sampleRank, countAbove, quickselect } from './contestSim.js';
 import { selectPortfolio } from './portfolioSelector.js';
 import { buildPortfolio, normalizeOptions } from './index.js';
+import { scoreDistributions, niceBinWidth } from './scoreDistribution.js';
 
 const POSITIONS = ['PG', 'SG', 'SF', 'PF', 'C', 'PG/SG', 'SG/SF', 'SF/PF', 'PF/C', 'PG'];
 
@@ -313,10 +314,36 @@ test('buildPortfolio end to end respects exposure, uniqueness, locks and seed', 
   assert.ok(Math.abs(optimalTotal - 800) < 2, `optimal rates sum to ${optimalTotal}%`);
   for (const p of res.players) assert.ok(Math.abs(p.leverage - (p.optimalRate - p.ownership)) < 0.11);
 
+  const dist = res.portfolio.scoreDistribution;
+  assert.equal(dist.lineups.length, 10);
+  dist.lineups.forEach((d, k) => {
+    assert.equal(d.counts.length, dist.binCount);
+    assert.equal(d.counts.reduce((s, n) => s + n, 0), 300);
+    assert.ok(Math.abs(d.mean - lineups[k].metrics.meanScore) < 0.2, `lineup ${k} mean ${d.mean} vs ${lineups[k].metrics.meanScore}`);
+  });
+
   const again = buildPortfolio(slate, options);
   assert.deepEqual(
     again.portfolio.lineups.map((l) => l.metrics.playerIds),
     lineups.map((l) => l.metrics.playerIds),
     'same seed -> same portfolio'
   );
+});
+
+test('scoreDistributions bins every iteration on shared bins with ordered percentiles', () => {
+  assert.equal(niceBinWidth(97, 40), 2.5);
+  assert.equal(niceBinWidth(400, 40), 10);
+  const P = 9;
+  const N = 500;
+  const rng = createRng(3);
+  const T = Float32Array.from({ length: N * P }, () => 20 + rng.normal() * 8);
+  const res = scoreDistributions(T, P, N, [[0, 1, 2, 3, 4, 5, 6, 7], [1, 2, 3, 4, 5, 6, 7, 8]], { bins: 30 });
+  assert.ok(res.binCount >= 10 && res.binCount <= 31);
+  for (const d of res.lineups) {
+    assert.equal(d.counts.reduce((s, n) => s + n, 0), N);
+    assert.ok(d.p10 <= d.p50 && d.p50 <= d.p90 && d.p90 <= d.p99);
+    assert.ok(Math.abs(d.mean - 160) < 5);
+    assert.ok(d.p10 >= res.binStart && d.p99 <= res.binStart + res.binWidth * res.binCount);
+  }
+  assert.deepEqual(scoreDistributions(T, P, N, []).lineups, []);
 });

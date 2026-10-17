@@ -26,6 +26,10 @@ import ManualBuilder from '../features/lineupStudio/ManualBuilder';
 import { settingsFromPreset } from '../features/lineupStudio/presets';
 import { validateDraftRules } from '../features/lineupStudio/stackRules';
 import { buildOptimizerRequest } from '../features/lineupStudio/request';
+import PortfolioBuilderModal from '../features/portfolio/PortfolioBuilderModal';
+import PortfolioPanel from '../features/portfolio/PortfolioPanel';
+import usePortfolioJob from '../features/portfolio/usePortfolioJob';
+import { PORTFOLIO_SITE } from '../features/portfolio/portfolioMath';
 import {
   FALLBACK_SITE,
   downloadText,
@@ -111,6 +115,11 @@ export default function LineupStudioPage() {
   const [sortBy, setSortBy] = useState('number');
   const [exporting, setExporting] = useState(false);
 
+  // GPP portfolio builder (contest sim)
+  const portfolioJob = usePortfolioJob();
+  const { reset: resetPortfolio } = portfolioJob;
+  const [portfolioOpen, setPortfolioOpen] = useState(false);
+
   // Manual builder
   const [manualSlots, setManualSlots] = useState(() => emptySlots(siteConfig));
   const [manualSaving, setManualSaving] = useState(false);
@@ -132,6 +141,11 @@ export default function LineupStudioPage() {
     setNotice(null);
     setBreakdown({ open: false, loading: false, text: '' });
   }, [slateId]);
+
+  useEffect(() => {
+    resetPortfolio();
+    setPortfolioOpen(false);
+  }, [slateId, resetPortfolio]);
 
   useEffect(() => {
     if (!slateId) {
@@ -353,6 +367,25 @@ export default function LineupStudioPage() {
           ? `Min salary is above the ${formatSalary(salaryCap)} cap.`
           : null;
 
+  const portfolioBlocker = !slateId
+    ? 'Pick a slate in the top bar.'
+    : site !== PORTFOLIO_SITE
+      ? 'Portfolio simulation supports DraftKings slates only.'
+      : pool.status !== 'ready' || players.length === 0
+        ? 'Waiting for the player pool.'
+        : null;
+
+  const openPortfolio = () => {
+    setView('optimize');
+    setPortfolioOpen(true);
+  };
+
+  const startPortfolio = (request) => {
+    setPortfolioOpen(false);
+    setTab('portfolio');
+    portfolioJob.start(request);
+  };
+
   // ---- render -------------------------------------------------------------
 
   let body;
@@ -451,6 +484,13 @@ export default function LineupStudioPage() {
               { value: 'lineups', label: 'Lineups', count: lineups.length || undefined },
               { value: 'exposure', label: 'Exposure', disabled: lineups.length === 0 },
               { value: 'pool', label: 'Player pool', count: locked.size + excluded.size || undefined },
+              {
+                value: 'portfolio',
+                label: 'Portfolio',
+                count: portfolioJob.running
+                  ? `${Math.round((portfolioJob.state.progress || 0) * 100)}%`
+                  : portfolioJob.state.result?.portfolio.lineups.length || undefined,
+              },
             ]}
           />
           <div className="pt-3">
@@ -465,6 +505,16 @@ export default function LineupStudioPage() {
                   setLocked(new Set());
                   setExcluded(new Set());
                 }}
+              />
+            )}
+
+            {tab === 'portfolio' && (
+              <PortfolioPanel
+                job={portfolioJob}
+                slateId={slateId}
+                site={site}
+                onNewBuild={openPortfolio}
+                onNotice={setNotice}
               />
             )}
 
@@ -615,6 +665,11 @@ export default function LineupStudioPage() {
           <Button size="sm" variant="ghost" disabled={!slateId} loading={breakdown.loading} onClick={runBreakdown}>
             AI breakdown
           </Button>
+          <span title={portfolioBlocker || undefined}>
+            <Button size="sm" disabled={!!portfolioBlocker} loading={portfolioJob.running} onClick={openPortfolio}>
+              Simulate &amp; build portfolio
+            </Button>
+          </span>
         </div>
       </header>
 
@@ -633,6 +688,16 @@ export default function LineupStudioPage() {
           </div>
         )}
       </Modal>
+
+      <PortfolioBuilderModal
+        open={portfolioOpen}
+        onClose={() => setPortfolioOpen(false)}
+        onSubmit={startPortfolio}
+        slateId={slateId}
+        locked={locked}
+        excluded={excluded}
+        minSalary={site === PORTFOLIO_SITE ? settings.minSalary : undefined}
+      />
 
       <Modal
         open={!!review.key && !review.loading}

@@ -3,8 +3,9 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import { MemoryRouter } from 'react-router-dom'
 import LineupStudioPage from './LineupStudioPage'
 import { useSlate } from '../context/SlateContext'
-import { exportAPI, lineupsAPI, optimizerAPI, playersAPI } from '../services/api'
+import { exportAPI, lineupsAPI, optimizerAPI, playersAPI, portfolioAPI } from '../services/api'
 import { FALLBACK_SITE } from '../features/lineupStudio/lineupMath'
+import { LIMITS, PRESETS, makeResult } from '../features/portfolio/fixtures'
 
 vi.mock('../context/SlateContext', () => ({ useSlate: vi.fn() }))
 vi.mock('../services/api', () => ({
@@ -12,6 +13,7 @@ vi.mock('../services/api', () => ({
   optimizerAPI: { generate: vi.fn(), reviewLineup: vi.fn(), slateBreakdown: vi.fn() },
   lineupsAPI: { create: vi.fn() },
   exportAPI: { lineups: vi.fn() },
+  portfolioAPI: { getPresets: vi.fn(), build: vi.fn(), getJob: vi.fn(), cancel: vi.fn() },
 }))
 
 const POS = ['PG', 'SG', 'SF', 'PF', 'C', 'PG/SG', 'SF/PF', 'C']
@@ -159,5 +161,66 @@ describe('LineupStudioPage', () => {
     expect(within(rows[5]).getByText('Player 1')).toBeInTheDocument()
     expect(screen.getAllByText('In lineup')).toHaveLength(2)
     expect(screen.getByRole('button', { name: 'Save lineup' })).toBeDisabled()
+  })
+
+  it('simulates a portfolio, shows results and exports the selected lineups', async () => {
+    portfolioAPI.getPresets.mockResolvedValue({ data: { presets: PRESETS, limits: LIMITS } })
+    portfolioAPI.build.mockResolvedValue({ data: { jobId: 'job-1', status: 'queued' } })
+    portfolioAPI.getJob.mockResolvedValue({ data: { jobId: 'job-1', status: 'completed', finishedAt: 'now', result: makeResult() } })
+    exportAPI.lineups.mockResolvedValue({ data: { csv: 'PG\n1', filename: 'dk.csv', count: 1, warnings: [] } })
+
+    renderStudio()
+    await screen.findByText('No lineups yet')
+    fireEvent.click(screen.getByRole('button', { name: 'Simulate & build portfolio' }))
+
+    const dialog = await screen.findByRole('dialog')
+    await within(dialog).findByLabelText('Contest preset')
+    fireEvent.change(within(dialog).getByLabelText('Lineups to enter'), { target: { value: '2' } })
+    fireEvent.change(within(dialog).getByLabelText('Iterations'), { target: { value: '400' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Run simulation' }))
+
+    await waitFor(() => expect(portfolioAPI.build).toHaveBeenCalled())
+    expect(portfolioAPI.build.mock.calls[0][0]).toMatchObject({
+      slateId: '42',
+      contest: { preset: '20-max', label: '20-Max', contestSize: 40000, entryFee: 5, maxEntries: 20 },
+      numLineups: 2,
+      iterations: 400,
+      lockedPlayers: [],
+    })
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+
+    expect(await screen.findByText('Portfolio ROI', {}, { timeout: 3000 })).toBeInTheDocument()
+    expect(screen.getByText('+10.0%')).toBeInTheDocument()
+    expect(screen.getByText('Simulated score distribution')).toBeInTheDocument()
+    expect(screen.getByText('Optimal % vs ownership')).toBeInTheDocument()
+    // Lineup table is ranked by ROI: lineup 2 (+25%) first
+    const lineupRows = screen.getAllByRole('checkbox', { name: /Select lineup/ })
+    expect(lineupRows[0]).toHaveAccessibleName('Select lineup 2')
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select lineup 1' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Export 1 for DraftKings' }))
+    await waitFor(() => expect(exportAPI.lineups).toHaveBeenCalled())
+    const payload = exportAPI.lineups.mock.calls[0][0]
+    expect(payload).toMatchObject({ site: 'draftkings', slateId: '42' })
+    expect(payload.lineups).toHaveLength(1)
+    expect(payload.lineups[0].players[4]).toEqual({ slot: 'C', playerId: 9 })
+    expect(await screen.findByText(/Exported 1 portfolio lineup/)).toBeInTheDocument()
+  })
+
+  it('only offers portfolio simulation on DraftKings', async () => {
+    useSlate.mockReturnValue({
+      slate: { slate_id: '42', name: 'Main' },
+      slateId: '42',
+      site: 'fanduel',
+      siteConfig: FALLBACK_SITE,
+      loadingSlates: false,
+    })
+    render(
+      <MemoryRouter>
+        <LineupStudioPage />
+      </MemoryRouter>,
+    )
+    await screen.findByText('No lineups yet')
+    expect(screen.getByRole('button', { name: 'Simulate & build portfolio' })).toBeDisabled()
   })
 })
