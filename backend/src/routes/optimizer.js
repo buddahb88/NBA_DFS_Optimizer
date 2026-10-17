@@ -1,6 +1,6 @@
 import express from 'express';
 import playerModel from '../models/playerModel.js';
-import optimizerService from '../services/optimizerService.js';
+import { generateLineupBatch, ExposureConfigError } from '../services/optimizer/constraints/exposure.js';
 import { autoTuneSettings, reviewLineup } from '../utils/autoTuneSettings.js';
 import { generateSlateBreakdown } from '../utils/slateAnalyzer.js';
 
@@ -40,8 +40,9 @@ router.post('/generate', async (req, res) => {
 
     console.log(`📊 Found ${players.length} active players`);
 
-    // Run optimization with all settings from request body
-    const result = optimizerService.optimize(players, req.body);
+    // Exposure / uniqueness / randomness are hard constraints across the batch
+    // (request contract documented in services/optimizer/constraints/exposure.js)
+    const result = generateLineupBatch(players, req.body);
 
     console.log(`✅ Generated ${result.lineups?.length || 0} valid lineup(s)`);
 
@@ -50,9 +51,15 @@ router.post('/generate', async (req, res) => {
       lineups: result.lineups || [],
       count: result.lineups?.length || 0,
       exposureStats: result.exposureStats,
+      exposureSummary: result.exposureSummary,
+      warnings: result.warnings,
+      error: result.error,
       settings: result.settings
     });
   } catch (error) {
+    if (error instanceof ExposureConfigError) {
+      return res.status(400).json({ error: error.message });
+    }
     console.error('Optimizer error:', error);
     res.status(500).json({
       error: 'Optimization failed',
