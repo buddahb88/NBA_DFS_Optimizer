@@ -1,5 +1,6 @@
 import { DATABASE_TYPE } from './database.js';
 import { migrateSiteColumns } from './siteMigrations.js';
+import { migrateSiteFantasyPoints } from './scoringMigrations.js';
 
 /**
  * Create all database tables
@@ -18,6 +19,9 @@ export const createTables = async (db) => {
 
   // Multi-site columns (slates.site, players.site_player_id/roster_positions)
   await migrateSiteColumns(db);
+
+  // historical_games.fd_fantasy_points / yahoo_fantasy_points
+  await migrateSiteFantasyPoints(db);
 };
 
 /**
