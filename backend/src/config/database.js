@@ -23,7 +23,7 @@ const azureSqlConfig = {
   server: process.env.AZURE_SQL_SERVER || 'nbadfs-sql.database.windows.net',
   database: process.env.AZURE_SQL_DATABASE || 'nbadfs',
   user: process.env.AZURE_SQL_USER || 'nbadfsadmin',
-  password: process.env.AZURE_SQL_PASSWORD || 'NbaDfs2024!Secure',
+  password: process.env.AZURE_SQL_PASSWORD,
   options: {
     encrypt: true,
     trustServerCertificate: false,
@@ -49,7 +49,11 @@ class DatabaseWrapper {
     this.isAzureSql = DATABASE_TYPE === 'azuresql';
     this.sqliteDb = null;
 
-    if (!this.isAzureSql) {
+    if (this.isAzureSql) {
+      if (!process.env.AZURE_SQL_PASSWORD) {
+        throw new Error('AZURE_SQL_PASSWORD environment variable is required when DATABASE_TYPE=azuresql (see backend/.env.example)');
+      }
+    } else {
       this.sqliteDb = this._createSqliteDb();
     }
   }

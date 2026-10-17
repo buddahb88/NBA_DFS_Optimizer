@@ -53,3 +53,12 @@ coverage/
 
 # Misc
 .eslintcache
+
+# Secrets / local settings
+backend/.env
+azure-function/local.settings.json
+
+# Archives and downloaded logs
+*.zip
+backend-logs*/
+logs/

@@ -10,9 +10,6 @@ import nbaStatsService from '../services/nbaStatsService.js';
 
 const router = express.Router();
 
-// Azure Blob Storage URL for box scores (with SAS token for read access)
-const BLOB_STORAGE_URL = process.env.BLOB_STORAGE_URL || 'https://nbadfsdata.blob.core.windows.net/nba-data/box_scores.json?se=2026-12-31&sp=r&sv=2022-11-02&sr=b&sig=4jVifOP8UL1XSEDbFgtoaavdSSNl4ZWrJefIXJBSqUw%3D';
-
 // Track sync progress
 let syncProgress = null;
 let isSyncing = false;
@@ -74,6 +71,15 @@ router.get('/summary', async (req, res) => {
  * The blob is updated nightly by an Azure Function that scrapes Basketball Reference
  */
 router.post('/sync', async (req, res) => {
+  // Azure Blob Storage URL for box scores (with SAS token for read access).
+  // Read per request: this module loads before server.js calls dotenv.config().
+  const blobStorageUrl = process.env.BLOB_STORAGE_URL;
+  if (!blobStorageUrl) {
+    return res.status(500).json({
+      error: 'BLOB_STORAGE_URL environment variable is not set (see backend/.env.example)'
+    });
+  }
+
   if (isSyncing) {
     return res.status(409).json({
       error: 'Sync already in progress',
@@ -114,7 +120,7 @@ router.post('/sync', async (req, res) => {
       };
 
       // Fetch box scores from blob storage
-      const response = await fetch(BLOB_STORAGE_URL);
+      const response = await fetch(blobStorageUrl);
       if (!response.ok) {
         throw new Error(`Failed to fetch blob: ${response.status} ${response.statusText}`);
       }
