@@ -8,7 +8,7 @@
     "dev": "nodemon src/server.js",
     "dev:backtest": "BACKTESTING_MODE=true nodemon src/server.js",
     "start": "node src/server.js",
-    "test": "node --test \"src/**/*.test.js\"",
+    "test": "node --test \"src/**/*.test.js\" \"test/**/*.test.js\"",
     "start:backtest": "BACKTESTING_MODE=true node src/server.js",
     "init-db": "node src/config/initDb.js",
     "snapshot": "node scripts/snapshot-db.js",
@@ -16,7 +16,6 @@
     "enhanced-projections": "node scripts/backfill-enhanced-projections.js",
     "enhanced-projections:update": "node scripts/backfill-enhanced-projections.js --update-db",
     "enhanced-projections:verbose": "node scripts/backfill-enhanced-projections.js --verbose",
-    "test": "node --test \"test/**/*.test.js\"",
     "backtest:accuracy": "node scripts/projectionBacktest.js",
     "test:accuracy": "node --test test/projectionBacktest.test.js"
   },
