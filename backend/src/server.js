@@ -14,6 +14,7 @@ import historicalRouter from './routes/historical.js';
 import simRouter from './routes/sim.js';
 import sitesRouter from './routes/sites.js';
 import analyticsRouter from './routes/analytics.js';
+import portfolioRouter from './routes/portfolio.js';
 
 // Get directory paths for ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -46,6 +47,7 @@ app.use('/api/historical', historicalRouter);
 app.use('/api/sim', simRouter);
 app.use('/api/sites', sitesRouter);
 app.use('/api/analytics', analyticsRouter);
+app.use('/api/portfolio', portfolioRouter);
 
 // Health check
 app.get('/api/health', (req, res) => {
