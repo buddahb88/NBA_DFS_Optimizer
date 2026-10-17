@@ -1,14 +1,14 @@
 import { useState, useEffect } from 'react';
-import { useSearchParams, useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { playersAPI, lineupsAPI } from '../services/api';
+import { useSlate } from '../context/SlateContext';
 
 const DK_POSITIONS = ['PG', 'SG', 'SF', 'PF', 'C', 'G', 'F', 'UTIL'];
 const SALARY_CAP = 50000;
 
 function LineupBuilderPage() {
-  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const [slateId, setSlateId] = useState(searchParams.get('slateId') || '');
+  const { slate, slateId } = useSlate();
   const [players, setPlayers] = useState([]);
   const [lineup, setLineup] = useState(Array(8).fill(null));
   const [lineupName, setLineupName] = useState('My Lineup');
@@ -16,26 +16,29 @@ function LineupBuilderPage() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
 
-  // Only auto-load on initial mount if slateId is in URL
+  // Start a fresh lineup and load players whenever the top-bar slate changes
   useEffect(() => {
-    const urlSlateId = searchParams.get('slateId');
-    if (urlSlateId) {
-      loadPlayers();
-    }
-  }, []); // Empty dependency array - only runs once on mount
-
-  const loadPlayers = async () => {
+    setPlayers([]);
+    setLineup(Array(8).fill(null));
+    setMessage('');
+    if (!slateId) return;
+    let cancelled = false;
     setLoading(true);
-    try {
-      const response = await playersAPI.getBySlateId(slateId);
-      setPlayers(response.data);
-    } catch (error) {
-      console.error('Error loading players:', error);
-      setMessage('Error loading players');
-    } finally {
-      setLoading(false);
-    }
-  };
+    playersAPI.getBySlateId(slateId)
+      .then((response) => {
+        if (!cancelled) setPlayers(response.data);
+      })
+      .catch((error) => {
+        console.error('Error loading players:', error);
+        if (!cancelled) setMessage('Error loading players');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [slateId]);
 
   const addPlayerToLineup = (player, slotIndex) => {
     const newLineup = [...lineup];
@@ -119,35 +122,17 @@ function LineupBuilderPage() {
           <h1 className="text-3xl font-bold text-gray-900">Lineup Builder</h1>
         </div>
 
-        {/* Slate ID Input */}
+        {/* Slate (selected in the top bar) */}
         <div className="bg-white rounded-lg shadow p-6">
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            Slate ID
-          </label>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={slateId}
-              onChange={(e) => setSlateId(e.target.value)}
-              onKeyPress={(e) => {
-                if (e.key === 'Enter' && slateId) {
-                  loadPlayers();
-                }
-              }}
-              placeholder="e.g., 26155"
-              className="flex-1 px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
-            />
-            <button
-              onClick={loadPlayers}
-              disabled={!slateId || loading}
-              className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
-            >
-              {loading ? 'Loading...' : 'Load Players'}
-            </button>
-          </div>
-          {players.length > 0 && (
-            <p className="mt-2 text-sm text-green-600">
-              ✓ Loaded {players.length} players
+          {slate ? (
+            <p className="text-sm text-gray-700">
+              Slate: <span className="font-medium">{slate.name}</span>
+              {loading ? ' · Loading players...' : ` · ${players.length} players`}
+            </p>
+          ) : (
+            <p className="text-sm text-gray-600">
+              No slate selected. Pick one in the top bar, or{' '}
+              <Link to="/" className="font-medium text-blue-600 underline">import one from Home</Link>.
             </p>
           )}
         </div>

@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { playersAPI, slatesAPI, historicalAPI } from '../services/api';
+import { playersAPI, historicalAPI } from '../services/api';
+import { useSlate } from '../context/SlateContext';
 
 // Helper to format date for input
 const formatDateForInput = (date) => {
@@ -70,7 +71,7 @@ function PlayerRow({ player, showReason = true }) {
 }
 
 function InsightsPage() {
-  const [activeSlate, setActiveSlate] = useState(null);
+  const { slate: activeSlate, slateId, loadingSlates } = useSlate();
   const [players, setPlayers] = useState([]);
   const [insights, setInsights] = useState(null);
   const [summary, setSummary] = useState(null);
@@ -102,9 +103,13 @@ function InsightsPage() {
   ];
 
   useEffect(() => {
-    loadData();
     checkDataStatus();
   }, []);
+
+  // (Re)load when the top-bar slate changes; wait for the slate list first
+  useEffect(() => {
+    if (!loadingSlates) loadData();
+  }, [slateId, loadingSlates]);
 
   // Poll for sync status if syncing
   useEffect(() => {
@@ -174,11 +179,13 @@ function InsightsPage() {
         setSummary(summaryRes.data.summary);
       }
 
-      // Load active slate and players
-      const slateRes = await slatesAPI.getActiveSlate();
-      if (slateRes.data) {
-        setActiveSlate(slateRes.data);
-        const playersRes = await playersAPI.getBySlateId(slateRes.data.slate_id);
+      // Load the selected slate's players
+      setPlayers([]);
+      setInsights(null);
+      setUsageBumps([]);
+      setMissingPlayers([]);
+      if (slateId) {
+        const playersRes = await playersAPI.getBySlateId(slateId);
         setPlayers(playersRes.data || []);
 
         // Get slate-specific insights
@@ -464,12 +471,12 @@ function InsightsPage() {
         <>
           {!activeSlate ? (
             <div className="text-center py-12 bg-white rounded-lg shadow">
-              <p className="text-gray-500 mb-4">No active slate selected.</p>
+              <p className="text-gray-500 mb-4">No slate selected. Pick one in the top bar, or import one from Home.</p>
               <Link
                 to="/"
                 className="inline-block px-6 py-3 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-medium"
               >
-                Go to Home to Select a Slate
+                Go to Home to Import a Slate
               </Link>
             </div>
           ) : !insights ? (

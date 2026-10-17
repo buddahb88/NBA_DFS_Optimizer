@@ -9,9 +9,15 @@ const api = axios.create({
   },
 });
 
+// DFS sites API (contest rules: salary cap, roster slots, scoring)
+export const sitesAPI = {
+  getAll: () => api.get('/sites'),
+  getByKey: (site) => api.get(`/sites/${site}`),
+};
+
 // Slates API
 export const slatesAPI = {
-  getAll: () => api.get('/slates'),
+  getAll: (site = null) => api.get('/slates', { params: site ? { site } : {} }),
   getAvailableSlates: () => api.get('/slates/list'), // Get available slates from RotoWire
   getActiveSlate: () => api.get('/slates/active'), // Get the current active slate
   getById: (slateId) => api.get(`/slates/${slateId}`),

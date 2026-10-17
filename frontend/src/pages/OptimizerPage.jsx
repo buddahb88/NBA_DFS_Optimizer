@@ -1,11 +1,13 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { optimizerAPI, lineupsAPI, slatesAPI, playersAPI } from '../services/api';
+import { optimizerAPI, lineupsAPI, playersAPI } from '../services/api';
+import { useSlate } from '../context/SlateContext';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
 function OptimizerPage() {
-  const [activeSlate, setActiveSlate] = useState(null);
+  const { slate: activeSlate, slateId, site } = useSlate();
+  const slateIdRef = useRef(slateId);
   const [players, setPlayers] = useState([]);
   const [lockedPlayers, setLockedPlayers] = useState([]);
   const [excludedPlayers, setExcludedPlayers] = useState([]);
@@ -39,9 +41,20 @@ function OptimizerPage() {
   const [reviewingLineup, setReviewingLineup] = useState(false);
   const [lineupReview, setLineupReview] = useState(null);
 
+  // Reset slate-specific state and load players when the top-bar slate changes
   useEffect(() => {
-    loadActiveSlate();
-  }, []);
+    setPlayers([]);
+    setLockedPlayers([]);
+    setExcludedPlayers([]);
+    setResults(null);
+    setSelectedLineupIndex(0);
+    setSlateBreakdown(null);
+    setShowBreakdown(false);
+    setLineupReview(null);
+    setProjectionResult(null);
+    slateIdRef.current = slateId;
+    if (slateId) loadPlayers(slateId);
+  }, [slateId]);
 
   useEffect(() => {
     // Update defaults when mode changes
@@ -58,21 +71,11 @@ function OptimizerPage() {
     }
   }, [mode]);
 
-  const loadActiveSlate = async () => {
+  const loadPlayers = async (id) => {
     try {
-      const response = await slatesAPI.getActiveSlate();
-      setActiveSlate(response.data);
-      if (response.data) {
-        loadPlayers(response.data.slate_id);
-      }
-    } catch (error) {
-      console.error('Error loading active slate:', error);
-    }
-  };
-
-  const loadPlayers = async (slateId) => {
-    try {
-      const response = await playersAPI.getBySlateId(slateId);
+      const response = await playersAPI.getBySlateId(id);
+      // Ignore a late response for a slate the user has already switched away from
+      if (String(id) !== String(slateIdRef.current)) return;
       setPlayers(response.data);
     } catch (error) {
       console.error('Error loading players:', error);
@@ -132,7 +135,7 @@ function OptimizerPage() {
 
   const handleSlateBreakdown = async () => {
     if (!activeSlate) {
-      setMessage('No active slate. Please go to Home to select a slate.');
+      setMessage('No slate selected. Pick one in the top bar.');
       return;
     }
 
@@ -178,7 +181,7 @@ function OptimizerPage() {
 
   const handleOptimize = async () => {
     if (!activeSlate) {
-      setMessage('No active slate. Please go to Home to select a slate.');
+      setMessage('No slate selected. Pick one in the top bar.');
       return;
     }
 
@@ -189,6 +192,7 @@ function OptimizerPage() {
     try {
       const settings = {
         slateId: activeSlate.slate_id,
+        site,
         mode,
         numLineups,
         lockedPlayers,
@@ -463,7 +467,7 @@ function OptimizerPage() {
             {!activeSlate && (
               <div className="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-md">
                 <p className="text-yellow-800 text-sm">
-                  No active slate. <Link to="/" className="font-medium underline">Go to Home</Link> to select one.
+                  No slate selected. Pick one in the top bar, or <Link to="/" className="font-medium underline">import one from Home</Link>.
                 </p>
               </div>
             )}

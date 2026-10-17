@@ -1,19 +1,26 @@
 import { useState, useEffect } from 'react';
 import { lineupsAPI } from '../services/api';
+import { useSlate } from '../context/SlateContext';
 
 function LineupsPage() {
+  const { slateId, loadingSlates } = useSlate();
   const [lineups, setLineups] = useState([]);
   const [selectedLineup, setSelectedLineup] = useState(null);
   const [loading, setLoading] = useState(false);
+  // Lineups for slates that have since been replaced stay reachable via "All slates"
+  const [showAllSlates, setShowAllSlates] = useState(false);
+  const filterSlateId = showAllSlates ? null : slateId;
 
   useEffect(() => {
+    if (loadingSlates) return;
+    setSelectedLineup(null);
     loadLineups();
-  }, []);
+  }, [filterSlateId, loadingSlates]);
 
   const loadLineups = async () => {
     setLoading(true);
     try {
-      const response = await lineupsAPI.getAll();
+      const response = await lineupsAPI.getAll(filterSlateId);
       setLineups(response.data);
     } catch (error) {
       console.error('Error loading lineups:', error);
@@ -88,6 +95,15 @@ function LineupsPage() {
             Refresh
           </button>
         </div>
+        <label className="flex items-center gap-2 text-sm text-gray-600">
+          <input
+            type="checkbox"
+            checked={showAllSlates || !slateId}
+            disabled={!slateId}
+            onChange={(e) => setShowAllSlates(e.target.checked)}
+          />
+          Show lineups from all slates
+        </label>
 
         {loading ? (
           <div className="bg-white rounded-lg shadow p-6 text-center text-gray-500">
