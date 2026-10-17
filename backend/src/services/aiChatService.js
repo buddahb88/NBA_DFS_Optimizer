@@ -8,6 +8,8 @@ import { fileURLToPath } from 'url';
 import db, { DATABASE_TYPE } from '../config/database.js';
 import optimizerService from './optimizerService.js';
 import nbaStatsService from './nbaStatsService.js';
+import { SITE_KEYS } from '../config/sites.js';
+import { resolveSite } from '../utils/resolveSite.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -308,12 +310,19 @@ ${schemaDoc}
           excludedPlayerIds: z.array(z.number()).optional().describe('Array of player IDs to exclude from consideration'),
           mode: z.enum(['cash', 'gpp']).default('cash').describe('Optimization mode: cash for safe plays, gpp for tournaments'),
           numLineups: z.number().default(1).describe('Number of lineups to generate (1-20)'),
-          minSalary: z.number().default(49000).describe('Minimum salary to use (default 49000)'),
+          minSalary: z.number().optional().describe('Minimum salary to use (default 98% of the site cap, e.g. 49000 on DraftKings)'),
           randomness: z.number().default(0).describe('Randomness 0-100 for GPP variance (default 0)'),
+          site: z.enum(SITE_KEYS).optional().describe('DFS site (default: the slate\'s site, usually draftkings)'),
+          minUniqueness: z.number().optional().describe('Min players each lineup must differ from every earlier lineup (default 0)'),
         }),
-        func: async ({ slateId, lockedPlayerIds = [], excludedPlayerIds = [], mode = 'cash', numLineups = 1, minSalary = 49000, randomness = 0 }) => {
+        func: async ({ slateId, lockedPlayerIds = [], excludedPlayerIds = [], mode = 'cash', numLineups = 1, minSalary, randomness = 0, site: requestedSite, minUniqueness = 0 }) => {
           try {
-            console.log(`\n🏀 Building ${numLineups} ${mode.toUpperCase()} lineup(s) for slate ${slateId}`);
+            const { site, error: siteError } = await resolveSite(requestedSite, slateId);
+            if (siteError) {
+              return JSON.stringify({ success: false, error: siteError });
+            }
+
+            console.log(`\n🏀 Building ${numLineups} ${site} ${mode.toUpperCase()} lineup(s) for slate ${slateId}`);
             if (lockedPlayerIds.length > 0) {
               console.log(`🔒 Locked players: ${lockedPlayerIds.join(', ')}`);
             }
@@ -331,13 +340,15 @@ ${schemaDoc}
             console.log(`✅ Found ${players.length} players for slate`);
 
             // Use optimizer service
-            const lineups = optimizerService.optimize(players, {
+            const { lineups } = optimizerService.optimize(players, {
+              site,
               mode,
               numLineups,
               lockedPlayers: lockedPlayerIds,
               excludedPlayers: excludedPlayerIds,
               minSalary,
               randomness,
+              minUniqueness,
             });
 
             if (lineups.length === 0) {
@@ -369,6 +380,7 @@ ${schemaDoc}
               success: true,
               lineups: formattedLineups,
               count: formattedLineups.length,
+              site,
               mode,
               slateId,
             }, null, 2);

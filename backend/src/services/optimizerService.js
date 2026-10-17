@@ -1,16 +1,16 @@
 import solver from 'javascript-lp-solver';
+import { buildRequestContext, buildSolveContext } from './optimizer/context.js';
+import { filterPool, applyConstraints } from './optimizer/constraints/index.js';
 
 /**
  * NBA DFS LINEUP OPTIMIZER
  * Streamlined optimizer for Cash Games and GPP Tournaments
  * Minimal filtering - let the optimizer find the best combinations
+ *
+ * Site rules (cap, roster slots, team limits) come from config/sites.js.
+ * LP constraints live in ./optimizer/constraints/ (index.js lists the pipeline).
  */
 class OptimizerService {
-  constructor() {
-    this.SALARY_CAP = 50000;
-    this.ROSTER_SLOTS = ['PG', 'SG', 'SF', 'PF', 'C', 'G', 'F', 'UTIL'];
-  }
-
   /**
    * Main optimization entry point
    * @param {Array} players - Array of player objects with all metrics
@@ -24,29 +24,15 @@ class OptimizerService {
       // Core Settings
       mode = 'cash',                    // 'cash' or 'gpp'
       numLineups = 1,                   // Number of lineups to generate
+      // site: 'draftkings' (default), 'fanduel' or 'yahoo'
 
       // Player Controls
-      lockedPlayers = [],               // Array of player IDs to lock
       excludedPlayers = [],             // Array of player IDs to exclude
+      // lockedPlayers: array of player IDs to lock
+      // minUniqueness: min players each lineup differs from every earlier one (0 = off)
 
-      // Salary Settings
-      minSalary = 49000,                // Minimum salary to use
-
-      // Simple Filters (the only ones we really need)
-      minMinutes = 0,                   // Minimum projected minutes (0 = no filter)
-      minUsage = 0,                     // Minimum usage rate (0 = no filter)
-
-      // Advanced Filters
-      minProjection = 0,                // Minimum projected points
-      minValue = 0,                     // Minimum value (pts per $1k)
-      maxRostership = 100,              // Maximum ownership %
-      minDvpPtsAllowed = 0,             // Minimum DVP points allowed (matchup quality)
-      minOppDefEff = 0,                 // Minimum opponent defensive efficiency
-      minImpliedTotal = 0,              // Minimum Vegas implied team total
-      minOverUnder = 0,                 // Minimum game over/under
-      minFloor = 0,                     // Minimum floor projection
-      maxVolatility = 1,                // Maximum volatility
-      minLeverageScore = 0,             // Minimum leverage score
+      // minSalary defaults to 98% of the site cap ($49,000 on DK)
+      // Pool filters (minMinutes, minProjection, ...): optimizer/constraints/filters.js
 
       // Diversity for multi-lineup
       maxExposure = 60,                 // Max % exposure per player across lineups
@@ -56,29 +42,17 @@ class OptimizerService {
 
     } = settings;
 
+    const requestCtx = buildRequestContext(settings);
+    const { site } = requestCtx;
+
     console.log(`\n🏀 ═══════════════════════════════════════════════`);
-    console.log(`   NBA DFS OPTIMIZER - ${mode.toUpperCase()} MODE`);
+    console.log(`   NBA DFS OPTIMIZER - ${site.name.toUpperCase()} ${mode.toUpperCase()} MODE`);
     console.log(`═══════════════════════════════════════════════════`);
     console.log(`📊 Starting with ${players.length} total players`);
     console.log(`🎯 Generating ${numLineups} lineup(s)`);
 
-    // Step 1: Filter players based on all criteria
-    let availablePlayers = this.filterPlayers(players, {
-      lockedPlayers,
-      excludedPlayers,
-      minMinutes,
-      minUsage,
-      minProjection,
-      minValue,
-      maxRostership,
-      minDvpPtsAllowed,
-      minOppDefEff,
-      minImpliedTotal,
-      minOverUnder,
-      minFloor,
-      maxVolatility,
-      minLeverageScore
-    });
+    // Step 1: Filter players (request excludes + stat filters)
+    const availablePlayers = filterPool(players, buildSolveContext(requestCtx, players));
 
     console.log(`✅ ${availablePlayers.length} players in pool after filters\n`);
 
@@ -109,19 +83,19 @@ class OptimizerService {
       // Build exclusion list for this iteration
       // Include recently used top players to force more diversity
       const diversityExclusions = consecutiveFailures > 0 ? Array.from(recentTopPlayers) : [];
-      const iterationExclusions = [...excludedPlayers, ...overexposedPlayers, ...diversityExclusions];
+      const iterationExclusions = new Set([...excludedPlayers, ...overexposedPlayers, ...diversityExclusions]);
 
       // Calculate randomness - increase significantly for each lineup to get diversity
       // Each subsequent lineup gets more randomness to find different solutions
       const iterationRandomness = randomness + (i * 15) + (consecutiveFailures * 25);
 
-      const lineup = this.generateLineup(availablePlayers, {
-        mode,
-        lockedPlayers,
+      const lineup = this.generateLineup(availablePlayers, requestCtx, {
         excludedPlayers: iterationExclusions,
-        minSalary,
         randomness: iterationRandomness,
-        lineupNumber: i + 1
+        lineupNumber: i + 1,
+        numLineups,
+        priorLineups: lineups.map(l => l.players.map(s => s.player?.id).filter(id => id != null)),
+        playerUsageCount
       });
 
       if (lineup && lineup.isValid) {
@@ -191,124 +165,11 @@ class OptimizerService {
       exposureStats,
       settings: {
         mode,
+        site: site.key,
         numLineups: lineups.length,
         executionTime
       }
     };
-  }
-
-  /**
-   * Advanced player filter with all criteria
-   */
-  filterPlayers(players, filters) {
-    const {
-      lockedPlayers,
-      excludedPlayers,
-      minMinutes,
-      minUsage,
-      minProjection,
-      minValue,
-      maxRostership,
-      minDvpPtsAllowed,
-      minOppDefEff,
-      minImpliedTotal,
-      minOverUnder,
-      minFloor,
-      maxVolatility,
-      minLeverageScore
-    } = filters;
-
-    console.log(`\n🔍 Applying filters:`);
-    if (minMinutes > 0) console.log(`   - Min Minutes: ${minMinutes}`);
-    if (minUsage > 0) console.log(`   - Min Usage: ${minUsage}%`);
-    if (minProjection > 0) console.log(`   - Min Projection: ${minProjection} pts`);
-    if (minValue > 0) console.log(`   - Min Value: ${minValue}x`);
-    if (maxRostership < 100) console.log(`   - Max Ownership: ${maxRostership}%`);
-    if (minDvpPtsAllowed > 0) console.log(`   - Min DVP Pts Allowed: ${minDvpPtsAllowed}`);
-    if (minOppDefEff > 0) console.log(`   - Min Opp Def Eff: ${minOppDefEff}`);
-    if (minImpliedTotal > 0) console.log(`   - Min Implied Total: ${minImpliedTotal}`);
-    if (minOverUnder > 0) console.log(`   - Min Over/Under: ${minOverUnder}`);
-    if (minFloor > 0) console.log(`   - Min Floor: ${minFloor}`);
-    if (maxVolatility < 1) console.log(`   - Max Volatility: ${maxVolatility}`);
-    if (minLeverageScore > 0) console.log(`   - Min Leverage: ${minLeverageScore}`);
-
-    return players.filter(player => {
-      // Always keep locked players
-      if (lockedPlayers.includes(player.id)) {
-        return true;
-      }
-
-      // Exclude specified players
-      if (excludedPlayers.includes(player.id)) {
-        return false;
-      }
-
-      // Must have a projection
-      if (!player.projected_points || player.projected_points <= 0) {
-        return false;
-      }
-
-      // Must have a salary
-      if (!player.salary || player.salary <= 0) {
-        return false;
-      }
-
-      // Calculate value for filtering
-      const playerValue = player.projected_points / (player.salary / 1000);
-
-      // Core filters
-      if (minMinutes > 0 && (player.projected_minutes || 0) < minMinutes) {
-        return false;
-      }
-
-      if (minUsage > 0 && (player.usage || 0) < minUsage) {
-        return false;
-      }
-
-      if (minProjection > 0 && player.projected_points < minProjection) {
-        return false;
-      }
-
-      if (minValue > 0 && playerValue < minValue) {
-        return false;
-      }
-
-      if (maxRostership < 100 && (player.rostership || 0) > maxRostership) {
-        return false;
-      }
-
-      // Matchup filters
-      if (minDvpPtsAllowed > 0 && (player.dvp_pts_allowed || 0) < minDvpPtsAllowed) {
-        return false;
-      }
-
-      if (minOppDefEff > 0 && (player.opp_def_eff || 0) < minOppDefEff) {
-        return false;
-      }
-
-      if (minImpliedTotal > 0 && (player.vegas_implied_total || 0) < minImpliedTotal) {
-        return false;
-      }
-
-      if (minOverUnder > 0 && (player.vegas_over_under || 0) < minOverUnder) {
-        return false;
-      }
-
-      // Safety/risk filters
-      if (minFloor > 0 && (player.floor || 0) < minFloor) {
-        return false;
-      }
-
-      if (maxVolatility < 1 && (player.volatility || 0) > maxVolatility) {
-        return false;
-      }
-
-      if (minLeverageScore > 0 && (player.leverage_score || 0) < minLeverageScore) {
-        return false;
-      }
-
-      return true;
-    });
   }
 
   /**
@@ -332,26 +193,18 @@ class OptimizerService {
 
   /**
    * Generate a single lineup using LP solver
+   * @param {Object} requestCtx - from buildRequestContext()
+   * @param {Object} solveOptions - per-solve state (excludedPlayers, randomness, priorLineups, ...)
    */
-  generateLineup(players, settings) {
-    const {
-      mode,
-      lockedPlayers,
-      excludedPlayers,
-      minSalary,
-      randomness
-    } = settings;
+  generateLineup(players, requestCtx, solveOptions) {
+    const { randomness, ...solveState } = solveOptions;
 
     // Apply variance to projections for diversity
-    const playersWithVariance = this.applyVariance(players, randomness, mode);
+    const playersWithVariance = this.applyVariance(players, randomness, requestCtx.mode);
 
     // Build LP model
-    const model = this.buildLPModel(playersWithVariance, {
-      mode,
-      lockedPlayers,
-      excludedPlayers,
-      minSalary
-    });
+    const ctx = buildSolveContext(requestCtx, playersWithVariance, solveState);
+    const model = this.buildLPModel(ctx);
 
     // Solve
     const result = solver.Solve(model);
@@ -364,11 +217,11 @@ class OptimizerService {
     console.log(`✅ LP solution found! Objective: ${result.result?.toFixed(2)}`);
 
     // Extract lineup
-    const lineup = this.extractLineupFromSolution(result, players, mode);
+    const lineup = this.extractLineupFromSolution(result, players, ctx);
 
     // Add analytics
     if (lineup && lineup.isValid) {
-      lineup.analytics = this.calculateLineupAnalytics(lineup, mode);
+      lineup.analytics = this.calculateLineupAnalytics(lineup, requestCtx.mode);
     }
 
     return lineup;
@@ -403,133 +256,57 @@ class OptimizerService {
   }
 
   /**
-   * Build LP model - clean and simple
+   * Build LP model by running the constraint pipeline (optimizer/constraints)
    */
-  buildLPModel(players, settings) {
-    const { mode, lockedPlayers, excludedPlayers, minSalary } = settings;
-
+  buildLPModel(ctx) {
     // Determine what to optimize based on mode
-    const optimizeField = mode === 'cash' ? 'cashScore' : 'gppScore';
-
     const model = {
-      optimize: optimizeField,
+      optimize: ctx.mode === 'cash' ? 'cashScore' : 'gppScore',
       opType: 'max',
-      constraints: {
-        salary: { max: this.SALARY_CAP },
-        minSalary: { min: minSalary },
-        totalPlayers: { equal: 8 }
-      },
+      constraints: {},
       variables: {},
       ints: {}
     };
 
-    // Position slot constraints - exactly 1 player per slot
-    this.ROSTER_SLOTS.forEach(slot => {
-      model.constraints[`slot_${slot}`] = { equal: 1 };
-    });
-
-    // Player uniqueness - each player can only be used once
-    const playerIds = new Set();
-    players.forEach(player => {
-      if (!playerIds.has(player.id)) {
-        playerIds.add(player.id);
-        if (lockedPlayers.includes(player.id)) {
-          model.constraints[`player_${player.id}`] = { equal: 1 };
-        } else {
-          model.constraints[`player_${player.id}`] = { max: 1 };
-        }
-      }
-    });
-
-    // Create decision variables for each player-slot combination
-    players.forEach(player => {
-      if (excludedPlayers.includes(player.id)) return;
-
-      const playerPositions = this.getPlayerPositions(player.position);
-      const eligibleSlots = this.getEligibleSlots(playerPositions);
-
-      eligibleSlots.forEach(slot => {
-        const varName = `p${player.id}_${slot}`;
-
-        // Calculate scores for optimization
-        const projection = player.adjustedProjection || player.projected_points || 0;
-        const floor = player.floor || (projection * 0.75);
-        const ceiling = player.ceiling || (projection * 1.25);
-        const ownership = player.rostership || 10;
-        const leverage = player.leverage_score || 1;
-
-        // Cash score: weighted toward floor and consistency
-        // Prioritize: high floor, solid projection, good value
-        const value = projection / (player.salary / 1000);
-        const cashScore = (projection * 0.5) + (floor * 0.4) + (value * 1.5);
-
-        // GPP score: weighted toward ceiling, value, and ownership
-        // Low ownership + high ceiling + good value = GPP gold
-        // Leverage already factors in boom probability vs ownership
-        const ceilingValue = ceiling / (player.salary / 1000);
-        const ownershipBoost = Math.max(0, (25 - ownership) * 0.5); // Boost for <25% owned
-        const leverageBonus = Math.min(leverage, 20) * 0.5; // Cap leverage impact
-        const gppScore = (ceiling * 0.4) + (ceilingValue * 3) + ownershipBoost + leverageBonus;
-
-        model.variables[varName] = {
-          cashScore,
-          gppScore,
-          salary: player.salary,
-          minSalary: player.salary,
-          totalPlayers: 1,
-          [`slot_${slot}`]: 1,
-          [`player_${player.id}`]: 1
-        };
-
-        model.ints[varName] = 1;
-      });
-    });
-
-    return model;
+    return applyConstraints(model, ctx);
   }
 
   /**
-   * Extract lineup from LP solution
+   * Extract lineup from LP solution, in the site's roster slot order
    */
-  extractLineupFromSolution(solution, players, mode) {
-    const lineup = {
-      PG: null, SG: null, SF: null, PF: null,
-      C: null, G: null, F: null, UTIL: null
-    };
+  extractLineupFromSolution(solution, players, ctx) {
+    const { site } = ctx;
+
+    // Picked players per slot name (FanDuel has two of each guard/forward slot)
+    const picked = new Map();
+    ctx.varMeta.forEach(({ playerId, slot }, varName) => {
+      if (Math.round(solution[varName] || 0) !== 1) return;
+      const player = players.find(p => p.id === playerId);
+      if (!player) return;
+      if (!picked.has(slot)) picked.set(slot, []);
+      picked.get(slot).push(player);
+    });
 
     let totalSalary = 0;
     let projectedPoints = 0;
 
-    Object.keys(solution).forEach(key => {
-      if (key.startsWith('p') && solution[key] === 1) {
-        const match = key.match(/^p(\d+)_(.+)$/);
-        if (match) {
-          const playerId = parseInt(match[1]);
-          const slot = match[2];
-          const player = players.find(p => p.id === playerId);
-
-          if (player && lineup[slot] === null) {
-            lineup[slot] = player;
-            totalSalary += player.salary;
-            projectedPoints += player.projected_points || 0;
-          }
-        }
+    const lineupArray = site.rosterSlots.map(({ slot }) => {
+      const player = picked.get(slot)?.shift() || null;
+      if (player) {
+        totalSalary += player.salary;
+        projectedPoints += player.projected_points || 0;
       }
+      return { position: slot, player };
     });
 
-    const lineupArray = Object.entries(lineup).map(([pos, player]) => ({
-      position: pos,
-      player
-    }));
-
     const filledSlots = lineupArray.filter(slot => slot.player !== null).length;
-    const isValid = filledSlots === 8 && totalSalary <= this.SALARY_CAP;
+    const isValid = filledSlots === ctx.rosterSize && totalSalary <= site.salaryCap;
 
     return {
       players: lineupArray,
       totalSalary,
       projectedPoints,
-      remainingSalary: this.SALARY_CAP - totalSalary,
+      remainingSalary: site.salaryCap - totalSalary,
       filledSlots,
       isValid
     };
@@ -646,35 +423,6 @@ class OptimizerService {
     console.log(`╚═══════════════════════════════════════════════════════════╝`);
 
     console.log(`\n👥 Total Unique Players Used: ${stats.length}`);
-  }
-
-  /**
-   * Parse position string into array
-   */
-  getPlayerPositions(positionString) {
-    if (!positionString) return [];
-    return positionString.split(',').map(p => p.trim());
-  }
-
-  /**
-   * Get eligible roster slots for a player's positions
-   */
-  getEligibleSlots(playerPositions) {
-    const slots = new Set();
-
-    playerPositions.forEach(pos => {
-      // Primary positions
-      if (this.ROSTER_SLOTS.includes(pos)) {
-        slots.add(pos);
-      }
-      // Flex positions
-      if (pos === 'PG' || pos === 'SG') slots.add('G');
-      if (pos === 'SF' || pos === 'PF') slots.add('F');
-      // Everyone can go in UTIL
-      slots.add('UTIL');
-    });
-
-    return Array.from(slots);
   }
 }
 
