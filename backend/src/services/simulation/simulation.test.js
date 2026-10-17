@@ -1,4 +1,4 @@
-import { test } from 'node:test';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { runSimulation, summarizePlayers, scoreLineups, playerSamples } from './engine.js';
 import { derivePlayerSd, summarize, normalizeName } from './variance.js';

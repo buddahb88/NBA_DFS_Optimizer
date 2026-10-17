@@ -8,7 +8,7 @@
     "dev": "nodemon src/server.js",
     "dev:backtest": "BACKTESTING_MODE=true nodemon src/server.js",
     "start": "node src/server.js",
-    "test": "node --test \"src/**/*.test.js\" \"test/**/*.test.js\"",
+    "test": "vitest run",
     "start:backtest": "BACKTESTING_MODE=true node src/server.js",
     "init-db": "node src/config/initDb.js",
     "snapshot": "node scripts/snapshot-db.js",
@@ -17,7 +17,7 @@
     "enhanced-projections:update": "node scripts/backfill-enhanced-projections.js --update-db",
     "enhanced-projections:verbose": "node scripts/backfill-enhanced-projections.js --verbose",
     "backtest:accuracy": "node scripts/projectionBacktest.js",
-    "test:accuracy": "node --test test/projectionBacktest.test.js"
+    "test:accuracy": "vitest run test/projectionBacktest.test.js"
   },
   "keywords": [],
   "author": "",
@@ -43,6 +43,7 @@
     "zod": "^4.1.12"
   },
   "devDependencies": {
-    "nodemon": "^3.0.2"
+    "nodemon": "^3.0.2",
+    "vitest": "^5.0.5"
   }
 }

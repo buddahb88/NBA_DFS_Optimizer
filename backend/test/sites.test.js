@@ -1,4 +1,4 @@
-import { test } from 'node:test';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { SITES, SITE_KEYS, getSiteConfig, getEligibleSlots, isValidSite } from '../src/config/sites.js';
 

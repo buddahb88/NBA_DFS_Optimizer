@@ -1,4 +1,4 @@
-import { test, before, after } from 'node:test';
+import { test, beforeAll as before, afterAll as after } from 'vitest';
 import assert from 'node:assert/strict';
 import fs from 'fs';
 import os from 'os';

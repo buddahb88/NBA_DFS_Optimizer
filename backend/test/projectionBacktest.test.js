@@ -1,9 +1,9 @@
 /**
  * Tests for the projection accuracy backtest.
- * Run: npm test (or npm run test:accuracy) (uses node:test, an in-memory SQLite database)
+ * Run: npm test (or npm run test:accuracy) (uses vitest, an in-memory SQLite database)
  */
 
-import { test } from 'node:test';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 
 // Must be set before database.js is imported so tests never touch real data
