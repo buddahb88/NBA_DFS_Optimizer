@@ -152,4 +152,10 @@ export const projectionsAPI = {
     api.delete(`/projections/${slateId}/overrides/${playerId}`),
 };
 
+// Late Swap API
+export const lateSwapAPI = {
+  // body: { slateId, csv, site?, now?, mode?, maxExposure?, playerExposure?, outPlayers?, lockedTeams?, gameTimes?, swapQuestionable?, unique? }
+  run: (body) => api.post('/lateswap', body, { timeout: 120000 }),
+};
+
 export default api;

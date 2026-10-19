@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { lineupsAPI } from '../services/api';
 import ExportLineupsModal from '../components/ExportLineupsModal';
 import { useSlate } from '../context/SlateContext';
+import { Tabs } from '../components/ui';
+import LateSwapPanel from '../components/lateSwap/LateSwapPanel';
 
 function LineupsPage() {
   const { site, slateId, loadingSlates } = useSlate();
@@ -14,6 +16,7 @@ function LineupsPage() {
   // Lineups for slates that have since been replaced stay reachable via "All slates"
   const [showAllSlates, setShowAllSlates] = useState(false);
   const filterSlateId = showAllSlates ? null : slateId;
+  const [tab, setTab] = useState('saved');
 
   useEffect(() => {
     if (loadingSlates) return;
@@ -72,6 +75,16 @@ function LineupsPage() {
   };
 
   return (
+    <div className="space-y-4">
+      <Tabs
+        value={tab}
+        onChange={setTab}
+        tabs={[
+          { value: 'saved', label: 'Saved lineups' },
+          { value: 'lateswap', label: 'Late Swap' },
+        ]}
+      />
+      {tab === 'lateswap' ? <LateSwapPanel /> : (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
       {/* Lineups List */}
       <div className="lg:col-span-1 space-y-4">
@@ -282,6 +295,8 @@ function LineupsPage() {
         lineupIds={exportIds || []}
         defaultSite={site}
       />
+    </div>
+      )}
     </div>
   );
 }
