@@ -1,6 +1,7 @@
 import { DATABASE_TYPE } from './database.js';
 import { migrateSiteColumns } from './siteMigrations.js';
 import { migrateSiteFantasyPoints } from './scoringMigrations.js';
+import { migrateProjectionOverrides } from './projectionOverrideMigrations.js';
 
 /**
  * Create all database tables
@@ -22,6 +23,9 @@ export const createTables = async (db) => {
 
   // historical_games.fd_fantasy_points / yahoo_fantasy_points
   await migrateSiteFantasyPoints(db);
+
+  // projection_overrides (manual minutes/points per slate)
+  await migrateProjectionOverrides(db);
 };
 
 /**

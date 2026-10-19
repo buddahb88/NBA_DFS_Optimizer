@@ -4,6 +4,9 @@
  * Calculates adjusted projections using RotoWire as baseline + our own adjustments.
  * This is where we "bake in" matchup, pace, rest, and Vegas factors.
  *
+ * MINUTES MODEL: slate projections also project minutes x FPPM (with injury
+ * redistribution and manual overrides) and blend it in; see minutesModel.js.
+ *
  * ENHANCED: Now includes historical data blending:
  *   - Season average from historical box scores
  *   - Last 3 games momentum (hot/cold streaks)
@@ -30,6 +33,7 @@ import teamDefenseVsPositionModel from '../models/teamDefenseVsPositionModel.js'
 import { normalizeForRankings, normalizeForVsPosition } from '../utils/teamMapping.js';
 import db from '../config/database.js';
 import { fantasyPointsColumn } from './scoring.js';
+import { applyMinutesModel } from './minutesProjectionService.js';
 
 const DATABASE_TYPE = process.env.DATABASE_TYPE || 'sqlite';
 
@@ -730,8 +734,17 @@ class ProjectionService {
 
   /**
    * Batch calculate enhanced projections for all players in a slate
+   *
+   * The minutes x FPPM model (minutesProjectionService) is blended in last:
+   * enhanced_projection becomes the blended value, legacy_projection keeps
+   * the historical-blend value and minutes_model has the breakdown.
+   *
+   * @param {Object} options
+   * @param {string} options.slateId - enables OUT statuses and manual overrides
+   * @param {number} options.minutesWeight - 0..1 weight of the minutes model
+   * @param {boolean} options.minutesModel - false skips the minutes model
    */
-  async calculateSlateEnhancedProjections(players, slateDate = null, site = 'draftkings') {
+  async calculateSlateEnhancedProjections(players, slateDate = null, site = 'draftkings', options = {}) {
     console.log(`\n🧠 Calculating ENHANCED projections for ${players.length} players...`);
 
     // Build slate roster for usage bump detection
@@ -791,7 +804,15 @@ class ProjectionService {
     console.log(`   📈 Usage bumps found: ${usageBumpsFound}`);
     console.log(`   🔥 Hot streaks: ${hotStreaks} | 🥶 Cold streaks: ${coldStreaks}`);
 
-    return results;
+    if (options.minutesModel === false) {
+      return results;
+    }
+    return applyMinutesModel(results, {
+      slateId: options.slateId,
+      slateDate,
+      site,
+      minutesWeight: options.minutesWeight
+    });
   }
 
   /**

@@ -288,11 +288,13 @@ router.get('/:slateId/projection/:playerId', async (req, res) => {
  * - slateDate: (optional) Date string YYYY-MM-DD for backtesting
  * - updateDb: (optional) boolean - whether to update DB with new projections (default: false)
  * - site: (optional) DFS site whose historical fantasy points to use (default: draftkings)
+ * - minutesWeight: (optional) 0..1 weight of the minutes x FPPM model (default: PROJECTION_MINUTES_WEIGHT or 0.6)
+ * - minutesModel: (optional) false to skip the minutes model
  */
 router.post('/:slateId/enhanced-projections', async (req, res) => {
   try {
     const { slateId } = req.params;
-    const { slateDate = null, updateDb = false, site = DEFAULT_SITE } = req.body;
+    const { slateDate = null, updateDb = false, site = DEFAULT_SITE, minutesWeight = null, minutesModel = true } = req.body;
     if (!isValidSite(site)) {
       return res.status(400).json({ error: `Unknown site "${site}"` });
     }
@@ -317,17 +319,25 @@ router.post('/:slateId/enhanced-projections', async (req, res) => {
     console.log(`📊 Found ${players.length} players to process`);
 
     // Calculate enhanced projections
-    const enhancedResults = await projectionService.calculateSlateEnhancedProjections(players, slateDate, site);
+    const enhancedResults = await projectionService.calculateSlateEnhancedProjections(players, slateDate, site, {
+      slateId,
+      minutesWeight,
+      minutesModel
+    });
 
     // Optionally update database
     if (updateDb) {
       console.log(`💾 Updating database with enhanced projections...`);
-      const projectionsToUpdate = enhancedResults.map(r => ({
-        player_id: r.player_id,
-        adjusted_projection: r.enhanced_projection,
-        floor: r.historical?.floor || r.enhanced_projection * 0.7,
-        ceiling: r.historical?.ceiling || r.enhanced_projection * 1.3
-      }));
+      const projectionsToUpdate = enhancedResults.map(r => {
+        // OUT players project to 0, so their range does too
+        const isOut = r.minutes_model?.source === 'out';
+        return {
+          player_id: r.player_id,
+          adjusted_projection: r.enhanced_projection,
+          floor: isOut ? 0 : r.historical?.floor || r.enhanced_projection * 0.7,
+          ceiling: isOut ? 0 : r.historical?.ceiling || r.enhanced_projection * 1.3
+        };
+      });
       await playerModel.bulkUpdateProjections(slateId, projectionsToUpdate);
     }
 
@@ -443,6 +453,7 @@ router.post('/:slateId/enhanced-projections', async (req, res) => {
         salary: p.salary,
         rotowire_projection: p.rotowire_baseline,
         enhanced_projection: p.enhanced_projection,
+        legacy_projection: p.legacy_projection,
         blended_baseline: p.blended_baseline,
         total_adjustment: p.total_adjustment,
         confidence: p.confidence,
@@ -450,7 +461,8 @@ router.post('/:slateId/enhanced-projections', async (req, res) => {
         historical: p.historical,
         matchup: p.matchup,
         usageBump: p.usageBump,
-        adjustments: p.adjustments
+        adjustments: p.adjustments,
+        minutes_model: p.minutes_model
       }))
     });
   } catch (error) {

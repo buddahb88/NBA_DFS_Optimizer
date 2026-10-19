@@ -103,10 +103,30 @@ npm run dev
 npm run dev
 ```
 
+## Projection Accuracy Replay
+
+`npm run backtest:accuracy` scores projections still stored in the `players`
+table. Those are only kept for the most recent slate, so it usually has little
+to score. Replay mode projects every past date in `historical_games` instead,
+using only box scores from before that date. It compares the legacy enhanced
+projection with the minutes x FPPM model and blends of the two:
+
+```bash
+npm run backtest:accuracy -- --replay                 # DraftKings
+npm run backtest:accuracy -- --replay --site fanduel
+npm run backtest:accuracy -- --replay --no-legacy     # minutes model only, faster
+```
+
+Replay has no RotoWire projections, Vegas lines or injury reports. OUT players
+are inferred from who is missing from the box score, so read the injury
+numbers as directional. The blend weight in production is set with
+`PROJECTION_MINUTES_WEIGHT` (0..1, default 0.6).
+
 ## Environment Variables
 
 - `BACKTESTING_MODE=true` - Uses `nba_dfs_backtest.db` instead of `nba_dfs.db`
 - `DATABASE_PATH=/custom/path.db` - Use a completely custom database path (overrides backtest mode)
+- `PROJECTION_MINUTES_WEIGHT=0.6` - Weight of the minutes x FPPM model in slate projections (0 turns it off)
 
 ## File Locations
 
