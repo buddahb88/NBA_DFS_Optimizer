@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { optimizerAPI, lineupsAPI, slatesAPI, playersAPI } from '../services/api';
+import { optimizerAPI, lineupsAPI, slatesAPI, playersAPI, playerSettingsAPI } from '../services/api';
+import { toOptimizerPlayers } from '../features/playerPool/playerPool';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -187,10 +188,18 @@ function OptimizerPage() {
     setResults(null);
 
     try {
+      // Per-player controls saved on the Player Pool page (exposure.js request contract)
+      const { data: savedControls } = await playerSettingsAPI.getBySlateId(activeSlate.slate_id);
+      const poolControls = toOptimizerPlayers(
+        players,
+        Object.fromEntries((savedControls || []).map(s => [String(s.playerId), s]))
+      );
+
       const settings = {
         slateId: activeSlate.slate_id,
         mode,
         numLineups,
+        players: poolControls,
         lockedPlayers,
         excludedPlayers,
         minSalary,
@@ -205,7 +214,8 @@ function OptimizerPage() {
 
       if (response.data.lineups && response.data.lineups.length > 0) {
         setResults(response.data);
-        setMessage(`✅ Generated ${response.data.lineups.length} optimal lineup(s)!`);
+        const controlsNote = poolControls.length ? ` (${poolControls.length} Player Pool control(s) applied)` : '';
+        setMessage(`✅ Generated ${response.data.lineups.length} optimal lineup(s)!${controlsNote}`);
       } else {
         setMessage('❌ No lineups generated. Try relaxing your filters.');
       }

@@ -29,6 +29,13 @@ export const playersAPI = {
   getProjectionBreakdown: (slateId, playerId) => api.get(`/players/${slateId}/projection/${playerId}`),
 };
 
+// Per-slate player controls (lock/exclude/exposure/projection override), keyed by players.player_id
+export const playerSettingsAPI = {
+  getBySlateId: (slateId) => api.get(`/player-settings/${slateId}`),
+  save: (slateId, playerId, settings) => api.put(`/player-settings/${slateId}/${encodeURIComponent(playerId)}`, settings),
+  clear: (slateId) => api.delete(`/player-settings/${slateId}`),
+};
+
 // Lineups API
 export const lineupsAPI = {
   getAll: (slateId = null) => api.get('/lineups', { params: slateId ? { slateId } : {} }),
