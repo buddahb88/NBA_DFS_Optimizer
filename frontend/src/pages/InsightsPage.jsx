@@ -149,6 +149,18 @@ function InsightsPage() {
     }
   };
 
+  // Direct NBA API sync - bypasses blob storage, syncs from last known date
+  const startNbaApiSync = async () => {
+    try {
+      setIsSyncing(true);
+      setSyncProgress({ status: 'starting', mode: 'nba-api', message: 'Connecting to NBA Stats API...' });
+      await historicalAPI.startNbaApiSync('2024-25', dataStatus.latestGame);
+    } catch (e) {
+      console.error('Error starting NBA API sync:', e);
+      setIsSyncing(false);
+    }
+  };
+
   const toggleSeason = (season) => {
     setSelectedSeasons(prev => {
       if (prev.includes(season)) {
@@ -300,13 +312,23 @@ function InsightsPage() {
                   <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
                   <div className="text-sm">
                     <div className="font-medium text-gray-900">
-                      {syncProgress?.mode === 'incremental' ? 'Updating' : 'Syncing'}...
+                      {syncProgress?.mode === 'nba-api' ? '🏀 NBA API Sync' :
+                       syncProgress?.mode === 'incremental' ? 'Updating' : 'Syncing'}...
                       {syncProgress?.percent ? ` ${syncProgress.percent}%` : ''}
                       {syncProgress?.currentSeason && ` (${syncProgress.currentSeason})`}
+                      {syncProgress?.season && syncProgress?.mode === 'nba-api' && ` (${syncProgress.season})`}
                     </div>
+                    {syncProgress?.message && (
+                      <div className="text-gray-500">{syncProgress.message}</div>
+                    )}
                     {syncProgress?.processed && (
                       <div className="text-gray-500">
                         {syncProgress.processed}/{syncProgress.total} players | {syncProgress.games} games
+                      </div>
+                    )}
+                    {syncProgress?.current && syncProgress?.playerName && (
+                      <div className="text-gray-500">
+                        {syncProgress.current}/{syncProgress.total} players - {syncProgress.playerName}
                       </div>
                     )}
                   </div>
@@ -333,6 +355,13 @@ function InsightsPage() {
                       Force Full Sync
                     </button>
                   )}
+                  <button
+                    onClick={startNbaApiSync}
+                    className="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-medium"
+                    title="Sync directly from NBA.com API - bypasses blob storage"
+                  >
+                    🏀 NBA API Sync
+                  </button>
                 </>
               )}
             </div>

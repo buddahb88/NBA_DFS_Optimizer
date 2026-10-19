@@ -1,0 +1,384 @@
+/**
+ * ResearchAgent - Specialized agent for database queries and player search
+ *
+ * Responsibilities:
+ * - Execute SQL queries against the database
+ * - Search for players by name
+ * - Get current slate information
+ * - Provide raw data for analysis
+ */
+
+import BaseAgent from './BaseAgent.js';
+import db from '../config/database.js';
+
+const SYSTEM_PROMPT = `You are a DFS research specialist with expertise in database queries and data retrieval.
+
+Your job is to:
+1. Query the NBA DFS database for player stats, Vegas lines, and performance data
+2. Search for players by name (partial matching supported)
+3. Get current slate information
+4. Provide accurate, structured data for analysis
+
+Database Tables Available:
+- players: Current slate player data (name, salary, projected_points, position, team, opponent, vegas data, advanced metrics)
+- slates: Available contest slates
+- historical_games: Past game logs (7000+ rows) - uses player_name NOT player_id
+- team_defense_rankings: Team defensive efficiency metrics
+- team_defense_vs_position: Position-specific defense vs position (DVP)
+
+HISTORICAL_GAMES TABLE COLUMNS (query directly, NO JOIN needed):
+- player_name (TEXT), team, opponent, game_date, season
+- is_home (0/1), is_back_to_back (0/1), rest_days
+- minutes, points, rebounds, assists, steals, blocks, turnovers
+- dk_fantasy_points (DraftKings fantasy points scored)
+- usg_pct, ts_pct, efg_pct, off_rtg, def_rtg, bpm, plus_minus
+
+Important Query Tips:
+- historical_games: Query directly by player_name - DO NOT JOIN with players table
+- Example: SELECT player_name, AVG(dk_fantasy_points) FROM historical_games GROUP BY player_name
+- Use LOWER() for case-insensitive name searches
+- Players table has pre-joined matchup data (dvp_pts_allowed, opp_def_eff)
+- Vegas data includes: vegas_implied_total, vegas_spread, vegas_over_under, vegas_win_prob
+- Advanced metrics: floor, ceiling, volatility, boom_probability, bust_probability, leverage_score
+
+CRITICAL - NO HALLUCINATION RULES:
+- ONLY report data that is actually returned from your tool calls
+- If a query returns 0 rows or "no data found", report that honestly - DO NOT make up data
+- NEVER invent player names, salaries, stats, or matchups that weren't in the query results
+- If there's no slate data, say "No slate data available in the database"
+- If a player search returns empty, say "Player not found in current slate"
+- DO NOT use your general NBA knowledge to fill gaps - only use actual query results
+
+Always show your SQL queries and explain what data you retrieved.`;
+
+class ResearchAgent extends BaseAgent {
+  constructor() {
+    super({
+      name: 'research',
+      description: 'Database queries and player search specialist',
+      maxIterations: 5,
+      systemPrompt: SYSTEM_PROMPT,
+      tools: []
+    });
+
+    this.tools = this.createTools();
+  }
+
+  createTools() {
+    return [
+      {
+        name: 'sql_query',
+        description: 'Execute SQL SELECT queries against the NBA DFS database. Returns data as JSON array.',
+        parameters: {
+          type: 'object',
+          properties: {
+            query: {
+              type: 'string',
+              description: 'SQL SELECT query to execute (SELECT only for safety)'
+            },
+            explanation: {
+              type: 'string',
+              description: 'Brief explanation of what this query does'
+            }
+          },
+          required: ['query', 'explanation']
+        },
+        execute: async ({ query, explanation }) => {
+          console.log(`\n📊 [ResearchAgent] SQL: ${explanation}`);
+          console.log(`Query: ${query}`);
+
+          // Safety check - only allow SELECT
+          const normalizedQuery = query.trim().toUpperCase();
+          if (!normalizedQuery.startsWith('SELECT')) {
+            return {
+              success: false,
+              error: 'Only SELECT queries are allowed for safety'
+            };
+          }
+
+          try {
+            const results = await db.all(query);
+            console.log(`✅ Returned ${results.length} rows`);
+
+            // Limit results to prevent token overflow
+            const limitedResults = results.slice(0, 100);
+
+            return {
+              success: true,
+              rowCount: results.length,
+              data: limitedResults,
+              truncated: results.length > 100,
+              explanation
+            };
+          } catch (error) {
+            console.error('❌ SQL Error:', error.message);
+            return {
+              success: false,
+              error: error.message,
+              query
+            };
+          }
+        }
+      },
+
+      {
+        name: 'search_players',
+        description: 'Search for players by name to get their IDs and details. Supports partial name matching.',
+        parameters: {
+          type: 'object',
+          properties: {
+            playerNames: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Array of player names to search for'
+            },
+            slateId: {
+              type: 'string',
+              description: 'Optional slate ID to filter by'
+            }
+          },
+          required: ['playerNames']
+        },
+        execute: async ({ playerNames, slateId }) => {
+          console.log(`\n🔍 [ResearchAgent] Searching for: ${playerNames.join(', ')}`);
+
+          const foundPlayers = [];
+          const notFound = [];
+
+          for (const name of playerNames) {
+            let query = `
+              SELECT id, name, position, team, opponent, salary, projected_points,
+                     floor, ceiling, ownership, leverage_score, injury_status, slate_id
+              FROM players
+              WHERE LOWER(name) LIKE LOWER(?)
+            `;
+            const params = [`%${name}%`];
+
+            if (slateId) {
+              query += ' AND slate_id = ?';
+              params.push(slateId);
+            }
+
+            query += ' ORDER BY projected_points DESC LIMIT 5';
+
+            const results = await db.all(query, ...params);
+
+            if (results.length > 0) {
+              foundPlayers.push(...results);
+              console.log(`✅ Found ${results.length} matches for "${name}"`);
+            } else {
+              notFound.push(name);
+              console.log(`❌ No matches for "${name}"`);
+            }
+          }
+
+          return {
+            success: true,
+            found: foundPlayers.map(p => ({
+              id: p.id,
+              name: p.name,
+              position: p.position,
+              team: p.team,
+              opponent: p.opponent,
+              salary: p.salary,
+              projection: p.projected_points,
+              floor: p.floor,
+              ceiling: p.ceiling,
+              ownership: p.ownership,
+              leverage: p.leverage_score,
+              injury: p.injury_status,
+              slateId: p.slate_id
+            })),
+            notFound,
+            totalMatches: foundPlayers.length
+          };
+        }
+      },
+
+      {
+        name: 'get_current_slate',
+        description: 'Get the most recent slate ID and details. Use this when slate_id is not provided.',
+        parameters: {
+          type: 'object',
+          properties: {}
+        },
+        execute: async () => {
+          console.log('\n📅 [ResearchAgent] Getting current slate...');
+
+          const slate = await db.get(`
+            SELECT slate_id, name, start_time, created_at,
+                   (SELECT COUNT(*) FROM players WHERE players.slate_id = slates.slate_id) as player_count
+            FROM slates
+            ORDER BY created_at DESC
+            LIMIT 1
+          `);
+
+          if (!slate) {
+            return { success: false, error: 'No slates found in database' };
+          }
+
+          console.log(`✅ Current slate: ${slate.slate_id} (${slate.name})`);
+
+          return {
+            success: true,
+            slate: {
+              slateId: slate.slate_id,
+              name: slate.name,
+              startTime: slate.start_time,
+              createdAt: slate.created_at,
+              playerCount: slate.player_count
+            }
+          };
+        }
+      },
+
+      {
+        name: 'get_slate_summary',
+        description: 'Get a summary of all players on a slate including position breakdown, salary distribution, and top plays.',
+        parameters: {
+          type: 'object',
+          properties: {
+            slateId: {
+              type: 'string',
+              description: 'Slate ID to summarize'
+            }
+          },
+          required: ['slateId']
+        },
+        execute: async ({ slateId }) => {
+          console.log(`\n📈 [ResearchAgent] Getting slate summary for ${slateId}`);
+
+          // Get position breakdown
+          const positionBreakdown = await db.all(`
+            SELECT position, COUNT(*) as count, AVG(salary) as avg_salary, AVG(projected_points) as avg_projection
+            FROM players WHERE slate_id = ?
+            GROUP BY position
+          `, slateId);
+
+          // Get salary tiers
+          const salaryTiers = await db.all(`
+            SELECT
+              CASE
+                WHEN salary >= 9000 THEN 'Premium ($9k+)'
+                WHEN salary >= 7000 THEN 'Mid ($7-9k)'
+                WHEN salary >= 5000 THEN 'Value ($5-7k)'
+                ELSE 'Punt (<$5k)'
+              END as tier,
+              COUNT(*) as count,
+              AVG(projected_points) as avg_projection
+            FROM players WHERE slate_id = ?
+            GROUP BY tier
+          `, slateId);
+
+          // Get top projected players
+          const topProjected = await db.all(`
+            SELECT name, position, team, salary, projected_points, ownership, leverage_score
+            FROM players WHERE slate_id = ?
+            ORDER BY projected_points DESC LIMIT 10
+          `, slateId);
+
+          // Get best value plays
+          const bestValue = await db.all(`
+            SELECT name, position, team, salary, projected_points,
+                   (projected_points / salary * 1000) as value_score
+            FROM players WHERE slate_id = ? AND salary > 0
+            ORDER BY value_score DESC LIMIT 10
+          `, slateId);
+
+          // Get top leverage plays (GPP)
+          const topLeverage = await db.all(`
+            SELECT name, position, team, salary, projected_points, ownership, leverage_score, ceiling
+            FROM players WHERE slate_id = ? AND leverage_score IS NOT NULL
+            ORDER BY leverage_score DESC LIMIT 10
+          `, slateId);
+
+          return {
+            success: true,
+            slateId,
+            positionBreakdown: positionBreakdown.map(p => ({
+              position: p.position,
+              count: p.count,
+              avgSalary: Math.round(p.avg_salary),
+              avgProjection: Math.round(p.avg_projection * 10) / 10
+            })),
+            salaryTiers,
+            topProjected: topProjected.map(p => ({
+              name: p.name,
+              position: p.position,
+              team: p.team,
+              salary: p.salary,
+              projection: p.projected_points,
+              ownership: p.ownership
+            })),
+            bestValue: bestValue.map(p => ({
+              name: p.name,
+              position: p.position,
+              team: p.team,
+              salary: p.salary,
+              projection: p.projected_points,
+              valueScore: Math.round(p.value_score * 100) / 100
+            })),
+            topLeverage: topLeverage.map(p => ({
+              name: p.name,
+              position: p.position,
+              team: p.team,
+              salary: p.salary,
+              projection: p.projected_points,
+              ownership: p.ownership,
+              leverage: p.leverage_score,
+              ceiling: p.ceiling
+            }))
+          };
+        }
+      },
+
+      {
+        name: 'get_game_environment',
+        description: 'Get Vegas lines and game environment data for all games on a slate.',
+        parameters: {
+          type: 'object',
+          properties: {
+            slateId: {
+              type: 'string',
+              description: 'Slate ID'
+            }
+          },
+          required: ['slateId']
+        },
+        execute: async ({ slateId }) => {
+          console.log(`\n🎰 [ResearchAgent] Getting game environment for slate ${slateId}`);
+
+          const games = await db.all(`
+            SELECT DISTINCT
+              team, opponent,
+              vegas_implied_total, vegas_spread, vegas_over_under, vegas_win_prob,
+              game_info
+            FROM players
+            WHERE slate_id = ?
+            GROUP BY team, opponent
+          `, slateId);
+
+          // Sort by implied total (highest scoring games first)
+          games.sort((a, b) => (b.vegas_implied_total || 0) - (a.vegas_implied_total || 0));
+
+          return {
+            success: true,
+            slateId,
+            gameCount: games.length / 2, // Each game has 2 teams
+            games: games.map(g => ({
+              team: g.team,
+              opponent: g.opponent,
+              impliedTotal: g.vegas_implied_total,
+              spread: g.vegas_spread,
+              overUnder: g.vegas_over_under,
+              winProb: g.vegas_win_prob,
+              gameInfo: g.game_info
+            }))
+          };
+        }
+      }
+    ];
+  }
+}
+
+export default ResearchAgent;

@@ -201,6 +201,140 @@ router.get('/sync/status', (req, res) => {
 });
 
 /**
+ * POST /api/historical/sync/nba-api
+ * Sync historical data directly from NBA Stats API (bypasses blob storage)
+ * Use this when Azure Function hasn't updated the blob, or for incremental updates
+ * Body: { season?: string, fromDate?: string }
+ */
+router.post('/sync/nba-api', async (req, res) => {
+  if (isSyncing) {
+    return res.status(409).json({
+      error: 'Sync already in progress',
+      progress: syncProgress
+    });
+  }
+
+  const { season = '2024-25', fromDate } = req.body;
+
+  // Get current data status to determine start date
+  const status = await nbaStatsService.getDataStatus();
+  const startDate = fromDate || status.latestGame || null;
+
+  isSyncing = true;
+  syncProgress = {
+    status: 'starting',
+    mode: 'nba-api',
+    season,
+    fromDate: startDate,
+    message: 'Fetching player list from NBA.com...'
+  };
+
+  res.json({
+    success: true,
+    mode: 'nba-api',
+    message: `Starting incremental sync from NBA Stats API. Season: ${season}, From: ${startDate || 'season start'}`,
+    startDate
+  });
+
+  // Run sync in background
+  setImmediate(async () => {
+    try {
+      const startTime = Date.now();
+
+      // Progress callback
+      const progressCallback = (progress) => {
+        const current = progress.current || progress.processed || 0;
+        syncProgress = {
+          status: 'syncing',
+          mode: 'nba-api',
+          season,
+          ...progress,
+          percent: progress.total > 0 ? Math.round((current / progress.total) * 100) : 0
+        };
+      };
+
+      console.log(`\n🏀 Starting NBA API sync: season=${season}, fromDate=${startDate}`);
+
+      let result;
+      if (startDate) {
+        // Incremental sync from last known date
+        result = await nbaStatsService.fetchIncrementalGameLogs(season, startDate, progressCallback);
+      } else {
+        // Full season sync
+        result = await nbaStatsService.fetchSeasonGameLogs(season, progressCallback);
+      }
+
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+
+      syncProgress = {
+        status: 'complete',
+        mode: 'nba-api',
+        season,
+        games: result.totalInserted || 0,
+        players: result.playersProcessed || 0,
+        elapsed,
+        message: `Synced ${result.totalInserted || 0} games from ${result.playersProcessed || 0} players in ${elapsed}s`
+      };
+
+      console.log(`✅ NBA API sync complete: ${result.totalInserted || 0} games in ${elapsed}s`);
+
+    } catch (error) {
+      console.error('❌ NBA API sync error:', error);
+      syncProgress = {
+        status: 'error',
+        mode: 'nba-api',
+        error: error.message
+      };
+    } finally {
+      isSyncing = false;
+    }
+  });
+});
+
+/**
+ * POST /api/historical/import
+ * Manually import games from JSON array
+ * Body: { games: [{player_name, team, opponent, game_date, ...}] }
+ */
+router.post('/import', async (req, res) => {
+  const { games } = req.body;
+
+  if (!games || !Array.isArray(games)) {
+    return res.status(400).json({ error: 'games array is required' });
+  }
+
+  console.log(`\n📥 Importing ${games.length} games manually...`);
+
+  let imported = 0;
+  let skipped = 0;
+  const errors = [];
+
+  for (const game of games) {
+    try {
+      const wasInserted = await nbaStatsService.insertGameFromBoxScore(game);
+      if (wasInserted) {
+        imported++;
+      } else {
+        skipped++;
+      }
+    } catch (e) {
+      errors.push({ game: game.player_name, error: e.message });
+      skipped++;
+    }
+  }
+
+  console.log(`✅ Import complete: ${imported} imported, ${skipped} skipped`);
+
+  res.json({
+    success: true,
+    imported,
+    skipped,
+    total: games.length,
+    errors: errors.slice(0, 10) // Only show first 10 errors
+  });
+});
+
+/**
  * GET /api/historical/player/:name
  * Get historical game log for a player
  */

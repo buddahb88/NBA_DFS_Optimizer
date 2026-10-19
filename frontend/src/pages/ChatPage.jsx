@@ -9,6 +9,11 @@ import { ModuleRegistry, AllCommunityModule } from 'ag-grid-community';
 import 'ag-grid-community/styles/ag-grid.css';
 import 'ag-grid-community/styles/ag-theme-alpine.css';
 
+// Import new agentic components
+import { useAgentStream } from '../hooks/useAgentStream';
+import { ReasoningPanel } from '../components/ReasoningPanel';
+import { ChatSettings } from '../components/ChatSettings';
+
 // Register AG Grid modules
 ModuleRegistry.registerModules([AllCommunityModule]);
 
@@ -364,21 +369,45 @@ function Message({ message, formatTimestamp }) {
               )}
             </div>
 
-            {/* Tools used metadata */}
-            {message.metadata?.toolsUsed && message.metadata.toolsUsed.length > 0 && (
+            {/* Tools/Agents used metadata */}
+            {(message.metadata?.toolsUsed?.length > 0 || message.metadata?.agentsUsed?.length > 0) && (
               <div className="mt-4 pt-4 border-t border-gray-200">
-                <div className="flex items-center gap-2 text-xs text-gray-500">
-                  <span>Tools used:</span>
-                  <div className="flex flex-wrap gap-1.5">
-                    {message.metadata.toolsUsed.map((tool, i) => (
-                      <span
-                        key={i}
-                        className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs font-medium"
-                      >
-                        {tool}
-                      </span>
-                    ))}
-                  </div>
+                <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
+                  {message.metadata.agentsUsed?.length > 0 && (
+                    <>
+                      <span>Agents:</span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {message.metadata.agentsUsed.map((agent, i) => (
+                          <span
+                            key={i}
+                            className="px-2 py-1 bg-purple-100 text-purple-700 rounded text-xs font-medium"
+                          >
+                            {agent}
+                          </span>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                  {message.metadata.toolsUsed?.length > 0 && (
+                    <>
+                      <span className="ml-2">Tools:</span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {message.metadata.toolsUsed.slice(0, 5).map((tool, i) => (
+                          <span
+                            key={i}
+                            className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs font-medium"
+                          >
+                            {typeof tool === 'object' ? tool.name : tool}
+                          </span>
+                        ))}
+                        {message.metadata.toolsUsed.length > 5 && (
+                          <span className="px-2 py-1 bg-gray-100 text-gray-600 rounded text-xs">
+                            +{message.metadata.toolsUsed.length - 5} more
+                          </span>
+                        )}
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
             )}
@@ -387,6 +416,61 @@ function Message({ message, formatTimestamp }) {
             {message.created_at && (
               <div className="text-xs text-gray-400 mt-3">
                 {formatTimestamp(message.created_at)}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Streaming message component (shows during agentic response)
+function StreamingMessage({ content, reasoning, toolCalls, activeAgent, iterations, isStreaming }) {
+  return (
+    <div className="w-full bg-white">
+      <div className="max-w-3xl mx-auto px-6 py-8">
+        <div className="flex gap-4">
+          {/* Avatar */}
+          <div className="flex-shrink-0 pt-1">
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-orange-400 to-red-500 flex items-center justify-center text-lg">
+              🏀
+            </div>
+          </div>
+
+          {/* Content */}
+          <div className="flex-1 min-w-0">
+            {/* Role label with streaming indicator */}
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                Assistant
+              </span>
+              {isStreaming && (
+                <span className="text-xs text-green-600 flex items-center gap-1">
+                  <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+                  Thinking...
+                </span>
+              )}
+            </div>
+
+            {/* Reasoning Panel */}
+            <ReasoningPanel
+              reasoning={reasoning}
+              toolCalls={toolCalls}
+              activeAgent={activeAgent}
+              iterations={iterations}
+              isStreaming={isStreaming}
+            />
+
+            {/* Response content */}
+            {content && (
+              <div className="prose prose-sm max-w-none text-gray-800">
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={MarkdownComponents}
+                >
+                  {content}
+                </ReactMarkdown>
               </div>
             )}
           </div>
@@ -426,13 +510,31 @@ function TypingIndicator() {
 export default function ChatPage() {
   const [messages, setMessages] = useState([]);
   const [inputMessage, setInputMessage] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
   const [sessionId, setSessionId] = useState(null);
   const [sessions, setSessions] = useState([]);
   const [showSessions, setShowSessions] = useState(false);
   const [playerHeadshots, setPlayerHeadshots] = useState({});
+  const [showSettings, setShowSettings] = useState(false);
+  const [maxIterations, setMaxIterations] = useState(10);
+  const [showReasoning, setShowReasoning] = useState(true);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
+
+  // Use the streaming hook
+  const {
+    isStreaming,
+    reasoning,
+    toolCalls,
+    activeAgent,
+    message: streamingMessage,
+    error: streamError,
+    iterations,
+    metadata,
+    startStream,
+    cancelStream,
+    reset: resetStream,
+    sessionId: streamSessionId
+  } = useAgentStream();
 
   // Scroll to bottom when messages change
   const scrollToBottom = () => {
@@ -441,7 +543,7 @@ export default function ChatPage() {
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages]);
+  }, [messages, streamingMessage, reasoning]);
 
   // Load sessions and player headshots on mount
   useEffect(() => {
@@ -453,6 +555,48 @@ export default function ChatPage() {
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
+
+  // Handle stream completion
+  useEffect(() => {
+    if (!isStreaming && streamingMessage && metadata) {
+      // Add completed message to history
+      const assistantMessage = {
+        role: 'assistant',
+        content: streamingMessage,
+        metadata: {
+          toolsUsed: metadata.toolsUsed,
+          agentsUsed: metadata.agentsUsed,
+          iterations: metadata.iterations
+        },
+        created_at: new Date().toISOString(),
+      };
+
+      setMessages(prev => [...prev, assistantMessage]);
+
+      // Update session ID
+      if (metadata.sessionId) {
+        setSessionId(metadata.sessionId);
+        loadSessions();
+      }
+
+      // Reset stream state
+      resetStream();
+    }
+  }, [isStreaming, streamingMessage, metadata]);
+
+  // Handle stream error
+  useEffect(() => {
+    if (streamError) {
+      const errorMessage = {
+        role: 'assistant',
+        content: `Error: ${streamError}`,
+        created_at: new Date().toISOString(),
+        isError: true,
+      };
+      setMessages(prev => [...prev, errorMessage]);
+      resetStream();
+    }
+  }, [streamError]);
 
   const loadSessions = async () => {
     try {
@@ -511,13 +655,14 @@ export default function ChatPage() {
     setMessages([]);
     setSessionId(null);
     setShowSessions(false);
+    resetStream();
     inputRef.current?.focus();
   };
 
   const handleSendMessage = async (e) => {
     e.preventDefault();
 
-    if (!inputMessage.trim() || isLoading) return;
+    if (!inputMessage.trim() || isStreaming) return;
 
     const userMessage = {
       role: 'user',
@@ -526,43 +671,14 @@ export default function ChatPage() {
     };
 
     setMessages((prev) => [...prev, userMessage]);
+    const messageToSend = inputMessage;
     setInputMessage('');
-    setIsLoading(true);
 
-    try {
-      const response = await chatAPI.sendMessage(inputMessage, sessionId);
-
-      if (response.data.success) {
-        const assistantMessage = {
-          role: 'assistant',
-          content: response.data.message,
-          metadata: { toolsUsed: response.data.toolsUsed },
-          created_at: new Date().toISOString(),
-        };
-
-        setMessages((prev) => [...prev, assistantMessage]);
-
-        // Update session ID if it was a new session
-        if (!sessionId && response.data.sessionId) {
-          setSessionId(response.data.sessionId);
-          loadSessions(); // Refresh sessions list
-        }
-      } else {
-        throw new Error(response.data.error || 'Failed to get response');
-      }
-    } catch (error) {
-      console.error('Chat error:', error);
-      const errorMessage = {
-        role: 'assistant',
-        content: 'Sorry, I encountered an error. Please try again.',
-        created_at: new Date().toISOString(),
-        isError: true,
-      };
-      setMessages((prev) => [...prev, errorMessage]);
-    } finally {
-      setIsLoading(false);
-      inputRef.current?.focus();
-    }
+    // Use streaming API
+    await startStream(messageToSend, {
+      sessionId,
+      maxIterations
+    });
   };
 
   const deleteSession = async (sessionIdToDelete) => {
@@ -677,31 +793,44 @@ export default function ChatPage() {
       {/* Main Chat Area */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Header */}
-        <div className="bg-white border-b border-gray-200 px-4 py-3 flex items-center gap-3 shadow-sm">
-          <button
-            onClick={() => setShowSessions(!showSessions)}
-            className="p-2 hover:bg-gray-100 rounded-lg transition-colors text-gray-600"
-            title={showSessions ? 'Hide sidebar' : 'Show sidebar'}
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-            </svg>
-          </button>
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-orange-400 to-red-500 flex items-center justify-center text-lg">
-              🏀
-            </div>
-            <div>
-              <h1 className="text-base font-semibold text-gray-900">
-                NBA DFS AI Assistant
-              </h1>
+        <div className="bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between shadow-sm">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setShowSessions(!showSessions)}
+              className="p-2 hover:bg-gray-100 rounded-lg transition-colors text-gray-600"
+              title={showSessions ? 'Hide sidebar' : 'Show sidebar'}
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-orange-400 to-red-500 flex items-center justify-center text-lg">
+                🏀
+              </div>
+              <div>
+                <h1 className="text-base font-semibold text-gray-900">
+                  NBA DFS AI Assistant
+                </h1>
+                <p className="text-xs text-gray-500">Agentic Mode</p>
+              </div>
             </div>
           </div>
+
+          {/* Settings */}
+          <ChatSettings
+            maxIterations={maxIterations}
+            setMaxIterations={setMaxIterations}
+            showReasoning={showReasoning}
+            setShowReasoning={setShowReasoning}
+            isOpen={showSettings}
+            onToggle={() => setShowSettings(!showSettings)}
+          />
         </div>
 
         {/* Messages Area */}
         <div className="flex-1 overflow-y-auto px-4">
-          {messages.length === 0 ? (
+          {messages.length === 0 && !isStreaming ? (
             <div className="max-w-3xl mx-auto py-12">
               {/* Welcome Section */}
               <div className="text-center mb-12">
@@ -709,8 +838,11 @@ export default function ChatPage() {
                 <h2 className="text-3xl font-semibold text-gray-900 mb-2">
                   NBA DFS AI Assistant
                 </h2>
-                <p className="text-gray-600">
+                <p className="text-gray-600 mb-2">
                   Get expert insights on player analysis, lineup optimization, and matchup breakdowns
+                </p>
+                <p className="text-sm text-purple-600">
+                  Powered by specialized agents: Optimizer, Research, Analyst
                 </p>
               </div>
 
@@ -747,8 +879,18 @@ export default function ChatPage() {
                 />
               ))}
 
-              {isLoading && <TypingIndicator />}
-              
+              {/* Streaming response */}
+              {isStreaming && (
+                <StreamingMessage
+                  content={streamingMessage}
+                  reasoning={showReasoning ? reasoning : []}
+                  toolCalls={showReasoning ? toolCalls : []}
+                  activeAgent={activeAgent}
+                  iterations={iterations}
+                  isStreaming={isStreaming}
+                />
+              )}
+
               <div ref={messagesEndRef} />
             </div>
           )}
@@ -764,20 +906,37 @@ export default function ChatPage() {
                 value={inputMessage}
                 onChange={(e) => setInputMessage(e.target.value)}
                 placeholder="Message NBA DFS AI Assistant..."
-                className="w-full px-4 py-3 pr-12 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all text-gray-900 placeholder-gray-400 bg-white shadow-sm"
-                disabled={isLoading}
+                className="w-full px-4 py-3 pr-24 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all text-gray-900 placeholder-gray-400 bg-white shadow-sm"
+                disabled={isStreaming}
               />
-              <button
-                type="submit"
-                disabled={isLoading || !inputMessage.trim()}
-                className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-gray-400 hover:text-gray-600 disabled:text-gray-300 disabled:cursor-not-allowed transition-colors"
-                title="Send message"
-              >
-                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
-                </svg>
-              </button>
+              <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                {isStreaming && (
+                  <button
+                    type="button"
+                    onClick={cancelStream}
+                    className="p-2 text-red-500 hover:text-red-600 transition-colors"
+                    title="Cancel"
+                  >
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                )}
+                <button
+                  type="submit"
+                  disabled={isStreaming || !inputMessage.trim()}
+                  className="p-2 text-gray-400 hover:text-gray-600 disabled:text-gray-300 disabled:cursor-not-allowed transition-colors"
+                  title="Send message"
+                >
+                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+                  </svg>
+                </button>
+              </div>
             </form>
+            <div className="text-xs text-gray-400 mt-2 text-center">
+              Max iterations: {maxIterations} | Press Enter to send
+            </div>
           </div>
         </div>
       </div>

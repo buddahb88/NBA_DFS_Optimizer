@@ -1,0 +1,512 @@
+#!/usr/bin/env node
+/**
+ * NBA DFS SQLite MCP Server
+ *
+ * Provides direct SQL query access to the NBA DFS database.
+ */
+
+import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import {
+  CallToolRequestSchema,
+  ListToolsRequestSchema,
+  ListResourcesRequestSchema,
+  ReadResourceRequestSchema,
+} from '@modelcontextprotocol/sdk/types.js';
+import Database from 'better-sqlite3';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// Database path - relative to project root
+const DB_PATH = process.env.NBA_DFS_DB_PATH || join(__dirname, '..', '..', 'backend', 'data', 'nba_dfs.db');
+
+let db;
+
+try {
+  db = new Database(DB_PATH, { readonly: true });
+  console.error(`Connected to database: ${DB_PATH}`);
+} catch (error) {
+  console.error(`Failed to connect to database: ${error.message}`);
+  process.exit(1);
+}
+
+const server = new Server(
+  {
+    name: 'nba-dfs-sqlite',
+    version: '1.0.0',
+  },
+  {
+    capabilities: {
+      tools: {},
+      resources: {},
+    },
+  }
+);
+
+// List available tools
+server.setRequestHandler(ListToolsRequestSchema, async () => {
+  return {
+    tools: [
+      {
+        name: 'query',
+        description: 'Execute a read-only SQL query against the NBA DFS database. Returns results as JSON.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            sql: {
+              type: 'string',
+              description: 'SQL SELECT query to execute',
+            },
+            limit: {
+              type: 'number',
+              description: 'Maximum rows to return (default 100)',
+              default: 100,
+            },
+          },
+          required: ['sql'],
+        },
+      },
+      {
+        name: 'get_schema',
+        description: 'Get the schema for a database table',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            table: {
+              type: 'string',
+              description: 'Table name (players, historical_games, slates, team_defense_rankings, team_defense_vs_position)',
+            },
+          },
+          required: ['table'],
+        },
+      },
+      {
+        name: 'list_tables',
+        description: 'List all tables in the database',
+        inputSchema: {
+          type: 'object',
+          properties: {},
+        },
+      },
+      {
+        name: 'get_current_slate',
+        description: 'Get the most recent slate ID and player count',
+        inputSchema: {
+          type: 'object',
+          properties: {},
+        },
+      },
+      {
+        name: 'search_player',
+        description: 'Search for a player by name (partial match) in current slate and historical data',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            name: {
+              type: 'string',
+              description: 'Player name to search for (partial match supported)',
+            },
+          },
+          required: ['name'],
+        },
+      },
+      {
+        name: 'player_history',
+        description: 'Get recent game history for a player',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            name: {
+              type: 'string',
+              description: 'Player name',
+            },
+            limit: {
+              type: 'number',
+              description: 'Number of games to return (default 10)',
+              default: 10,
+            },
+          },
+          required: ['name'],
+        },
+      },
+      {
+        name: 'value_plays',
+        description: 'Find value plays on current slate (high projection per dollar)',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            max_salary: {
+              type: 'number',
+              description: 'Maximum salary threshold (default 5500)',
+              default: 5500,
+            },
+            limit: {
+              type: 'number',
+              description: 'Number of results (default 15)',
+              default: 15,
+            },
+          },
+        },
+      },
+      {
+        name: 'gpp_plays',
+        description: 'Find GPP leverage plays (low ownership, high ceiling)',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            max_rostership: {
+              type: 'number',
+              description: 'Maximum rostership % (default 12)',
+              default: 12,
+            },
+            min_ceiling: {
+              type: 'number',
+              description: 'Minimum ceiling (default 40)',
+              default: 40,
+            },
+            limit: {
+              type: 'number',
+              description: 'Number of results (default 15)',
+              default: 15,
+            },
+          },
+        },
+      },
+      {
+        name: 'game_stacks',
+        description: 'Get games sorted by Vegas total for stacking opportunities',
+        inputSchema: {
+          type: 'object',
+          properties: {},
+        },
+      },
+    ],
+  };
+});
+
+// Handle tool calls
+server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  const { name, arguments: args } = request.params;
+
+  try {
+    switch (name) {
+      case 'query': {
+        const sql = args.sql?.trim();
+        const limit = args.limit || 100;
+
+        // Security: Only allow SELECT
+        if (!sql.toUpperCase().startsWith('SELECT')) {
+          return {
+            content: [{ type: 'text', text: 'Error: Only SELECT queries are allowed' }],
+            isError: true,
+          };
+        }
+
+        const results = db.prepare(sql).all().slice(0, limit);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(results, null, 2),
+            },
+          ],
+        };
+      }
+
+      case 'get_schema': {
+        const table = args.table;
+        const schema = db.prepare(`PRAGMA table_info(${table})`).all();
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(schema, null, 2),
+            },
+          ],
+        };
+      }
+
+      case 'list_tables': {
+        const tables = db
+          .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+          .all();
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(tables.map((t) => t.name), null, 2),
+            },
+          ],
+        };
+      }
+
+      case 'get_current_slate': {
+        const slate = db
+          .prepare(
+            `SELECT s.slate_id, s.name, s.start_time, s.created_at,
+                    (SELECT COUNT(*) FROM players WHERE players.slate_id = s.slate_id) as player_count
+             FROM slates s
+             ORDER BY s.created_at DESC LIMIT 1`
+          )
+          .get();
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(slate, null, 2),
+            },
+          ],
+        };
+      }
+
+      case 'search_player': {
+        const playerName = args.name;
+
+        // Search in current slate
+        const slatePlayer = db
+          .prepare(
+            `SELECT name, position, team, opponent, salary, projected_points, floor, ceiling, rostership, leverage_score
+             FROM players
+             WHERE LOWER(name) LIKE LOWER(?)
+               AND slate_id = (SELECT slate_id FROM slates ORDER BY created_at DESC LIMIT 1)
+             LIMIT 5`
+          )
+          .all(`%${playerName}%`);
+
+        // Search in historical
+        const histCount = db
+          .prepare(
+            `SELECT player_name, COUNT(*) as games, AVG(dk_fantasy_points) as avg_dk
+             FROM historical_games
+             WHERE LOWER(player_name) LIKE LOWER(?)
+             GROUP BY player_name`
+          )
+          .all(`%${playerName}%`);
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({ currentSlate: slatePlayer, historical: histCount }, null, 2),
+            },
+          ],
+        };
+      }
+
+      case 'player_history': {
+        const playerName = args.name;
+        const limit = args.limit || 10;
+
+        const history = db
+          .prepare(
+            `SELECT game_date, opponent, dk_fantasy_points, minutes, points, rebounds, assists, steals, blocks, turnovers, usg_pct, is_home, is_back_to_back
+             FROM historical_games
+             WHERE LOWER(player_name) LIKE LOWER(?)
+             ORDER BY game_date DESC
+             LIMIT ?`
+          )
+          .all(`%${playerName}%`, limit);
+
+        // Calculate averages
+        const stats = db
+          .prepare(
+            `SELECT
+               COUNT(*) as games,
+               ROUND(AVG(dk_fantasy_points), 1) as avg_dk,
+               ROUND(MIN(dk_fantasy_points), 1) as min_dk,
+               ROUND(MAX(dk_fantasy_points), 1) as max_dk,
+               ROUND(AVG(minutes), 1) as avg_min,
+               ROUND(AVG(points), 1) as avg_pts,
+               ROUND(AVG(rebounds), 1) as avg_reb,
+               ROUND(AVG(assists), 1) as avg_ast
+             FROM historical_games
+             WHERE LOWER(player_name) LIKE LOWER(?)`
+          )
+          .get(`%${playerName}%`);
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({ recentGames: history, seasonStats: stats }, null, 2),
+            },
+          ],
+        };
+      }
+
+      case 'value_plays': {
+        const maxSalary = args.max_salary || 5500;
+        const limit = args.limit || 15;
+
+        const values = db
+          .prepare(
+            `SELECT name, position, team, opponent, salary, projected_points,
+                    ROUND(projected_points / salary * 1000, 2) as value,
+                    floor, ceiling
+             FROM players
+             WHERE slate_id = (SELECT slate_id FROM slates ORDER BY created_at DESC LIMIT 1)
+               AND salary < ?
+               AND salary > 0
+             ORDER BY value DESC
+             LIMIT ?`
+          )
+          .all(maxSalary, limit);
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(values, null, 2),
+            },
+          ],
+        };
+      }
+
+      case 'gpp_plays': {
+        const maxRostership = args.max_rostership || 12;
+        const minCeiling = args.min_ceiling || 40;
+        const limit = args.limit || 15;
+
+        const plays = db
+          .prepare(
+            `SELECT name, position, team, opponent, salary, projected_points,
+                    rostership, ceiling, leverage_score, boom_probability
+             FROM players
+             WHERE slate_id = (SELECT slate_id FROM slates ORDER BY created_at DESC LIMIT 1)
+               AND rostership < ?
+               AND ceiling > ?
+             ORDER BY leverage_score DESC
+             LIMIT ?`
+          )
+          .all(maxRostership, minCeiling, limit);
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(plays, null, 2),
+            },
+          ],
+        };
+      }
+
+      case 'game_stacks': {
+        const games = db
+          .prepare(
+            `SELECT team, opponent, vegas_over_under, vegas_implied_total, vegas_spread,
+                    COUNT(*) as players,
+                    ROUND(AVG(projected_points), 1) as avg_projection
+             FROM players
+             WHERE slate_id = (SELECT slate_id FROM slates ORDER BY created_at DESC LIMIT 1)
+             GROUP BY team, opponent
+             ORDER BY vegas_over_under DESC`
+          )
+          .all();
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(games, null, 2),
+            },
+          ],
+        };
+      }
+
+      default:
+        return {
+          content: [{ type: 'text', text: `Unknown tool: ${name}` }],
+          isError: true,
+        };
+    }
+  } catch (error) {
+    return {
+      content: [{ type: 'text', text: `Error: ${error.message}` }],
+      isError: true,
+    };
+  }
+});
+
+// List resources (provide database info)
+server.setRequestHandler(ListResourcesRequestSchema, async () => {
+  return {
+    resources: [
+      {
+        uri: 'nba-dfs://schema',
+        name: 'Database Schema',
+        description: 'Full schema of the NBA DFS database',
+        mimeType: 'application/json',
+      },
+      {
+        uri: 'nba-dfs://current-slate',
+        name: 'Current Slate',
+        description: 'Current slate players and projections',
+        mimeType: 'application/json',
+      },
+    ],
+  };
+});
+
+// Read resources
+server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+  const { uri } = request.params;
+
+  if (uri === 'nba-dfs://schema') {
+    const tables = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table'")
+      .all()
+      .map((t) => t.name);
+
+    const schema = {};
+    for (const table of tables) {
+      schema[table] = db.prepare(`PRAGMA table_info(${table})`).all();
+    }
+
+    return {
+      contents: [
+        {
+          uri,
+          mimeType: 'application/json',
+          text: JSON.stringify(schema, null, 2),
+        },
+      ],
+    };
+  }
+
+  if (uri === 'nba-dfs://current-slate') {
+    const players = db
+      .prepare(
+        `SELECT * FROM players
+         WHERE slate_id = (SELECT slate_id FROM slates ORDER BY created_at DESC LIMIT 1)
+         ORDER BY projected_points DESC`
+      )
+      .all();
+
+    return {
+      contents: [
+        {
+          uri,
+          mimeType: 'application/json',
+          text: JSON.stringify(players, null, 2),
+        },
+      ],
+    };
+  }
+
+  throw new Error(`Unknown resource: ${uri}`);
+});
+
+// Start the server
+async function main() {
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+  console.error('NBA DFS SQLite MCP server running');
+}
+
+main().catch((error) => {
+  console.error('Server error:', error);
+  process.exit(1);
+});
