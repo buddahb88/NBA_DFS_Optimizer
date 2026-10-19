@@ -13,6 +13,7 @@ describe('App', () => {
   it('renders the app shell and home page without crashing', async () => {
     render(<App />)
 
-    expect(await screen.findByText('NBA DFS Lineup Optimizer')).toBeInTheDocument()
+    // Slate dashboard home page; the stubbed API has no slates
+    expect(await screen.findByText('No slate loaded')).toBeInTheDocument()
   })
 })

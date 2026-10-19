@@ -1,5 +1,5 @@
-// Run with: node --test frontend/src/pages/home/slateDashboard.test.js
-import { test } from 'node:test';
+// Run with: npm test (vitest)
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import {
   buildGames,
