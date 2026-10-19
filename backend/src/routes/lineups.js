@@ -1,7 +1,9 @@
 import express from 'express';
 import lineupModel from '../models/lineupModel.js';
-import { getSiteConfig } from '../config/sites.js';
+import { getSiteConfig, isValidSite, SITE_KEYS } from '../config/sites.js';
 import { resolveSite } from '../utils/resolveSite.js';
+import { buildLineupExport } from '../services/lineupExportService.js';
+import { loadSavedLineups, loadInlineLineups } from '../services/lineupExportData.js';
 
 const router = express.Router();
 
@@ -149,6 +151,36 @@ router.post('/validate', async (req, res) => {
     res.json(validation);
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /api/lineups/export
+ * Body: { site, mode: 'new'|'entries', lineupIds?: [id] | lineups?: [{ name?, players: [{ id, positionSlot? }] }],
+ *         entriesTemplate?: string (entries file text, required for mode 'entries') }
+ * 200 { success, csv, rowCount, warnings }
+ * 422 { success: false, errors: [{ index, lineupId, name, csvRow, messages }], warnings }
+ */
+router.post('/export', async (req, res) => {
+  try {
+    const { site, mode = 'new', lineupIds, lineups, entriesTemplate } = req.body || {};
+
+    if (!isValidSite(site)) {
+      return res.status(400).json({ error: `site must be one of: ${SITE_KEYS.join(', ')}` });
+    }
+    const hasIds = Array.isArray(lineupIds) && lineupIds.length > 0;
+    const hasInline = Array.isArray(lineups) && lineups.length > 0;
+    if (hasIds === hasInline) {
+      return res.status(400).json({ error: 'Send either lineupIds or lineups (not both)' });
+    }
+
+    const loaded = hasIds ? await loadSavedLineups(lineupIds) : await loadInlineLineups(lineups);
+    const result = buildLineupExport({ site: site.toLowerCase(), mode, lineups: loaded, entriesTemplate });
+
+    res.status(result.success ? 200 : 422).json(result);
+  } catch (error) {
+    console.error('Lineup export error:', error);
+    res.status(error.status || 500).json({ error: error.message });
   }
 });
 

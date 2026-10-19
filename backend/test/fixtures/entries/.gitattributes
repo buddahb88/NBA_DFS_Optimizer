@@ -1,0 +1,2 @@
+# Keep the site templates byte-for-byte (DK/FD files use CRLF)
+*.csv -text

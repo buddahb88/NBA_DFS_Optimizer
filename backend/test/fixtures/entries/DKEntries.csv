@@ -1,0 +1,7 @@
+Entry ID,Contest Name,Contest ID,Entry Fee,PG,SG,SF,PF,C,G,F,UTIL,,Instructions
+4512345001,NBA $5K Shot [20 Entry Max],180001234,$3,,,,,,,,,,1. Column A lists all of your contest entries for this draftgroup
+4512345002,NBA $5K Shot [20 Entry Max],180001234,$3,,,,,,,,,,2. Your current lineup is listed next to each entry (blank = no lineup)
+4512345003,"NBA $100K Main Event, Single Entry",180005678,$20,Guard One (39000001),Wing One (39000002),,,,,,,,3. You can change the lineup for an entry by entering the IDs of the players
+,,,,,,,,,,,,,4. You can use the player list below
+,,,,,,,,,,,,,Position,Name + ID,Name,ID,Roster Position,Salary,Game Info,TeamAbbrev,AvgPointsPerGame
+,,,,,,,,,,,,,PG,Guard One (39000001),Guard One,39000001,PG/G/UTIL,9500,AAA@BBB 10/17/2026 07:00PM ET,AAA,50.1

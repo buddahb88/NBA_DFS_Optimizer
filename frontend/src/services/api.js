@@ -46,6 +46,8 @@ export const lineupsAPI = {
   update: (lineupId, data) => api.put(`/lineups/${lineupId}`, data),
   delete: (lineupId) => api.delete(`/lineups/${lineupId}`),
   validate: (players) => api.post('/lineups/validate', { players }),
+  // { site, mode: 'new'|'entries', lineupIds | lineups, entriesTemplate? } -> { csv, rowCount, warnings }
+  exportCsv: (data) => api.post('/lineups/export', data),
 };
 
 // Optimizer API
