@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { playersAPI, slatesAPI } from '../services/api';
+import SalaryImport from '../components/SalaryImport';
 
 function PlayerPoolPage() {
   const [players, setPlayers] = useState([]);
@@ -75,7 +76,7 @@ function PlayerPoolPage() {
 
   return (
     <div className="space-y-6 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Player Pool</h1>
           {activeSlate && (
@@ -84,11 +85,14 @@ function PlayerPoolPage() {
             </p>
           )}
         </div>
-        {players.length > 0 && (
-          <span className="text-sm text-gray-600">
-            {filteredPlayers.length} of {players.length} players
-          </span>
-        )}
+        <div className="flex flex-col items-stretch gap-2 sm:items-end">
+          <SalaryImport onImported={loadActiveSlate} />
+          {players.length > 0 && (
+            <span className="text-sm text-gray-600">
+              {filteredPlayers.length} of {players.length} players
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Filters */}
