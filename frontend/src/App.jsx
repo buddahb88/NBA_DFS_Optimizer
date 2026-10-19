@@ -18,7 +18,7 @@ function App() {
     <Router>
       <AppShell>
         <Routes>
-          <Route path="/" element={<LegacyPage><HomePage /></LegacyPage>} />
+          <Route path="/" element={<HomePage />} />
           <Route path="/players" element={<LegacyPage><PlayerPoolPage /></LegacyPage>} />
           <Route path="/insights" element={<LegacyPage><InsightsPage /></LegacyPage>} />
           <Route path="/lineup-builder" element={<LegacyPage><LineupBuilderPage /></LegacyPage>} />
