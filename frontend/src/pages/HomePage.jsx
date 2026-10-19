@@ -1,223 +1,230 @@
-import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
-import { slatesAPI, playersAPI } from '../services/api';
+import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Button, Card, CardBody, EmptyState, IconChart, Spinner, Stat } from '../components/ui';
+import GameCard from './home/GameCard';
+import SlateLoader from './home/SlateLoader';
+import { ChalkPanel, InjuryFeedPanel, LeveragePanel, TopValuesPanel } from './home/DashboardPanels';
+import useSlateDashboard from './home/useSlateDashboard';
 import { useSlate } from '../context/SlateContext';
+import {
+  buildGames,
+  buildInjuryFeed,
+  formatRelative,
+  formatTipoff,
+  parseTimestamp,
+  summarizeSlate,
+  topChalk,
+  topLeverage,
+  topValuesByPosition,
+} from './home/slateDashboard';
 
 // RotoWire's slate list (siteID=1) and player import are DraftKings only
 const IMPORT_SITE = 'draftkings';
 
-function HomePage() {
-  const { site, siteConfig, slate: activeSlate, refreshSlates } = useSlate();
-  const canImport = site === IMPORT_SITE;
-  const [availableSlates, setAvailableSlates] = useState([]);
-  const [selectedSlate, setSelectedSlate] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [loadingSlates, setLoadingSlates] = useState(false);
-  const [message, setMessage] = useState('');
-
-  useEffect(() => {
-    loadAvailableSlates();
-  }, []);
-
-  const loadAvailableSlates = async () => {
-    setLoadingSlates(true);
-    try {
-      const response = await slatesAPI.getAvailableSlates();
-      setAvailableSlates(response.data);
-
-      // Auto-select the default slate if available
-      const defaultSlate = response.data.find(slate => slate.isDefault);
-      if (defaultSlate && !selectedSlate) {
-        setSelectedSlate(defaultSlate);
-      }
-    } catch (error) {
-      console.error('Error loading available slates:', error);
-      setMessage('❌ Could not load available slates from RotoWire');
-    } finally {
-      setLoadingSlates(false);
-    }
-  };
-
-  const handleSlateChange = (e) => {
-    const slateId = e.target.value;
-    const slate = availableSlates.find(s => s.slateId === slateId);
-    setSelectedSlate(slate);
-  };
-
-  const handleSync = async (slate = selectedSlate) => {
-    if (!slate) {
-      setMessage('Please select a slate');
-      return;
-    }
-
-    setLoading(true);
-    setMessage('');
-
-    try {
-      const response = await playersAPI.syncFromRotoWire(slate.slateId, { name: slate.name });
-      setMessage(`✅ Successfully imported ${response.data.count} players for ${slate.name}! This is now your active slate.`);
-      await refreshSlates(slate.slateId); // Select the imported slate in the top bar
-    } catch (error) {
-      setMessage(`❌ Error: ${error.response?.data?.error || error.message}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
+function ImportUnavailable({ siteName }) {
   return (
-    <div className="space-y-8">
-      {/* Header */}
-      <div className="text-center">
-        <h1 className="text-3xl sm:text-4xl font-bold text-gray-900 mb-4">
-          NBA DFS Lineup Optimizer
-        </h1>
-        <p className="text-base sm:text-lg text-gray-600">
-          Build and optimize {siteConfig?.name ?? 'DFS'} lineups with AI assistance
-        </p>
-      </div>
+    <p className="rounded border border-caution/30 bg-caution-soft px-3 py-2 text-xs text-caution">
+      Importing from RotoWire is only available for DraftKings. Switch the site in the top bar to DraftKings to load a
+      slate{siteName ? `, or import a ${siteName} salary file on the Player Pool page` : ''}.
+    </p>
+  );
+}
 
-      {/* Sync Players Card */}
-      <div className="bg-white rounded-lg shadow p-6">
-        <h2 className="text-2xl font-semibold mb-4">Import Player Data</h2>
-        <p className="text-gray-600 mb-4">
-          Select a slate and click "Load Slate" to import player data and projections.
-        </p>
-        {!canImport && (
-          <div className="mb-4 p-4 rounded-md bg-yellow-50 text-yellow-800 text-sm">
-            Importing is only available for DraftKings right now. Switch the site in the top bar to DraftKings to load a slate.
-          </div>
-        )}
+/** Re-render periodically so "updated 5m ago" stays honest. */
+function useNow(intervalMs = 60000) {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), intervalMs);
+    return () => clearInterval(t);
+  }, [intervalMs]);
+  return now;
+}
 
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Available Slates
-            </label>
-            {loadingSlates ? (
-              <div className="w-full px-4 py-3 border border-gray-300 rounded-md bg-gray-50 text-gray-500">
-                Loading available slates...
-              </div>
-            ) : availableSlates.length > 0 ? (
-              <select
-                value={selectedSlate?.slateId || ''}
-                onChange={handleSlateChange}
-                disabled={loading}
-                className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed"
-              >
-                <option value="">Select a slate...</option>
-                {availableSlates.map((slate) => (
-                  <option key={slate.slateId} value={slate.slateId}>
-                    {slate.name} - {slate.startTime} ({slate.games} games)
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <div className="w-full px-4 py-3 border border-gray-300 rounded-md bg-yellow-50 text-yellow-800">
-                No slates available. Check your RotoWire cookie configuration.
-              </div>
-            )}
-          </div>
-
-          <button
-            onClick={() => handleSync()}
-            disabled={!selectedSlate || loading || !canImport}
-            className="w-full px-6 py-4 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-medium text-base shadow-md disabled:bg-gray-300 disabled:cursor-not-allowed disabled:text-gray-500 transition-colors touch-manipulation active:scale-95"
-          >
-            {loading ? 'Loading Players...' : 'Load Slate'}
-          </button>
-
-          {selectedSlate && (
-            <div className="bg-blue-50 p-4 rounded-md">
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div>
-                  <span className="font-medium text-blue-900">Slate ID:</span>
-                  <span className="ml-2 text-blue-700">{selectedSlate.slateId}</span>
-                </div>
-                <div>
-                  <span className="font-medium text-blue-900">Start Time:</span>
-                  <span className="ml-2 text-blue-700">{selectedSlate.startTime}</span>
-                </div>
-                <div>
-                  <span className="font-medium text-blue-900">Games:</span>
-                  <span className="ml-2 text-blue-700">{selectedSlate.games}</span>
-                </div>
-                <div>
-                  <span className="font-medium text-blue-900">Salary Cap:</span>
-                  <span className="ml-2 text-blue-700">${selectedSlate.salaryCap?.toLocaleString()}</span>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {loading && (
-            <div className="p-4 rounded-md bg-blue-50 text-blue-800">
-              <div className="flex items-center">
-                <svg className="animate-spin h-5 w-5 mr-3" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"></circle>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                Importing players...
-              </div>
-            </div>
-          )}
-
-          {message && (
-            <div className={`p-4 rounded-md ${message.startsWith('✅') ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'}`}>
-              {message}
-            </div>
-          )}
+function RefreshTile({ updatedAt, historyStatus, syncing, onRefresh, now, canRefresh }) {
+  return (
+    <div className="col-span-2 flex items-center justify-between gap-3 rounded-md border border-line bg-surface px-3 py-2.5">
+      <div className="min-w-0">
+        <span className="text-2xs font-medium uppercase tracking-wider text-fg-subtle">Slate data refreshed</span>
+        <div className="num text-xl font-semibold leading-tight text-fg" title={updatedAt?.toLocaleString()}>
+          {formatRelative(updatedAt, now)}
+        </div>
+        <div className="truncate text-2xs text-fg-subtle">
+          {historyStatus?.latestGame ? `Game logs through ${historyStatus.latestGame}` : 'Game logs: not synced'}
         </div>
       </div>
-
-      {/* Active Slate */}
-      {activeSlate && (
-        <div className="bg-white rounded-lg shadow p-4 sm:p-6">
-          <h2 className="text-xl sm:text-2xl font-semibold mb-4">Active Slate</h2>
-          <div className="bg-gradient-to-r from-blue-50 to-green-50 border-2 border-blue-200 rounded-lg p-4 sm:p-6">
-            <div className="flex flex-col space-y-4">
-              <div>
-                <h3 className="text-lg sm:text-xl font-bold text-gray-900 mb-2">{activeSlate.name}</h3>
-                <div className="space-y-1">
-                  <p className="text-sm text-gray-600">
-                    <span className="font-medium">Slate ID:</span> {activeSlate.slate_id}
-                  </p>
-                  <p className="text-sm text-gray-600">
-                    <span className="font-medium">Last updated:</span>{' '}
-                    {new Date(activeSlate.updated_at).toLocaleString()}
-                  </p>
-                </div>
-              </div>
-              <div className="flex flex-col sm:flex-row gap-3">
-                <Link
-                  to="/players"
-                  className="flex-1 text-center px-6 py-4 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-medium shadow-md touch-manipulation active:scale-95 transition-transform"
-                >
-                  View Players
-                </Link>
-                <Link
-                  to="/lineup-builder"
-                  className="flex-1 text-center px-6 py-4 bg-green-600 text-white rounded-md hover:bg-green-700 font-medium shadow-md touch-manipulation active:scale-95 transition-transform"
-                >
-                  Build Lineup
-                </Link>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Quick Start Guide */}
-      <div className="bg-blue-50 rounded-lg p-6">
-        <h3 className="text-lg font-semibold text-blue-900 mb-3">Quick Start</h3>
-        <ol className="list-decimal list-inside space-y-2 text-blue-800">
-          <li>Select a slate from the dropdown and click "Load Slate" to import players</li>
-          <li>Only one slate can be active at a time - loading a new slate clears the previous one</li>
-          <li>View the player pool, build lineups, and chat with AI using your active slate</li>
-          <li>Switch site and slate any time from the selectors in the top bar</li>
-        </ol>
-      </div>
+      <Button
+        variant="secondary"
+        size="sm"
+        loading={syncing}
+        disabled={!canRefresh}
+        title={canRefresh ? undefined : 'RotoWire refresh is DraftKings only'}
+        onClick={onRefresh}
+      >
+        {syncing ? 'Refreshing…' : 'Refresh data'}
+      </Button>
     </div>
   );
 }
 
-export default HomePage;
+function NoSlate({ syncSlate, syncing, syncError, canImport, siteName }) {
+  return (
+    <div className="mx-auto max-w-2xl px-4 py-16">
+      <Card>
+        <CardBody className="flex flex-col gap-4 p-6">
+          <EmptyState
+            icon={<IconChart size={18} />}
+            title="No slate loaded"
+            description="Import a slate from RotoWire to see tonight's games, Vegas lines, injury news, value plays and ownership."
+          />
+          {canImport ? (
+            <SlateLoader onLoad={syncSlate} loading={syncing} error={syncError} submitLabel="Load slate" />
+          ) : (
+            <ImportUnavailable siteName={siteName} />
+          )}
+        </CardBody>
+      </Card>
+    </div>
+  );
+}
+
+export default function HomePage() {
+  const { status, error, slate, players, teamStats, historyStatus, news, syncing, syncError, reload, syncSlate, refresh } =
+    useSlateDashboard();
+  const { site, siteConfig } = useSlate();
+  const canImport = site === IMPORT_SITE;
+  const [showLoader, setShowLoader] = useState(false);
+  const now = useNow();
+  const navigate = useNavigate();
+
+  const games = useMemo(() => buildGames(players, teamStats), [players, teamStats]);
+  const summary = useMemo(() => summarizeSlate(players, games), [players, games]);
+  const values = useMemo(() => topValuesByPosition(players, 3), [players]);
+  const leverage = useMemo(() => topLeverage(players, 8), [players]);
+  const chalk = useMemo(() => topChalk(players, 8), [players]);
+  const feed = useMemo(() => buildInjuryFeed(players, news.missing, news.bumps), [players, news.missing, news.bumps]);
+  const blowouts = games.filter((g) => g.blowout).length;
+
+  if (status === 'loading') {
+    return (
+      <div className="flex justify-center py-24">
+        <Spinner size="md" label="Loading slate" />
+      </div>
+    );
+  }
+
+  if (status === 'error') {
+    return (
+      <div className="mx-auto max-w-xl px-4 py-16">
+        <EmptyState
+          title="Couldn't load the slate"
+          description={error}
+          action={
+            <Button variant="primary" onClick={() => reload()}>
+              Try again
+            </Button>
+          }
+        />
+      </div>
+    );
+  }
+
+  if (status === 'empty') {
+    return (
+      <NoSlate syncSlate={syncSlate} syncing={syncing} syncError={syncError} canImport={canImport} siteName={siteConfig?.name} />
+    );
+  }
+
+  const slateId = slate.slate_id;
+
+  return (
+    <div className="mx-auto flex max-w-[1600px] flex-col gap-4 px-4 py-4 sm:px-6">
+      {/* Header */}
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="truncate text-lg font-semibold text-fg">{slate.name}</h2>
+          <p className="text-xs text-fg-muted">
+            First lock {formatTipoff(summary.firstLock)} · slate {slateId}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="ghost" size="sm" onClick={() => setShowLoader((v) => !v)}>
+            {showLoader ? 'Cancel' : 'Change slate'}
+          </Button>
+          <Button variant="secondary" size="sm" onClick={() => navigate('/players')}>
+            Player pool
+          </Button>
+          <Button variant="primary" size="sm" onClick={() => navigate('/optimizer')}>
+            Optimize
+          </Button>
+        </div>
+      </div>
+
+      {showLoader && (
+        <Card>
+          <CardBody>
+            {canImport ? (
+              <SlateLoader
+                activeSlateId={slateId}
+                loading={syncing}
+                error={syncError}
+                submitLabel="Load slate"
+                onLoad={async (s) => {
+                  if (await syncSlate(s)) setShowLoader(false);
+                }}
+              />
+            ) : (
+              <ImportUnavailable siteName={siteConfig?.name} />
+            )}
+          </CardBody>
+        </Card>
+      )}
+
+      {!showLoader && syncError && (
+        <p className="rounded border border-negative/30 bg-negative-soft px-3 py-2 text-xs text-negative">Refresh failed: {syncError}</p>
+      )}
+
+      {/* KPI strip */}
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+        <Stat label="Players" value={summary.playerCount} hint="with projections" />
+        <Stat label="Games" value={summary.gameCount} hint={blowouts ? `${blowouts} blowout risk` : 'no blowout flags'} />
+        <Stat label="Avg total" value={summary.avgTotal != null ? summary.avgTotal.toFixed(1) : '—'} hint="Vegas O/U" />
+        <Stat label="First lock" value={formatTipoff(summary.firstLock)} hint={summary.firstLock?.toLocaleDateString()} />
+        <RefreshTile
+          updatedAt={parseTimestamp(slate.updated_at)}
+          historyStatus={historyStatus}
+          syncing={syncing}
+          onRefresh={refresh}
+          canRefresh={canImport}
+          now={now}
+        />
+      </div>
+
+      {/* Games */}
+      <section className="flex flex-col gap-2">
+        <div className="flex items-baseline justify-between">
+          <h3 className="text-sm font-semibold text-fg">Games</h3>
+          <span className="text-2xs text-fg-subtle">Sorted by total · implied team totals right-aligned</span>
+        </div>
+        {games.length === 0 ? (
+          <Card>
+            <EmptyState compact title="No games found" description="Players on this slate have no team/opponent data." />
+          </Card>
+        ) : (
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+            {games.map((g) => (
+              <GameCard key={g.key} game={g} />
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* Panels */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <InjuryFeedPanel items={feed} loading={news.loading} error={news.error} />
+        <LeveragePanel players={leverage} />
+        <ChalkPanel players={chalk} />
+      </div>
+      <TopValuesPanel valuesByPosition={values} />
+    </div>
+  );
+}
