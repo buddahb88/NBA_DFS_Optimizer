@@ -6,6 +6,7 @@ import { generateSlateBreakdown } from '../utils/slateAnalyzer.js';
 import { resolveSite } from '../utils/resolveSite.js';
 import { getSiteConfig } from '../config/sites.js';
 import { defaultMinSalary } from '../services/optimizer/scoring.js';
+import { validateStackRules, STACK_PRESETS } from '../services/optimizer/constraints/stacking.js';
 
 const router = express.Router();
 
@@ -15,7 +16,9 @@ const router = express.Router();
  *
  * Optional body fields: site ('draftkings' | 'fanduel' | 'yahoo', defaults to
  * the slate's site), lockedPlayers, excludedPlayers, minUniqueness (min players
- * each lineup differs from every earlier lineup in the request)
+ * each lineup differs from every earlier lineup in the request), stackRules
+ * (team/game stack rules and presets, see services/optimizer/constraints/stacking.js;
+ * teamStacks is an alias)
  */
 router.post('/generate', async (req, res) => {
   try {
@@ -34,6 +37,14 @@ router.post('/generate', async (req, res) => {
 
     if (!slateId) {
       return res.status(400).json({ error: 'slateId is required' });
+    }
+
+    const stackErrors = [
+      ...validateStackRules(req.body.stackRules),
+      ...validateStackRules(teamStacks).map(e => e.replace('stackRules', 'teamStacks'))
+    ];
+    if (stackErrors.length) {
+      return res.status(400).json({ error: 'Invalid stack rules', details: stackErrors });
     }
 
     const { site, error: siteError } = await resolveSite(req.body.site, slateId);
@@ -71,6 +82,14 @@ router.post('/generate', async (req, res) => {
       message: error.message
     });
   }
+});
+
+/**
+ * GET /api/optimizer/stack-presets
+ * NBA stacking presets usable as { preset: key } entries in stackRules
+ */
+router.get('/stack-presets', (req, res) => {
+  res.json(Object.entries(STACK_PRESETS).map(([key, preset]) => ({ key, ...preset })));
 });
 
 /**
