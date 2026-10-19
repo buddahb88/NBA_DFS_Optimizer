@@ -20,7 +20,7 @@ function App() {
         <AppShell>
           <Routes>
             <Route path="/" element={<LegacyPage><HomePage /></LegacyPage>} />
-            <Route path="/players" element={<LegacyPage><PlayerPoolPage /></LegacyPage>} />
+            <Route path="/players" element={<PlayerPoolPage />} />
             <Route path="/insights" element={<LegacyPage><InsightsPage /></LegacyPage>} />
             <Route path="/lineup-builder" element={<Navigate to="/optimizer?mode=manual" replace />} />
             <Route path="/optimizer" element={<LineupStudioPage />} />

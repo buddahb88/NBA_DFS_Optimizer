@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { exportAPI, lineupsAPI, optimizerAPI, playersAPI } from '../services/api';
+import { exportAPI, lineupsAPI, optimizerAPI, playerSettingsAPI, playersAPI } from '../services/api';
+import { toOptimizerPlayers } from '../features/playerPool/playerPool';
 import { useSlate } from '../context/SlateContext';
 import {
   Button,
@@ -199,9 +200,16 @@ export default function LineupStudioPage() {
     setTab('lineups');
     setNotice(null);
     try {
-      const res = await optimizerAPI.generate(
-        buildOptimizerRequest({ slateId, site, settings, locked, excluded }),
+      // Per-player controls saved on the Player Pool page (exposure.js request contract)
+      const { data: savedControls } = await playerSettingsAPI.getBySlateId(slateId);
+      const poolControls = toOptimizerPlayers(
+        players,
+        Object.fromEntries((savedControls || []).map((s) => [String(s.playerId), s])),
       );
+      const res = await optimizerAPI.generate({
+        ...buildOptimizerRequest({ slateId, site, settings, locked, excluded }),
+        players: poolControls,
+      });
       if (slateRef.current !== requestSlate) return;
       const stamp = Date.now();
       const lineups = (res.data.lineups || []).map((l, i) => ({

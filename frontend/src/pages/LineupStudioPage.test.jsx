@@ -3,13 +3,14 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import { MemoryRouter } from 'react-router-dom'
 import LineupStudioPage from './LineupStudioPage'
 import { useSlate } from '../context/SlateContext'
-import { exportAPI, lineupsAPI, optimizerAPI, playersAPI, portfolioAPI } from '../services/api'
+import { exportAPI, lineupsAPI, optimizerAPI, playerSettingsAPI, playersAPI, portfolioAPI } from '../services/api'
 import { FALLBACK_SITE } from '../features/lineupStudio/lineupMath'
 import { LIMITS, PRESETS, makeResult } from '../features/portfolio/fixtures'
 
 vi.mock('../context/SlateContext', () => ({ useSlate: vi.fn() }))
 vi.mock('../services/api', () => ({
   playersAPI: { getBySlateId: vi.fn(), recalculateProjections: vi.fn(), resetProjections: vi.fn() },
+  playerSettingsAPI: { getBySlateId: vi.fn() },
   optimizerAPI: { generate: vi.fn(), reviewLineup: vi.fn(), slateBreakdown: vi.fn() },
   lineupsAPI: { create: vi.fn() },
   exportAPI: { lineups: vi.fn() },
@@ -51,6 +52,7 @@ function renderStudio(slate = { slate_id: '42', name: 'Main' }, path = '/optimiz
 beforeEach(() => {
   vi.clearAllMocks()
   playersAPI.getBySlateId.mockResolvedValue({ data: PLAYERS })
+  playerSettingsAPI.getBySlateId.mockResolvedValue({ data: [] })
   URL.createObjectURL = vi.fn(() => 'blob:x')
   URL.revokeObjectURL = vi.fn()
   // jsdom can't follow the download link

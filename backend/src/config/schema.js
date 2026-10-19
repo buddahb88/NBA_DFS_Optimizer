@@ -2,6 +2,7 @@ import { DATABASE_TYPE } from './database.js';
 import { migrateSiteColumns } from './siteMigrations.js';
 import { migrateSiteFantasyPoints } from './scoringMigrations.js';
 import { migrateProjectionOverrides } from './projectionOverrideMigrations.js';
+import { migratePlayerSettings } from './playerSettingsMigrations.js';
 
 /**
  * Create all database tables
@@ -26,6 +27,8 @@ export const createTables = async (db) => {
 
   // projection_overrides (manual minutes/points per slate)
   await migrateProjectionOverrides(db);
+  // Per-slate player controls (Player Pool lock/exclude/exposure/override)
+  await migratePlayerSettings(db);
 };
 
 /**
