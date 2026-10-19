@@ -1,4 +1,4 @@
-import { test, describe, before, after } from 'node:test';
+import { test, describe, beforeAll, afterAll } from 'vitest';
 import assert from 'node:assert/strict';
 import solver from 'javascript-lp-solver';
 import optimizerService from '../src/services/optimizerService.js';
@@ -8,8 +8,8 @@ import { makeSlate, scaleSalaries, withSeed } from './fixtures/slate.js';
 
 // The optimizer logs a lot; keep test output readable
 const original = { log: console.log, warn: console.warn, error: console.error };
-before(() => { console.log = console.warn = console.error = () => {}; });
-after(() => Object.assign(console, original));
+beforeAll(() => { console.log = console.warn = console.error = () => {}; });
+afterAll(() => Object.assign(console, original));
 
 const run = (players, settings, seed = 1) => withSeed(seed, () => optimizerService.optimize(players, settings));
 const idSet = (lineup) => lineup.players.map(s => s.player.id).sort((a, b) => a - b);

@@ -3,15 +3,16 @@
  *
  * Max-projection lineup under the salary cap via k-dominance pruning + local search
  * (best-improvement 1-swaps, then 2-swaps, from a couple of starts). Roster rules come
- * from optimizerService so slot eligibility matches the ILP optimizer exactly; this
+ * from the DraftKings site config so slot eligibility matches the ILP optimizer exactly; this
  * exists because the ILP takes seconds-to-minutes per solve, and a portfolio build
  * needs thousands of solves (candidate pool + per-iteration optimal lineups).
  */
 
-import optimizerService from '../optimizerService.js';
+import { getSiteConfig, getEligibleSlots } from '../../config/sites.js';
 
-export const SALARY_CAP = optimizerService.SALARY_CAP;
-export const ROSTER_SLOTS = optimizerService.ROSTER_SLOTS;
+const DK = getSiteConfig('draftkings');
+export const SALARY_CAP = DK.salaryCap;
+export const ROSTER_SLOTS = DK.rosterSlots.map((s) => s.slot);
 export const ROSTER_SIZE = ROSTER_SLOTS.length;
 
 const MIN_SALARY_PENALTY = 0.05; // projected pts per $ below minSalary
@@ -19,9 +20,8 @@ const EPS = 1e-9;
 
 /** Bitmask of roster slots a DK position string ("PG/SG", "SF,PF") can fill. */
 export function slotMask(position) {
-  const positions = optimizerService.getPlayerPositions(String(position || '').replace(/\//g, ','));
   let mask = 0;
-  for (const slot of optimizerService.getEligibleSlots(positions)) {
+  for (const slot of getEligibleSlots('draftkings', position)) {
     const i = ROSTER_SLOTS.indexOf(slot);
     if (i >= 0) mask |= 1 << i;
   }
