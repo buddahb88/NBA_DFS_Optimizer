@@ -1,18 +1,22 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { slatesAPI, playersAPI } from '../services/api';
+import { useSlate } from '../context/SlateContext';
+
+// RotoWire's slate list (siteID=1) and player import are DraftKings only
+const IMPORT_SITE = 'draftkings';
 
 function HomePage() {
+  const { site, siteConfig, slate: activeSlate, refreshSlates } = useSlate();
+  const canImport = site === IMPORT_SITE;
   const [availableSlates, setAvailableSlates] = useState([]);
   const [selectedSlate, setSelectedSlate] = useState(null);
-  const [activeSlate, setActiveSlate] = useState(null);
   const [loading, setLoading] = useState(false);
   const [loadingSlates, setLoadingSlates] = useState(false);
   const [message, setMessage] = useState('');
 
   useEffect(() => {
     loadAvailableSlates();
-    loadActiveSlate();
   }, []);
 
   const loadAvailableSlates = async () => {
@@ -34,15 +38,6 @@ function HomePage() {
     }
   };
 
-  const loadActiveSlate = async () => {
-    try {
-      const response = await slatesAPI.getActiveSlate();
-      setActiveSlate(response.data);
-    } catch (error) {
-      console.error('Error loading active slate:', error);
-    }
-  };
-
   const handleSlateChange = (e) => {
     const slateId = e.target.value;
     const slate = availableSlates.find(s => s.slateId === slateId);
@@ -61,7 +56,7 @@ function HomePage() {
     try {
       const response = await playersAPI.syncFromRotoWire(slate.slateId, { name: slate.name });
       setMessage(`✅ Successfully imported ${response.data.count} players for ${slate.name}! This is now your active slate.`);
-      loadActiveSlate(); // Reload the active slate
+      await refreshSlates(slate.slateId); // Select the imported slate in the top bar
     } catch (error) {
       setMessage(`❌ Error: ${error.response?.data?.error || error.message}`);
     } finally {
@@ -77,7 +72,7 @@ function HomePage() {
           NBA DFS Lineup Optimizer
         </h1>
         <p className="text-base sm:text-lg text-gray-600">
-          Build and optimize DraftKings lineups with AI assistance
+          Build and optimize {siteConfig?.name ?? 'DFS'} lineups with AI assistance
         </p>
       </div>
 
@@ -87,6 +82,11 @@ function HomePage() {
         <p className="text-gray-600 mb-4">
           Select a slate and click "Load Slate" to import player data and projections.
         </p>
+        {!canImport && (
+          <div className="mb-4 p-4 rounded-md bg-yellow-50 text-yellow-800 text-sm">
+            Importing is only available for DraftKings right now. Switch the site in the top bar to DraftKings to load a slate.
+          </div>
+        )}
 
         <div className="space-y-4">
           <div>
@@ -120,7 +120,7 @@ function HomePage() {
 
           <button
             onClick={() => handleSync()}
-            disabled={!selectedSlate || loading}
+            disabled={!selectedSlate || loading || !canImport}
             className="w-full px-6 py-4 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-medium text-base shadow-md disabled:bg-gray-300 disabled:cursor-not-allowed disabled:text-gray-500 transition-colors touch-manipulation active:scale-95"
           >
             {loading ? 'Loading Players...' : 'Load Slate'}
@@ -189,13 +189,13 @@ function HomePage() {
               </div>
               <div className="flex flex-col sm:flex-row gap-3">
                 <Link
-                  to={`/players?slateId=${activeSlate.slate_id}`}
+                  to="/players"
                   className="flex-1 text-center px-6 py-4 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-medium shadow-md touch-manipulation active:scale-95 transition-transform"
                 >
                   View Players
                 </Link>
                 <Link
-                  to={`/lineup-builder?slateId=${activeSlate.slate_id}`}
+                  to="/lineup-builder"
                   className="flex-1 text-center px-6 py-4 bg-green-600 text-white rounded-md hover:bg-green-700 font-medium shadow-md touch-manipulation active:scale-95 transition-transform"
                 >
                   Build Lineup
@@ -213,7 +213,7 @@ function HomePage() {
           <li>Select a slate from the dropdown and click "Load Slate" to import players</li>
           <li>Only one slate can be active at a time - loading a new slate clears the previous one</li>
           <li>View the player pool, build lineups, and chat with AI using your active slate</li>
-          <li>Come back here to switch slates whenever you want</li>
+          <li>Switch site and slate any time from the selectors in the top bar</li>
         </ol>
       </div>
     </div>

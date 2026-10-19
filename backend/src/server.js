@@ -16,6 +16,7 @@ import sitesRouter from './routes/sites.js';
 import analyticsRouter from './routes/analytics.js';
 import portfolioRouter from './routes/portfolio.js';
 import projectionsRouter from './routes/projections.js';
+import exportRouter from './routes/export.js';
 
 // Get directory paths for ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -50,6 +51,7 @@ app.use('/api/sites', sitesRouter);
 app.use('/api/analytics', analyticsRouter);
 app.use('/api/portfolio', portfolioRouter);
 app.use('/api/projections', projectionsRouter);
+app.use('/api/export', exportRouter);
 
 // Health check
 app.get('/api/health', (req, res) => {

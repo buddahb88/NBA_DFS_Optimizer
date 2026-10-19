@@ -9,9 +9,15 @@ const api = axios.create({
   },
 });
 
+// DFS sites API (contest rules: salary cap, roster slots, scoring)
+export const sitesAPI = {
+  getAll: () => api.get('/sites'),
+  getByKey: (site) => api.get(`/sites/${site}`),
+};
+
 // Slates API
 export const slatesAPI = {
-  getAll: () => api.get('/slates'),
+  getAll: (site = null) => api.get('/slates', { params: site ? { site } : {} }),
   getAvailableSlates: () => api.get('/slates/list'), // Get available slates from RotoWire
   getActiveSlate: () => api.get('/slates/active'), // Get the current active slate
   getById: (slateId) => api.get(`/slates/${slateId}`),
@@ -57,6 +63,22 @@ export const optimizerAPI = {
   autoTune: (slateId, mode) => api.post('/optimizer/auto-tune', { slateId, mode }),
   slateBreakdown: (slateId, mode) => api.post('/optimizer/slate-breakdown', { slateId, mode }),
   reviewLineup: (slateId, lineup, mode) => api.post('/optimizer/review-lineup', { slateId, lineup, mode }),
+};
+
+// Export API (site upload CSVs)
+export const exportAPI = {
+  // { site, slateId, lineups: [{ players: [{ slot, playerId }] }] } -> { csv, filename, count, warnings }
+  lineups: (data) => api.post('/export/lineups', data),
+};
+
+// GPP portfolio builder (background contest-sim jobs)
+export const portfolioAPI = {
+  getPresets: () => api.get('/portfolio/presets'),
+  // { slateId, contest, numLineups, poolSize, iterations, ... } -> 202 { jobId, status }
+  build: (data) => api.post('/portfolio/build', data),
+  // Job status; `result` once completed. candidates: how many ranked candidates to include
+  getJob: (jobId, candidates = 0) => api.get(`/portfolio/${jobId}`, { params: { candidates } }),
+  cancel: (jobId) => api.delete(`/portfolio/${jobId}`),
 };
 
 // Chat API

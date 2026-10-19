@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo, createContext, useContext } from 'react';
-import { chatAPI, slatesAPI, playersAPI } from '../services/api';
+import { chatAPI, playersAPI } from '../services/api';
+import { useSlate } from '../context/SlateContext';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -508,6 +509,7 @@ function TypingIndicator() {
 }
 
 export default function ChatPage() {
+  const { slateId } = useSlate();
   const [messages, setMessages] = useState([]);
   const [inputMessage, setInputMessage] = useState('');
   const [sessionId, setSessionId] = useState(null);
@@ -545,11 +547,16 @@ export default function ChatPage() {
     scrollToBottom();
   }, [messages, streamingMessage, reasoning]);
 
-  // Load sessions and player headshots on mount
+  // Load sessions on mount
   useEffect(() => {
     loadSessions();
-    loadPlayerHeadshots();
   }, []);
+
+  // Headshots come from the top-bar slate's player pool
+  useEffect(() => {
+    setPlayerHeadshots({});
+    if (slateId) loadPlayerHeadshots(slateId);
+  }, [slateId]);
 
   // Focus input on mount
   useEffect(() => {
@@ -609,29 +616,20 @@ export default function ChatPage() {
     }
   };
 
-  const loadPlayerHeadshots = async () => {
+  const loadPlayerHeadshots = async (id) => {
     try {
-      // Get active slate
-      const slateResponse = await slatesAPI.getActiveSlate();
+      const playersResponse = await playersAPI.getBySlateId(id);
 
-      // The API returns the slate object directly, not wrapped in success/slate
-      if (slateResponse.data && slateResponse.data.slate_id) {
-        const slateId = slateResponse.data.slate_id;
-
-        // Get all players for active slate
-        const playersResponse = await playersAPI.getBySlateId(slateId);
-
-        // The API returns the array directly
-        if (Array.isArray(playersResponse.data)) {
-          // Create a map of player name -> headshot URL
-          const headshotsMap = {};
-          playersResponse.data.forEach(player => {
-            if (player.headshot) {
-              headshotsMap[player.name] = player.headshot;
-            }
-          });
-          setPlayerHeadshots(headshotsMap);
-        }
+      // The API returns the array directly
+      if (Array.isArray(playersResponse.data)) {
+        // Create a map of player name -> headshot URL
+        const headshotsMap = {};
+        playersResponse.data.forEach(player => {
+          if (player.headshot) {
+            headshotsMap[player.name] = player.headshot;
+          }
+        });
+        setPlayerHeadshots(headshotsMap);
       }
     } catch (error) {
       console.error('Failed to load player headshots:', error);
@@ -677,6 +675,7 @@ export default function ChatPage() {
     // Use streaming API
     await startStream(messageToSend, {
       sessionId,
+      slateId,
       maxIterations
     });
   };

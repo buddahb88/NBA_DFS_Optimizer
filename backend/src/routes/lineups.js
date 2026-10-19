@@ -7,18 +7,24 @@ import { loadSavedLineups, loadInlineLineups } from '../services/lineupExportDat
 
 const router = express.Router();
 
-// Validate lineup helper (roster size and salary cap of the slate's DFS site)
-function validateLineup(players, site) {
-  const { salaryCap, rosterSlots } = getSiteConfig(site);
+// Lineup rules (roster size, salary cap) come from the DFS site; DraftKings when omitted
+export function validateLineup(players, site) {
   const errors = [];
+  let config;
+  try {
+    config = getSiteConfig(site);
+  } catch (error) {
+    return { isValid: false, errors: [error.message], totalSalary: 0 };
+  }
+  const rosterSize = config.rosterSlots.length;
 
-  if (players.length !== rosterSlots.length) {
-    errors.push(`Lineup must have exactly ${rosterSlots.length} players`);
+  if (players.length !== rosterSize) {
+    errors.push(`Lineup must have exactly ${rosterSize} players`);
   }
 
   const totalSalary = players.reduce((sum, p) => sum + (p.salary || 0), 0);
-  if (totalSalary > salaryCap) {
-    errors.push(`Total salary ($${totalSalary}) exceeds cap ($${salaryCap})`);
+  if (totalSalary > config.salaryCap) {
+    errors.push(`Total salary ($${totalSalary}) exceeds cap ($${config.salaryCap})`);
   }
 
   return { isValid: errors.length === 0, errors, totalSalary };

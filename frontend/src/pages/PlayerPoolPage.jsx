@@ -1,37 +1,47 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { playersAPI, slatesAPI } from '../services/api';
+import { playersAPI } from '../services/api';
+import { useSlate } from '../context/SlateContext';
 import SalaryImport from '../components/SalaryImport';
 
 function PlayerPoolPage() {
+  const { slate: activeSlate, slateId, site, setSite, refreshSlates } = useSlate();
   const [players, setPlayers] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [activeSlate, setActiveSlate] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [positionFilter, setPositionFilter] = useState('');
   const [sortField, setSortField] = useState('salary');
   const [sortDirection, setSortDirection] = useState('desc');
+  // Bumped after a salary import so the same slate's players reload
+  const [importCount, setImportCount] = useState(0);
 
-  // Load active slate and players on mount
+  // Load players whenever the top-bar slate changes
   useEffect(() => {
-    loadActiveSlate();
-  }, []);
-
-  const loadActiveSlate = async () => {
+    setPlayers([]);
+    if (!slateId) return;
+    let cancelled = false;
     setLoading(true);
-    try {
-      const slateResponse = await slatesAPI.getActiveSlate();
-      if (slateResponse.data) {
-        setActiveSlate(slateResponse.data);
-        // Load players for the active slate
-        const playersResponse = await playersAPI.getBySlateId(slateResponse.data.slate_id);
-        setPlayers(playersResponse.data);
-      }
-    } catch (error) {
-      console.error('Error loading active slate:', error);
-    } finally {
-      setLoading(false);
+    playersAPI.getBySlateId(slateId)
+      .then((response) => {
+        if (!cancelled) setPlayers(response.data);
+      })
+      .catch((error) => console.error('Error loading players:', error))
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [slateId, importCount]);
+
+  // Show the imported slate: switch the top bar to its site, or reload this site's slates
+  const handleImported = (result) => {
+    if (result?.site && result.site !== site) {
+      setSite(result.site);
+      return;
     }
+    refreshSlates(result?.slate?.slate_id);
+    setImportCount((n) => n + 1);
   };
 
   const handleSort = (field) => {
@@ -86,7 +96,7 @@ function PlayerPoolPage() {
           )}
         </div>
         <div className="flex flex-col items-stretch gap-2 sm:items-end">
-          <SalaryImport onImported={loadActiveSlate} />
+          <SalaryImport onImported={handleImported} />
           {players.length > 0 && (
             <span className="text-sm text-gray-600">
               {filteredPlayers.length} of {players.length} players
@@ -529,12 +539,12 @@ function PlayerPoolPage() {
         <div className="text-center py-12 text-gray-500">Loading players...</div>
       ) : !activeSlate ? (
         <div className="text-center py-12">
-          <p className="text-gray-500 mb-4">No active slate selected.</p>
+          <p className="text-gray-500 mb-4">No slate selected. Pick one in the top bar, or import one from Home.</p>
           <Link
             to="/"
             className="inline-block px-6 py-3 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-medium"
           >
-            Go to Home to Select a Slate
+            Go to Home to Import a Slate
           </Link>
         </div>
       ) : (

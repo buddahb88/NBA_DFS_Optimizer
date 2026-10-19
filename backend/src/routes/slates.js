@@ -3,8 +3,13 @@ import slateModel from '../models/slateModel.js';
 import rotowireService from '../services/rotowireService.js';
 import { importSalaries } from '../services/salaryImportService.js';
 import { parseMultipart } from '../utils/multipart.js';
+import { DEFAULT_SITE, isValidSite } from '../config/sites.js';
 
 const router = express.Router();
+
+// Slates with no site predate multi-site support and are DraftKings
+export const filterSlatesBySite = (slates, site) =>
+  slates.filter(s => (s.site || DEFAULT_SITE) === site.toLowerCase());
 
 // Get available slates from RotoWire (Classic contests only)
 router.get('/list', async (req, res) => {
@@ -55,11 +60,15 @@ router.get('/active', async (req, res) => {
   }
 });
 
-// Get all slates
+// Get all slates, optionally only one site's (?site=fanduel)
 router.get('/', async (req, res) => {
   try {
+    const { site } = req.query;
+    if (site !== undefined && !isValidSite(site)) {
+      return res.status(400).json({ error: `Unknown site: ${site}` });
+    }
     const slates = await slateModel.getAll();
-    res.json(slates);
+    res.json(site ? filterSlatesBySite(slates, site) : slates);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

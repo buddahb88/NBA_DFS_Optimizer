@@ -32,6 +32,10 @@
   --info: 8 132 168;
   --info-soft: 207 250 254;
 
+  /* Chart series (validated pair: CVD-safe, >= 3:1 on surface) */
+  --chart-1: 37 99 235;
+  --chart-2: 235 104 52;
+
   color-scheme: light;
 }
 
@@ -61,6 +65,9 @@
   --caution-soft: 58 42 14;
   --info: 56 199 230;
   --info-soft: 12 44 54;
+
+  --chart-1: 77 141 255;
+  --chart-2: 217 89 38;
 
   color-scheme: dark;
 }
