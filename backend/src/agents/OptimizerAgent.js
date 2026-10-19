@@ -10,6 +10,7 @@
 import BaseAgent from './BaseAgent.js';
 import db from '../config/database.js';
 import optimizerService from '../services/optimizerService.js';
+import { resolveSite } from '../utils/resolveSite.js';
 
 const SYSTEM_PROMPT = `You are an expert DFS lineup optimizer for DraftKings NBA.
 
@@ -103,8 +104,10 @@ class OptimizerAgent extends BaseAgent {
 
           console.log(`✅ Found ${players.length} players for slate`);
 
-          // Use optimizer service
-          const lineups = optimizerService.optimize(players, {
+          // Use optimizer service (site rules follow the slate's site)
+          const { site } = await resolveSite(undefined, slateId);
+          const { lineups } = optimizerService.optimize(players, {
+            site,
             mode,
             numLineups: Math.min(numLineups, 20),
             lockedPlayers: lockedPlayerIds,
