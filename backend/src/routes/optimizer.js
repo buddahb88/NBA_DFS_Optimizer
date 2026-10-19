@@ -3,12 +3,19 @@ import playerModel from '../models/playerModel.js';
 import optimizerService from '../services/optimizerService.js';
 import { autoTuneSettings, reviewLineup } from '../utils/autoTuneSettings.js';
 import { generateSlateBreakdown } from '../utils/slateAnalyzer.js';
+import { resolveSite } from '../utils/resolveSite.js';
+import { getSiteConfig } from '../config/sites.js';
+import { defaultMinSalary } from '../services/optimizer/scoring.js';
 
 const router = express.Router();
 
 /**
  * POST /api/optimizer/generate
  * Generate optimized lineup(s)
+ *
+ * Optional body fields: site ('draftkings' | 'fanduel' | 'yahoo', defaults to
+ * the slate's site), lockedPlayers, excludedPlayers, minUniqueness (min players
+ * each lineup differs from every earlier lineup in the request)
  */
 router.post('/generate', async (req, res) => {
   try {
@@ -18,7 +25,7 @@ router.post('/generate', async (req, res) => {
       numLineups = 1,
       lockedPlayers = [],
       excludedPlayers = [],
-      minSalary = 49000,
+      minSalary,
       maxExposure = 100,
       teamStacks = [],
       randomness = 0,
@@ -29,7 +36,12 @@ router.post('/generate', async (req, res) => {
       return res.status(400).json({ error: 'slateId is required' });
     }
 
-    console.log(`🎯 Optimizing ${numLineups} lineup(s) for slate ${slateId} (${mode} mode)`);
+    const { site, error: siteError } = await resolveSite(req.body.site, slateId);
+    if (siteError) {
+      return res.status(400).json({ error: siteError });
+    }
+
+    console.log(`🎯 Optimizing ${numLineups} lineup(s) for slate ${slateId} (${site}, ${mode} mode)`);
 
     // Get all players for the slate
     const players = await playerModel.getBySlateId(slateId);
@@ -41,7 +53,7 @@ router.post('/generate', async (req, res) => {
     console.log(`📊 Found ${players.length} active players`);
 
     // Run optimization with all settings from request body
-    const result = optimizerService.optimize(players, req.body);
+    const result = optimizerService.optimize(players, { ...req.body, site });
 
     console.log(`✅ Generated ${result.lineups?.length || 0} valid lineup(s)`);
 
@@ -73,7 +85,12 @@ router.post('/auto-tune', async (req, res) => {
       return res.status(400).json({ error: 'slateId is required' });
     }
 
-    console.log(`🤖 Auto-tuning settings for slate ${slateId} (${mode} mode)`);
+    const { site, error: siteError } = await resolveSite(req.body.site, slateId);
+    if (siteError) {
+      return res.status(400).json({ error: siteError });
+    }
+
+    console.log(`🤖 Auto-tuning settings for slate ${slateId} (${site}, ${mode} mode)`);
 
     // Get all players for the slate
     const players = await playerModel.getBySlateId(slateId);
@@ -83,7 +100,7 @@ router.post('/auto-tune', async (req, res) => {
     }
 
     // Analyze and generate recommendations (async now)
-    const result = await autoTuneSettings(players, mode);
+    const result = await autoTuneSettings(players, mode, site);
 
     if (result.error) {
       return res.status(400).json(result);
@@ -155,7 +172,12 @@ router.post('/review-lineup', async (req, res) => {
       return res.status(400).json({ error: 'slateId and lineup are required' });
     }
 
-    console.log(`🤖 AI reviewing lineup for slate ${slateId} (${mode} mode)`);
+    const { site, error: siteError } = await resolveSite(req.body.site, slateId);
+    if (siteError) {
+      return res.status(400).json({ error: siteError });
+    }
+
+    console.log(`🤖 AI reviewing lineup for slate ${slateId} (${site}, ${mode} mode)`);
 
     // Get all players for context
     const players = await playerModel.getBySlateId(slateId);
@@ -165,7 +187,7 @@ router.post('/review-lineup', async (req, res) => {
     }
 
     // Get AI review
-    const result = await reviewLineup(lineup, players, mode);
+    const result = await reviewLineup(lineup, players, mode, site);
 
     console.log(`✅ Lineup review complete`);
 
@@ -186,10 +208,19 @@ router.post('/review-lineup', async (req, res) => {
  */
 router.post('/validate', async (req, res) => {
   try {
-    const { players, minSalary = 49000 } = req.body;
+    const { players, slateId } = req.body;
 
-    if (!players || !Array.isArray(players) || players.length !== 8) {
-      return res.status(400).json({ error: 'Must provide exactly 8 players' });
+    const { site, error: siteError } = await resolveSite(req.body.site, slateId);
+    if (siteError) {
+      return res.status(400).json({ error: siteError });
+    }
+    const siteConfig = getSiteConfig(site);
+    const { salaryCap } = siteConfig;
+    const rosterSize = siteConfig.rosterSlots.length;
+    const minSalary = req.body.minSalary ?? defaultMinSalary(siteConfig);
+
+    if (!players || !Array.isArray(players) || players.length !== rosterSize) {
+      return res.status(400).json({ error: `Must provide exactly ${rosterSize} players` });
     }
 
     const totalSalary = players.reduce((sum, p) => sum + (p.salary || 0), 0);
@@ -199,15 +230,16 @@ router.post('/validate', async (req, res) => {
       isValid: true,
       errors: [],
       warnings: [],
+      site,
       totalSalary,
       projectedPoints,
-      remainingSalary: 50000 - totalSalary
+      remainingSalary: salaryCap - totalSalary
     };
 
     // Check salary cap
-    if (totalSalary > 50000) {
+    if (totalSalary > salaryCap) {
       validation.isValid = false;
-      validation.errors.push(`Over salary cap by $${totalSalary - 50000}`);
+      validation.errors.push(`Over salary cap by $${totalSalary - salaryCap}`);
     }
 
     // Check minimum salary

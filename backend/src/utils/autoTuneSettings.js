@@ -4,14 +4,27 @@
  */
 
 import aiChatService from '../services/aiChatService.js';
+import { getSiteConfig } from '../config/sites.js';
+import { defaultMinSalary, valuePer1k } from '../services/optimizer/scoring.js';
+
+// "$7.5k" on DK/FD, "$38" on Yahoo
+const fmtSalary = (salary, site) => (site.salaryCap >= 10000
+  ? `$${((salary || 0) / 1000).toFixed(1)}k`
+  : `$${salary || 0}`);
+
+// Projected points per DK-equivalent $1k; missing salary counts as $10k DK-equivalent
+const playerValue = (p, site) => valuePer1k(p.projected_points || 0, p.salary || site.salaryCap / 5, site);
 
 /**
  * Analyze player pool with AI and generate intelligent optimizer settings
  * @param {Array} players - Array of player objects
  * @param {String} mode - 'cash' or 'gpp'
+ * @param {String} siteKey - DFS site (defaults to DraftKings)
  * @returns {Object} AI-generated recommendations with actual values
  */
-export async function autoTuneSettings(players, mode = 'gpp') {
+export async function autoTuneSettings(players, mode = 'gpp', siteKey) {
+  const site = getSiteConfig(siteKey);
+
   // Filter to players with projections
   const activePlayers = players.filter(p =>
     p.projected_points > 0 && p.projected_minutes > 0
@@ -28,13 +41,14 @@ export async function autoTuneSettings(players, mode = 'gpp') {
   const stats = calculateSlateStats(activePlayers);
 
   // Build detailed player summary for AI
-  const playerSummary = buildPlayerSummary(activePlayers, mode);
+  const playerSummary = buildPlayerSummary(activePlayers, mode, site);
 
   // Get AI to analyze and recommend settings
-  const aiResult = await generateAIRecommendations(playerSummary, stats, mode);
+  const aiResult = await generateAIRecommendations(playerSummary, stats, mode, site);
 
   return {
     mode,
+    site: site.key,
     totalPlayers: activePlayers.length,
     stats,
     recommendations: aiResult.settings,
@@ -153,7 +167,7 @@ function countPositions(players) {
 /**
  * Build comprehensive player summary for AI
  */
-function buildPlayerSummary(players, mode) {
+function buildPlayerSummary(players, mode, site) {
   // Sort by relevant metric
   const sorted = [...players].sort((a, b) => {
     if (mode === 'cash') {
@@ -170,13 +184,13 @@ function buildPlayerSummary(players, mode) {
   table += `|--------|-----|------|-----|--------|------|-------|------|------|-------|-------|-----|-----|-----|------|\n`;
 
   topPlayers.forEach(p => {
-    table += `| ${(p.name || '').substring(0, 16)} | ${(p.position || '').split(',')[0]} | ${p.team || ''} | ${p.opponent || ''} | $${((p.salary || 0) / 1000).toFixed(1)}k | ${(p.projected_points || 0).toFixed(1)} | ${(p.floor || 0).toFixed(1)} | ${(p.ceiling || 0).toFixed(1)} | ${(p.rostership || 0).toFixed(0)}% | ${(p.boom_probability || 0).toFixed(0)}% | ${(p.bust_probability || 0).toFixed(0)}% | ${(p.volatility || 0).toFixed(2)} | ${(p.leverage_score || 0).toFixed(1)} | ${(p.projected_minutes || 0).toFixed(0)} | ${(p.usage || 0).toFixed(0)}% |\n`;
+    table += `| ${(p.name || '').substring(0, 16)} | ${(p.position || '').split(',')[0]} | ${p.team || ''} | ${p.opponent || ''} | ${fmtSalary(p.salary, site)} | ${(p.projected_points || 0).toFixed(1)} | ${(p.floor || 0).toFixed(1)} | ${(p.ceiling || 0).toFixed(1)} | ${(p.rostership || 0).toFixed(0)}% | ${(p.boom_probability || 0).toFixed(0)}% | ${(p.bust_probability || 0).toFixed(0)}% | ${(p.volatility || 0).toFixed(2)} | ${(p.leverage_score || 0).toFixed(1)} | ${(p.projected_minutes || 0).toFixed(0)} | ${(p.usage || 0).toFixed(0)}% |\n`;
   });
 
   // Value plays
   const valueSort = [...players].sort((a, b) => {
-    const valA = (a.projected_points || 0) / ((a.salary || 10000) / 1000);
-    const valB = (b.projected_points || 0) / ((b.salary || 10000) / 1000);
+    const valA = playerValue(a, site);
+    const valB = playerValue(b, site);
     return valB - valA;
   });
 
@@ -185,8 +199,8 @@ function buildPlayerSummary(players, mode) {
   table += `|--------|--------|------|-------|------|-------|------|\n`;
 
   valueSort.slice(0, 10).forEach(p => {
-    const val = (p.projected_points || 0) / ((p.salary || 10000) / 1000);
-    table += `| ${(p.name || '').substring(0, 16)} | $${((p.salary || 0) / 1000).toFixed(1)}k | ${(p.projected_points || 0).toFixed(1)} | ${val.toFixed(2)} | ${(p.rostership || 0).toFixed(0)}% | ${(p.floor || 0).toFixed(1)} | ${(p.ceiling || 0).toFixed(1)} |\n`;
+    const val = playerValue(p, site);
+    table += `| ${(p.name || '').substring(0, 16)} | ${fmtSalary(p.salary, site)} | ${(p.projected_points || 0).toFixed(1)} | ${val.toFixed(2)} | ${(p.rostership || 0).toFixed(0)}% | ${(p.floor || 0).toFixed(1)} | ${(p.ceiling || 0).toFixed(1)} |\n`;
   });
 
   return table;
@@ -195,7 +209,10 @@ function buildPlayerSummary(players, mode) {
 /**
  * Generate AI recommendations with actual settings values
  */
-async function generateAIRecommendations(playerSummary, stats, mode) {
+async function generateAIRecommendations(playerSummary, stats, mode, site) {
+  const salaryRange = `${Math.round(site.salaryCap * 0.9)}-${site.salaryCap}`;
+  const rosterSize = site.rosterSlots.length;
+
   const settingsDescription = mode === 'cash' ? `
 **CASH GAME SETTINGS TO SET:**
 - minFloor: Minimum floor projection (range: 0-${stats.floor.max}, median: ${stats.floor.p50})
@@ -203,7 +220,7 @@ async function generateAIRecommendations(playerSummary, stats, mode) {
 - maxBustProbability: Max bust% allowed (range: 0-100, median: ${stats.bust.p50})
 - minProjectedMinutes: Min minutes (range: 0-${stats.minutes.max}, median: ${stats.minutes.p50})
 - minProjection: Min projected points (range: 0-${stats.projection.max}, p25: ${stats.projection.p25})
-- minSalary: Min salary to use cap (range: 45000-50000)
+- minSalary: Min salary to use cap (range: ${salaryRange})
 - minUsage: Min usage rate % (range: 0-${stats.usage.max}, median: ${stats.usage.p50})
 ` : `
 **GPP SETTINGS TO SET:**
@@ -211,14 +228,14 @@ async function generateAIRecommendations(playerSummary, stats, mode) {
 - minBoomProbability: Min boom% (range: 0-100, median: ${stats.boom.p50})
 - minCeiling: Min ceiling projection (range: 0-${stats.ceiling.max}, p75: ${stats.ceiling.p75})
 - minProjection: Min projected points (range: 0-${stats.projection.max}, p25: ${stats.projection.p25})
-- maxChalkPlayers: Max high-owned players (range: 0-8)
+- maxChalkPlayers: Max high-owned players (range: 0-${rosterSize})
 - randomness: Randomness % for diversity (range: 0-30)
-- minSalary: Min salary (range: 45000-50000)
+- minSalary: Min salary (range: ${salaryRange})
 - minUsage: Min usage rate % (range: 0-${stats.usage.max}, median: ${stats.usage.p50})
 - gppMode: 'balanced', 'ceiling', or 'leverage'
 `;
 
-  const prompt = `You are an expert NBA DFS optimizer. Analyze this ${mode.toUpperCase()} slate and provide SPECIFIC optimizer settings.
+  const prompt = `You are an expert NBA DFS optimizer. Analyze this ${site.name} ${mode.toUpperCase()} slate ($${site.salaryCap.toLocaleString()} cap, ${rosterSize} players) and provide SPECIFIC optimizer settings.
 
 **SLATE STATISTICS:**
 - ${stats.playerCount} players across ${stats.games} games
@@ -252,7 +269,7 @@ ${settingsDescription}
     "minBoomProbability": <number 0-100>,
     "minCeiling": <number>,
     "minProjection": <number>,
-    "maxChalkPlayers": <number 0-8>,
+    "maxChalkPlayers": <number 0-${rosterSize}>,
     "randomness": <number 0-30>,
     "minSalary": <number>,
     "minUsage": <number>,
@@ -281,7 +298,7 @@ Be aggressive with filters to create an optimal player pool. Don't set everythin
 
       const parsed = JSON.parse(jsonStr);
       return {
-        settings: parsed.settings || getDefaultSettings(mode),
+        settings: parsed.settings || getDefaultSettings(mode, site),
         analysis: parsed.analysis || 'AI analysis completed.'
       };
     } catch (parseError) {
@@ -289,14 +306,14 @@ Be aggressive with filters to create an optimal player pool. Don't set everythin
       console.log('Raw response:', content);
       // Return defaults with the raw analysis
       return {
-        settings: getDefaultSettings(mode),
+        settings: getDefaultSettings(mode, site),
         analysis: content || 'AI analysis unavailable - using default settings.'
       };
     }
   } catch (error) {
     console.error('AI analysis error:', error);
     return {
-      settings: getDefaultSettings(mode),
+      settings: getDefaultSettings(mode, site),
       analysis: `AI analysis unavailable: ${error.message}`
     };
   }
@@ -305,7 +322,7 @@ Be aggressive with filters to create an optimal player pool. Don't set everythin
 /**
  * Get default settings if AI fails
  */
-function getDefaultSettings(mode) {
+function getDefaultSettings(mode, site) {
   if (mode === 'cash') {
     return {
       minFloor: 20,
@@ -313,7 +330,7 @@ function getDefaultSettings(mode) {
       maxBustProbability: 30,
       minProjectedMinutes: 24,
       minProjection: 20,
-      minSalary: 49000,
+      minSalary: defaultMinSalary(site),
       minUsage: 15,
       avoidBlowouts: true
     };
@@ -325,7 +342,7 @@ function getDefaultSettings(mode) {
       minProjection: 15,
       maxChalkPlayers: 3,
       randomness: 15,
-      minSalary: 47000,
+      minSalary: Math.round(site.salaryCap * 0.94), // $47,000 on DK
       minUsage: 12,
       gppMode: 'balanced',
       maxExposureChalk: 40,
@@ -338,7 +355,8 @@ function getDefaultSettings(mode) {
 /**
  * AI Lineup Review - Analyze a generated lineup
  */
-export async function reviewLineup(lineup, players, mode = 'gpp') {
+export async function reviewLineup(lineup, players, mode = 'gpp', siteKey) {
+  const site = getSiteConfig(siteKey);
   const stats = calculateSlateStats(players);
 
   // Extract actual players from slot structure {position, player}
@@ -366,7 +384,7 @@ export async function reviewLineup(lineup, players, mode = 'gpp') {
 
   lineupPlayers.forEach(p => {
     const pos = p.position?.split(',')[0] || 'UTIL';
-    lineupTable += `| ${p.name} | ${pos} | $${((p.salary || 0)/1000).toFixed(1)}k | ${(p.projected_points || 0).toFixed(1)} | ${(p.floor || 0).toFixed(1)} | ${(p.ceiling || 0).toFixed(1)} | ${(p.rostership || 0).toFixed(0)}% | ${(p.leverage_score || 0).toFixed(1)} |\n`;
+    lineupTable += `| ${p.name} | ${pos} | ${fmtSalary(p.salary, site)} | ${(p.projected_points || 0).toFixed(1)} | ${(p.floor || 0).toFixed(1)} | ${(p.ceiling || 0).toFixed(1)} | ${(p.rostership || 0).toFixed(0)}% | ${(p.leverage_score || 0).toFixed(1)} |\n`;
     totalSalary += p.salary || 0;
     totalProj += p.projected_points || 0;
     totalOwn += p.rostership || 0;
@@ -382,13 +400,13 @@ export async function reviewLineup(lineup, players, mode = 'gpp') {
     return (b.projected_points / (b.salary/1000)) - (a.projected_points / (a.salary/1000));
   }).slice(0, 10);
 
-  const prompt = `You are a brutally honest NBA DFS analyst. Review this ${mode.toUpperCase()} lineup and give your honest opinion.
+  const prompt = `You are a brutally honest NBA DFS analyst. Review this ${site.name} ${mode.toUpperCase()} lineup and give your honest opinion.
 
 **THE LINEUP:**
 ${lineupTable}
 
 **Lineup Totals:**
-- Salary: $${totalSalary.toLocaleString()} / $50,000
+- Salary: $${totalSalary.toLocaleString()} / $${site.salaryCap.toLocaleString()}
 - Projection: ${totalProj.toFixed(1)} pts
 - Floor: ${totalFloor.toFixed(1)} | Ceiling: ${totalCeiling.toFixed(1)}
 - Avg Ownership: ${avgOwn.toFixed(1)}%
@@ -396,7 +414,7 @@ ${lineupTable}
 **SLATE CONTEXT:**
 - ${stats.playerCount} players, ${stats.games} games
 - Top projected: ${topProjected.slice(0, 5).map(p => `${p.name} (${p.projected_points?.toFixed(1)})`).join(', ')}
-- Top value: ${topValue.slice(0, 5).map(p => `${p.name} ($${(p.salary/1000).toFixed(1)}k, ${p.projected_points?.toFixed(1)}pts)`).join(', ')}
+- Top value: ${topValue.slice(0, 5).map(p => `${p.name} (${fmtSalary(p.salary, site)}, ${p.projected_points?.toFixed(1)}pts)`).join(', ')}
 - Slate avg projection: ${stats.projection.avg}
 
 **BE HONEST AND CRITICAL. Answer:**
