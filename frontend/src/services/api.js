@@ -97,4 +97,17 @@ export const historicalAPI = {
     api.post('/historical/missing-players', { players, minGames, minAvgDk }),
 };
 
+// Minutes x FPPM projections and manual overrides
+export const projectionsAPI = {
+  // options: { site, slateDate, minutesWeight, updateDb }
+  getMinutesProjections: (slateId, options = {}) =>
+    api.post(`/projections/${slateId}/minutes`, options, { timeout: 120000 }),
+  getOverrides: (slateId) => api.get(`/projections/${slateId}/overrides`),
+  // override: { minutes, points, note, apply } - minutes 0 marks the player OUT
+  setOverride: (slateId, playerId, override) =>
+    api.put(`/projections/${slateId}/overrides/${playerId}`, override, { timeout: 120000 }),
+  clearOverride: (slateId, playerId) =>
+    api.delete(`/projections/${slateId}/overrides/${playerId}`),
+};
+
 export default api;

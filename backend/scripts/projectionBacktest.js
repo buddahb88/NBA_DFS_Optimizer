@@ -11,6 +11,11 @@
  *   node scripts/projectionBacktest.js [--from YYYY-MM-DD] [--to YYYY-MM-DD]
  *                                      [--slate SLATE_ID] [--no-factors] [--json]
  *
+ * Replay mode (re-projects every past date from box scores before it, and
+ * compares the legacy model with the minutes x FPPM model):
+ *   node scripts/projectionBacktest.js --replay [--from ...] [--to ...]
+ *                                      [--site draftkings|fanduel|yahoo] [--no-legacy] [--json]
+ *
  * Works with SQLite (default) or Azure SQL (DATABASE_TYPE=azuresql in backend/.env).
  */
 
@@ -23,6 +28,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.join(__dirname, '../.env') });
 
 const { runProjectionBacktest } = await import('../src/services/projectionBacktestService.js');
+const { runReplayBacktest } = await import('../src/services/projectionReplayBacktest.js');
 const { default: db } = await import('../src/config/database.js');
 
 const args = process.argv.slice(2);
@@ -54,7 +60,59 @@ function printMetricTable(title, rows) {
   }
 }
 
+function printReplay(report) {
+  const row = (label, m) => console.log(
+    `${label.padEnd(26)}${pad(m?.n ?? 0, 7)}${pad(fmt(m?.mae), 8)}${pad(fmt(m?.rmse), 8)}${pad(fmt(m?.bias), 8)}${pad(fmt(m?.r2, 3), 8)}${pad(fmt(m?.correlation, 3), 8)}`
+  );
+  const header = () => console.log(`${''.padEnd(26)}${pad('n', 7)}${pad('MAE', 8)}${pad('RMSE', 8)}${pad('bias', 8)}${pad('R^2', 8)}${pad('corr', 8)}`);
+  const { sample } = report;
+  console.log('\n═══════════════════════════════════════════════════════════════');
+  console.log(`  PROJECTION REPLAY BACKTEST (${report.site})`);
+  console.log('═══════════════════════════════════════════════════════════════');
+  console.log(`Player-games: ${sample.playerGames} across ${sample.dates} date(s)` +
+    (sample.dateRange ? ` [${sample.dateRange.from} → ${sample.dateRange.to}]` : '') +
+    `, ${sample.injuryAffected} with a teammate OUT`);
+  if (!sample.playerGames) return;
+
+  console.log('\nFANTASY POINTS');
+  header();
+  if (report.points.legacy) row('legacy (before)', report.points.legacy);
+  row('minutes x FPPM', report.points.minutesModel);
+  row('minutes x FPPM, no injury', report.points.minutesModelNoInjury);
+  for (const b of report.blends) row(`blend w=${b.weight}`, b);
+
+  console.log('\nTEAMMATE OUT ROWS ONLY');
+  header();
+  if (report.injuryAffected.legacy) row('legacy', report.injuryAffected.legacy);
+  row('minutes x FPPM', report.injuryAffected.minutesModel);
+  row('minutes x FPPM, no injury', report.injuryAffected.minutesModelNoInjury);
+
+  console.log('\nMINUTES');
+  header();
+  row('season average', report.minutes.seasonAverage);
+  row('model, no injury', report.minutes.modelNoInjury);
+  row('model', report.minutes.model);
+  row('teammate OUT: no injury', report.minutes.injuryAffected.modelNoInjury);
+  row('teammate OUT: model', report.minutes.injuryAffected.model);
+
+  console.log('\nINSIGHTS');
+  for (const line of report.insights) console.log(`  • ${line}`);
+  console.log('');
+}
+
 try {
+  if (args.includes('--replay')) {
+    const report = await runReplayBacktest({
+      from: options.from,
+      to: options.to,
+      site: argValue('--site') || 'draftkings',
+      legacy: !args.includes('--no-legacy')
+    });
+    if (asJson) console.log(JSON.stringify(report, null, 2));
+    else printReplay(report);
+    process.exit(0);
+  }
+
   const report = await runProjectionBacktest(options);
 
   if (asJson) {
