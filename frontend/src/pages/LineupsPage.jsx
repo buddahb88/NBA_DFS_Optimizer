@@ -1,10 +1,13 @@
 import { useState, useEffect } from 'react';
 import { lineupsAPI } from '../services/api';
+import { Tabs } from '../components/ui';
+import LateSwapPanel from '../components/lateSwap/LateSwapPanel';
 
 function LineupsPage() {
   const [lineups, setLineups] = useState([]);
   const [selectedLineup, setSelectedLineup] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [tab, setTab] = useState('saved');
 
   useEffect(() => {
     loadLineups();
@@ -76,6 +79,16 @@ function LineupsPage() {
   };
 
   return (
+    <div className="space-y-4">
+      <Tabs
+        value={tab}
+        onChange={setTab}
+        tabs={[
+          { value: 'saved', label: 'Saved lineups' },
+          { value: 'lateswap', label: 'Late Swap' },
+        ]}
+      />
+      {tab === 'lateswap' ? <LateSwapPanel /> : (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
       {/* Lineups List */}
       <div className="lg:col-span-1 space-y-4">
@@ -242,6 +255,8 @@ function LineupsPage() {
           </div>
         )}
       </div>
+    </div>
+      )}
     </div>
   );
 }

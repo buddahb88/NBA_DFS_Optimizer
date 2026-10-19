@@ -97,4 +97,10 @@ export const historicalAPI = {
     api.post('/historical/missing-players', { players, minGames, minAvgDk }),
 };
 
+// Late Swap API
+export const lateSwapAPI = {
+  // body: { slateId, csv, site?, now?, mode?, maxExposure?, playerExposure?, outPlayers?, lockedTeams?, gameTimes?, swapQuestionable?, unique? }
+  run: (body) => api.post('/lateswap', body, { timeout: 120000 }),
+};
+
 export default api;
