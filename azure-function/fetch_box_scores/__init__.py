@@ -58,6 +58,45 @@ def calculate_dk_fantasy_points(row: Dict) -> float:
     return round(fantasy_pts, 1)
 
 
+# FanDuel and Yahoo NBA scoring. Keep in sync with backend/src/config/sites.js
+# (scoring.fanduel / scoring.yahoo). Neither site has a 3PM or DD/TD bonus.
+SITE_SCORING = {
+    'fd_fantasy_points': {'PTS': 1.0, 'TRB': 1.2, 'AST': 1.5, 'STL': 3.0, 'BLK': 3.0, 'TOV': -1.0},
+    'yahoo_fantasy_points': {'PTS': 1.0, 'TRB': 1.2, 'AST': 1.5, 'STL': 3.0, 'BLK': 3.0, 'TOV': -1.0},
+}
+
+
+def calculate_site_fantasy_points(row: Dict) -> Dict[str, float]:
+    """Calculate FanDuel and Yahoo fantasy points from box score stats.
+
+    row uses Basketball Reference keys (PTS, TRB, AST, STL, BLK, TOV).
+    Returns {'fd_fantasy_points': ..., 'yahoo_fantasy_points': ...}.
+    """
+    result = {}
+    for field, weights in SITE_SCORING.items():
+        total = sum((row.get(stat, 0) or 0) * weight for stat, weight in weights.items())
+        result[field] = round(total, 2)
+    return result
+
+
+# Box score JSON field -> Basketball Reference key, for rows already in blob storage
+STORED_TO_BREF = {'points': 'PTS', 'rebounds': 'TRB', 'assists': 'AST',
+                  'steals': 'STL', 'blocks': 'BLK', 'turnovers': 'TOV'}
+
+
+def add_missing_site_points(games: List[Dict]) -> int:
+    """Fill fd/yahoo points on stored games written before those fields existed"""
+    filled = 0
+    for game in games:
+        if all(field in game for field in SITE_SCORING):
+            continue
+        row = {bref: game.get(field, 0) for field, bref in STORED_TO_BREF.items()}
+        for field, value in calculate_site_fantasy_points(row).items():
+            game.setdefault(field, value)
+        filled += 1
+    return filled
+
+
 def parse_minutes(mp_str) -> float:
     """Parse minutes string 'MM:SS' to decimal minutes"""
     if pd.isna(mp_str) or mp_str == '' or mp_str is None:
@@ -137,6 +176,7 @@ def fetch_games_for_date(date_str: str, games_on_date: pd.DataFrame) -> List[Dic
 
                     # Calculate DK fantasy points
                     player_game['dk_fantasy_points'] = calculate_dk_fantasy_points(row)
+                    player_game.update(calculate_site_fantasy_points(row))
 
                     # Advanced stats (if available)
                     if adv_df is not None and player_name in adv_df['PLAYER'].values:
@@ -204,6 +244,10 @@ def main(mytimer: func.TimerRequest, outputblob: func.Out[str]) -> None:
         latest_date = get_latest_date(existing_data)
 
         logging.info(f"Existing data has {len(existing_data)} games, latest date: {latest_date}")
+
+        filled = add_missing_site_points(existing_data)
+        if filled:
+            logging.info(f"Added FanDuel/Yahoo points to {filled} existing games")
 
         # Determine date range to fetch
         yesterday = (datetime.utcnow() - timedelta(days=1)).strftime('%Y-%m-%d')

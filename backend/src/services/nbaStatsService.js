@@ -9,6 +9,7 @@
 import axios from 'axios';
 import pLimit from 'p-limit';
 import db from '../config/database.js';
+import { computeFantasyPoints } from './scoring.js';
 
 const DATABASE_TYPE = process.env.DATABASE_TYPE || 'sqlite';
 
@@ -243,6 +244,8 @@ class NBAStatsService {
         };
 
         stats.dk_fantasy_points = this.calculateDKFantasyPoints(stats);
+        stats.fd_fantasy_points = computeFantasyPoints(stats, 'fanduel');
+        stats.yahoo_fantasy_points = computeFantasyPoints(stats, 'yahoo');
 
         return stats;
       });
@@ -291,16 +294,17 @@ class NBAStatsService {
                 fg_made = @fg_made, fg_attempted = @fg_attempted, fg3_made = @fg3_made,
                 fg3_attempted = @fg3_attempted, ft_made = @ft_made, ft_attempted = @ft_attempted,
                 oreb = @oreb, dreb = @dreb, plus_minus = @plus_minus,
-                dk_fantasy_points = @dk_fantasy_points, rest_days = @rest_days, is_back_to_back = @is_back_to_back
+                dk_fantasy_points = @dk_fantasy_points, fd_fantasy_points = @fd_fantasy_points,
+                yahoo_fantasy_points = @yahoo_fantasy_points, rest_days = @rest_days, is_back_to_back = @is_back_to_back
             WHEN NOT MATCHED THEN
               INSERT (player_id, player_name, team, opponent, position, game_id, game_date, season, is_home,
                       minutes, points, rebounds, assists, steals, blocks, turnovers,
                       fg_made, fg_attempted, fg3_made, fg3_attempted, ft_made, ft_attempted,
-                      oreb, dreb, plus_minus, dk_fantasy_points, rest_days, is_back_to_back)
+                      oreb, dreb, plus_minus, dk_fantasy_points, fd_fantasy_points, yahoo_fantasy_points, rest_days, is_back_to_back)
               VALUES (@player_id, @player_name, @team, @opponent, @position, @game_id, @game_date, @season, @is_home,
                       @minutes, @points, @rebounds, @assists, @steals, @blocks, @turnovers,
                       @fg_made, @fg_attempted, @fg3_made, @fg3_attempted, @ft_made, @ft_attempted,
-                      @oreb, @dreb, @plus_minus, @dk_fantasy_points, @rest_days, @is_back_to_back);
+                      @oreb, @dreb, @plus_minus, @dk_fantasy_points, @fd_fantasy_points, @yahoo_fantasy_points, @rest_days, @is_back_to_back);
           `, {
             player_id: game.player_id,
             player_name: game.player_name,
@@ -328,6 +332,8 @@ class NBAStatsService {
             dreb: game.dreb,
             plus_minus: game.plus_minus,
             dk_fantasy_points: game.dk_fantasy_points,
+            fd_fantasy_points: game.fd_fantasy_points ?? computeFantasyPoints(game, 'fanduel'),
+            yahoo_fantasy_points: game.yahoo_fantasy_points ?? computeFantasyPoints(game, 'yahoo'),
             rest_days: game.rest_days || null,
             is_back_to_back: game.is_back_to_back || 0
           });
@@ -345,12 +351,12 @@ class NBAStatsService {
           player_id, player_name, team, opponent, position, game_id, game_date, season, is_home,
           minutes, points, rebounds, assists, steals, blocks, turnovers,
           fg_made, fg_attempted, fg3_made, fg3_attempted, ft_made, ft_attempted,
-          oreb, dreb, plus_minus, dk_fantasy_points, rest_days, is_back_to_back
+          oreb, dreb, plus_minus, dk_fantasy_points, fd_fantasy_points, yahoo_fantasy_points, rest_days, is_back_to_back
         ) VALUES (
           @player_id, @player_name, @team, @opponent, @position, @game_id, @game_date, @season, @is_home,
           @minutes, @points, @rebounds, @assists, @steals, @blocks, @turnovers,
           @fg_made, @fg_attempted, @fg3_made, @fg3_attempted, @ft_made, @ft_attempted,
-          @oreb, @dreb, @plus_minus, @dk_fantasy_points, @rest_days, @is_back_to_back
+          @oreb, @dreb, @plus_minus, @dk_fantasy_points, @fd_fantasy_points, @yahoo_fantasy_points, @rest_days, @is_back_to_back
         )
       `);
 
@@ -385,6 +391,8 @@ class NBAStatsService {
               dreb: game.dreb,
               plus_minus: game.plus_minus,
               dk_fantasy_points: game.dk_fantasy_points,
+              fd_fantasy_points: game.fd_fantasy_points ?? computeFantasyPoints(game, 'fanduel'),
+              yahoo_fantasy_points: game.yahoo_fantasy_points ?? computeFantasyPoints(game, 'yahoo'),
               rest_days: game.rest_days || null,
               is_back_to_back: game.is_back_to_back || 0
             });
@@ -987,6 +995,8 @@ class NBAStatsService {
         blocks: game.blocks,
         turnovers: game.turnovers
       }),
+      fd_fantasy_points: game.fd_fantasy_points ?? computeFantasyPoints(game, 'fanduel'),
+      yahoo_fantasy_points: game.yahoo_fantasy_points ?? computeFantasyPoints(game, 'yahoo'),
       rest_days: null,
       is_back_to_back: 0
     };
@@ -1002,11 +1012,11 @@ class NBAStatsService {
             INSERT (player_id, player_name, team, opponent, position, game_id, game_date, season, is_home,
                     minutes, points, rebounds, assists, steals, blocks, turnovers,
                     fg_made, fg_attempted, fg3_made, fg3_attempted, ft_made, ft_attempted,
-                    oreb, dreb, plus_minus, dk_fantasy_points, rest_days, is_back_to_back)
+                    oreb, dreb, plus_minus, dk_fantasy_points, fd_fantasy_points, yahoo_fantasy_points, rest_days, is_back_to_back)
             VALUES (@player_id, @player_name, @team, @opponent, @position, @game_id, @game_date, @season, @is_home,
                     @minutes, @points, @rebounds, @assists, @steals, @blocks, @turnovers,
                     @fg_made, @fg_attempted, @fg3_made, @fg3_attempted, @ft_made, @ft_attempted,
-                    @oreb, @dreb, @plus_minus, @dk_fantasy_points, @rest_days, @is_back_to_back);
+                    @oreb, @dreb, @plus_minus, @dk_fantasy_points, @fd_fantasy_points, @yahoo_fantasy_points, @rest_days, @is_back_to_back);
         `, gameData);
         return result && result.rowsAffected > 0;
       } else {
@@ -1015,12 +1025,12 @@ class NBAStatsService {
             player_id, player_name, team, opponent, position, game_id, game_date, season, is_home,
             minutes, points, rebounds, assists, steals, blocks, turnovers,
             fg_made, fg_attempted, fg3_made, fg3_attempted, ft_made, ft_attempted,
-            oreb, dreb, plus_minus, dk_fantasy_points, rest_days, is_back_to_back
+            oreb, dreb, plus_minus, dk_fantasy_points, fd_fantasy_points, yahoo_fantasy_points, rest_days, is_back_to_back
           ) VALUES (
             @player_id, @player_name, @team, @opponent, @position, @game_id, @game_date, @season, @is_home,
             @minutes, @points, @rebounds, @assists, @steals, @blocks, @turnovers,
             @fg_made, @fg_attempted, @fg3_made, @fg3_attempted, @ft_made, @ft_attempted,
-            @oreb, @dreb, @plus_minus, @dk_fantasy_points, @rest_days, @is_back_to_back
+            @oreb, @dreb, @plus_minus, @dk_fantasy_points, @fd_fantasy_points, @yahoo_fantasy_points, @rest_days, @is_back_to_back
           )
         `, gameData);
         return result.changes > 0;

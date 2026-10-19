@@ -5,6 +5,7 @@ import rotowireService from '../services/rotowireService.js';
 import espnScraperService from '../services/espnScraperService.js';
 import hashtagBasketballService from '../services/hashtagBasketballService.js';
 import projectionService from '../services/projectionService.js';
+import { DEFAULT_SITE, isValidSite } from '../config/sites.js';
 
 const router = express.Router();
 
@@ -286,11 +287,15 @@ router.get('/:slateId/projection/:playerId', async (req, res) => {
  * Body params:
  * - slateDate: (optional) Date string YYYY-MM-DD for backtesting
  * - updateDb: (optional) boolean - whether to update DB with new projections (default: false)
+ * - site: (optional) DFS site whose historical fantasy points to use (default: draftkings)
  */
 router.post('/:slateId/enhanced-projections', async (req, res) => {
   try {
     const { slateId } = req.params;
-    const { slateDate = null, updateDb = false } = req.body;
+    const { slateDate = null, updateDb = false, site = DEFAULT_SITE } = req.body;
+    if (!isValidSite(site)) {
+      return res.status(400).json({ error: `Unknown site "${site}"` });
+    }
 
     console.log(`\n🧠 ═══════════════════════════════════════════════════`);
     console.log(`   ENHANCED PROJECTIONS FOR SLATE ${slateId}`);
@@ -312,7 +317,7 @@ router.post('/:slateId/enhanced-projections', async (req, res) => {
     console.log(`📊 Found ${players.length} players to process`);
 
     // Calculate enhanced projections
-    const enhancedResults = await projectionService.calculateSlateEnhancedProjections(players, slateDate);
+    const enhancedResults = await projectionService.calculateSlateEnhancedProjections(players, slateDate, site);
 
     // Optionally update database
     if (updateDb) {
@@ -461,7 +466,10 @@ router.post('/:slateId/enhanced-projections', async (req, res) => {
 router.get('/:slateId/enhanced-projection/:playerId', async (req, res) => {
   try {
     const { slateId, playerId } = req.params;
-    const { slateDate = null } = req.query;
+    const { slateDate = null, site = DEFAULT_SITE } = req.query;
+    if (!isValidSite(site)) {
+      return res.status(400).json({ error: `Unknown site "${site}"` });
+    }
 
     const players = await playerModel.getAllForProjections(slateId);
     const player = players.find(p => p.player_id === playerId);
@@ -477,7 +485,8 @@ router.get('/:slateId/enhanced-projection/:playerId', async (req, res) => {
       slateRoster,
       slateDate,
       isHome: player.is_home === 1 || player.is_home === true,
-      isB2B: player.rest_days === 0
+      isB2B: player.rest_days === 0,
+      site
     });
 
     res.json({

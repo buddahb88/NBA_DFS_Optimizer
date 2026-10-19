@@ -16,6 +16,7 @@
     "enhanced-projections": "node scripts/backfill-enhanced-projections.js",
     "enhanced-projections:update": "node scripts/backfill-enhanced-projections.js --update-db",
     "enhanced-projections:verbose": "node scripts/backfill-enhanced-projections.js --verbose",
+    "backfill:site-points": "node scripts/backfill-site-fantasy-points.js",
     "backtest:accuracy": "node scripts/projectionBacktest.js",
     "test:accuracy": "vitest run test/projectionBacktest.test.js"
   },

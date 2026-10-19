@@ -29,6 +29,7 @@ import teamDefenseModel from '../models/teamDefenseModel.js';
 import teamDefenseVsPositionModel from '../models/teamDefenseVsPositionModel.js';
 import { normalizeForRankings, normalizeForVsPosition } from '../utils/teamMapping.js';
 import db from '../config/database.js';
+import { fantasyPointsColumn } from './scoring.js';
 
 const DATABASE_TYPE = process.env.DATABASE_TYPE || 'sqlite';
 
@@ -73,10 +74,12 @@ class ProjectionService {
    * Get historical stats for a player
    * @param {string} playerName - Player's name
    * @param {string} slateDate - Date of the slate (to filter out future games for backtesting)
+   * @param {string} site - DFS site whose fantasy points to use (default draftkings)
    */
-  async getPlayerHistoricalStats(playerName, slateDate = null) {
+  async getPlayerHistoricalStats(playerName, slateDate = null, site = 'draftkings') {
+    const pointsCol = fantasyPointsColumn(site);
     const normalizedName = this.normalizeName(playerName);
-    const cacheKey = `${normalizedName}_${slateDate || 'current'}`;
+    const cacheKey = `${normalizedName}_${slateDate || 'current'}_${pointsCol}`;
 
     if (this.historicalCache[cacheKey]) {
       return this.historicalCache[cacheKey];
@@ -97,23 +100,23 @@ class ProjectionService {
       seasonStats = await db.get(`
         SELECT
           COUNT(*) as games,
-          AVG(dk_fantasy_points) as avg_dk,
+          AVG(${pointsCol}) as avg_dk,
           AVG(minutes) as avg_min,
-          MIN(dk_fantasy_points) as floor,
-          MAX(dk_fantasy_points) as ceiling,
-          AVG(CASE WHEN is_home = 1 THEN dk_fantasy_points END) as home_avg,
-          AVG(CASE WHEN is_home = 0 THEN dk_fantasy_points END) as away_avg,
-          AVG(CASE WHEN is_back_to_back = 1 THEN dk_fantasy_points END) as b2b_avg,
-          AVG(CASE WHEN is_back_to_back = 0 THEN dk_fantasy_points END) as rested_avg
+          MIN(${pointsCol}) as floor,
+          MAX(${pointsCol}) as ceiling,
+          AVG(CASE WHEN is_home = 1 THEN ${pointsCol} END) as home_avg,
+          AVG(CASE WHEN is_home = 0 THEN ${pointsCol} END) as away_avg,
+          AVG(CASE WHEN is_back_to_back = 1 THEN ${pointsCol} END) as b2b_avg,
+          AVG(CASE WHEN is_back_to_back = 0 THEN ${pointsCol} END) as rested_avg
         FROM historical_games
         WHERE player_name LIKE @playerName ${dateFilter}
       `, params);
 
       // Get last 3 games
       last3 = await db.get(`
-        SELECT AVG(dk_fantasy_points) as avg_dk, COUNT(*) as games
+        SELECT AVG(${pointsCol}) as avg_dk, COUNT(*) as games
         FROM (
-          SELECT TOP 3 dk_fantasy_points
+          SELECT TOP 3 ${pointsCol}
           FROM historical_games
           WHERE player_name LIKE @playerName ${dateFilter}
           ORDER BY game_date DESC
@@ -122,9 +125,9 @@ class ProjectionService {
 
       // Get last 5 games for trend calculation
       last5 = await db.get(`
-        SELECT AVG(dk_fantasy_points) as avg_dk, COUNT(*) as games
+        SELECT AVG(${pointsCol}) as avg_dk, COUNT(*) as games
         FROM (
-          SELECT TOP 5 dk_fantasy_points
+          SELECT TOP 5 ${pointsCol}
           FROM historical_games
           WHERE player_name LIKE @playerName ${dateFilter}
           ORDER BY game_date DESC
@@ -143,23 +146,23 @@ class ProjectionService {
       seasonStats = await db.get(`
         SELECT
           COUNT(*) as games,
-          AVG(dk_fantasy_points) as avg_dk,
+          AVG(${pointsCol}) as avg_dk,
           AVG(minutes) as avg_min,
-          MIN(dk_fantasy_points) as floor,
-          MAX(dk_fantasy_points) as ceiling,
-          AVG(CASE WHEN is_home = 1 THEN dk_fantasy_points END) as home_avg,
-          AVG(CASE WHEN is_home = 0 THEN dk_fantasy_points END) as away_avg,
-          AVG(CASE WHEN is_back_to_back = 1 THEN dk_fantasy_points END) as b2b_avg,
-          AVG(CASE WHEN is_back_to_back = 0 THEN dk_fantasy_points END) as rested_avg
+          MIN(${pointsCol}) as floor,
+          MAX(${pointsCol}) as ceiling,
+          AVG(CASE WHEN is_home = 1 THEN ${pointsCol} END) as home_avg,
+          AVG(CASE WHEN is_home = 0 THEN ${pointsCol} END) as away_avg,
+          AVG(CASE WHEN is_back_to_back = 1 THEN ${pointsCol} END) as b2b_avg,
+          AVG(CASE WHEN is_back_to_back = 0 THEN ${pointsCol} END) as rested_avg
         FROM historical_games
         WHERE player_name LIKE ? ${dateFilter}
       `, ...params);
 
       // Get last 3 games
       last3 = await db.get(`
-        SELECT AVG(dk_fantasy_points) as avg_dk, COUNT(*) as games
+        SELECT AVG(${pointsCol}) as avg_dk, COUNT(*) as games
         FROM (
-          SELECT dk_fantasy_points
+          SELECT ${pointsCol}
           FROM historical_games
           WHERE player_name LIKE ? ${dateFilter}
           ORDER BY game_date DESC
@@ -169,9 +172,9 @@ class ProjectionService {
 
       // Get last 5 games for trend calculation
       last5 = await db.get(`
-        SELECT AVG(dk_fantasy_points) as avg_dk, COUNT(*) as games
+        SELECT AVG(${pointsCol}) as avg_dk, COUNT(*) as games
         FROM (
-          SELECT dk_fantasy_points
+          SELECT ${pointsCol}
           FROM historical_games
           WHERE player_name LIKE ? ${dateFilter}
           ORDER BY game_date DESC
@@ -210,7 +213,8 @@ class ProjectionService {
   /**
    * Get matchup-specific history (player vs opponent)
    */
-  async getMatchupHistory(playerName, opponent, slateDate = null) {
+  async getMatchupHistory(playerName, opponent, slateDate = null, site = 'draftkings') {
+    const pointsCol = fantasyPointsColumn(site);
     let matchup;
 
     if (DATABASE_TYPE === 'azuresql') {
@@ -224,10 +228,10 @@ class ProjectionService {
       matchup = await db.get(`
         SELECT
           COUNT(*) as games,
-          AVG(dk_fantasy_points) as avg_dk,
+          AVG(${pointsCol}) as avg_dk,
           AVG(minutes) as avg_min,
-          MAX(dk_fantasy_points) as best,
-          MIN(dk_fantasy_points) as worst
+          MAX(${pointsCol}) as best,
+          MIN(${pointsCol}) as worst
         FROM historical_games
         WHERE player_name LIKE @playerName AND opponent = @opponent ${dateFilter}
       `, params);
@@ -242,10 +246,10 @@ class ProjectionService {
       matchup = await db.get(`
         SELECT
           COUNT(*) as games,
-          AVG(dk_fantasy_points) as avg_dk,
+          AVG(${pointsCol}) as avg_dk,
           AVG(minutes) as avg_min,
-          MAX(dk_fantasy_points) as best,
-          MIN(dk_fantasy_points) as worst
+          MAX(${pointsCol}) as best,
+          MIN(${pointsCol}) as worst
         FROM historical_games
         WHERE player_name LIKE ? AND opponent = ? ${dateFilter}
       `, ...params);
@@ -264,7 +268,8 @@ class ProjectionService {
    * Detect if there's a usage bump opportunity for this player
    * Checks if any high-usage teammates are missing from the slate
    */
-  async detectUsageBump(playerName, team, slateRoster, slateDate = null) {
+  async detectUsageBump(playerName, team, slateRoster, slateDate = null, site = 'draftkings') {
+    const pointsCol = fantasyPointsColumn(site);
     // Get historical regular players for this team
     let historicalRoster;
 
@@ -280,13 +285,13 @@ class ProjectionService {
         SELECT
           player_name,
           COUNT(*) as games,
-          AVG(dk_fantasy_points) as avg_dk,
+          AVG(${pointsCol}) as avg_dk,
           AVG(minutes) as avg_min
         FROM historical_games
         WHERE team = @team ${dateFilter}
           AND game_date >= DATEADD(day, -30, GETDATE())
         GROUP BY player_name
-        HAVING COUNT(*) >= 3 AND AVG(dk_fantasy_points) >= 25
+        HAVING COUNT(*) >= 3 AND AVG(${pointsCol}) >= 25
         ORDER BY avg_dk DESC
       `, params);
     } else {
@@ -301,7 +306,7 @@ class ProjectionService {
         SELECT
           player_name,
           COUNT(*) as games,
-          AVG(dk_fantasy_points) as avg_dk,
+          AVG(${pointsCol}) as avg_dk,
           AVG(minutes) as avg_min
         FROM historical_games
         WHERE team = ? ${dateFilter}
@@ -386,14 +391,14 @@ class ProjectionService {
         gameDatesWithout.forEach((d, i) => dateParams[`date${i}`] = d);
 
         statsWithout = await db.get(`
-          SELECT AVG(dk_fantasy_points) as avg_dk, COUNT(*) as games
+          SELECT AVG(${pointsCol}) as avg_dk, COUNT(*) as games
           FROM historical_games
           WHERE player_name LIKE @playerName AND team = @team
             AND game_date IN (${placeholders})
         `, { playerName: `%${playerName}%`, team, ...dateParams });
 
         statsWith = await db.get(`
-          SELECT AVG(dk_fantasy_points) as avg_dk, COUNT(*) as games
+          SELECT AVG(${pointsCol}) as avg_dk, COUNT(*) as games
           FROM historical_games
           WHERE player_name LIKE @playerName AND team = @team
             AND game_date NOT IN (${placeholders})
@@ -402,14 +407,14 @@ class ProjectionService {
         const placeholders = gameDatesWithout.map(() => '?').join(',');
 
         statsWithout = await db.get(`
-          SELECT AVG(dk_fantasy_points) as avg_dk, COUNT(*) as games
+          SELECT AVG(${pointsCol}) as avg_dk, COUNT(*) as games
           FROM historical_games
           WHERE player_name LIKE ? AND team = ?
             AND game_date IN (${placeholders})
         `, `%${playerName}%`, team, ...gameDatesWithout);
 
         statsWith = await db.get(`
-          SELECT AVG(dk_fantasy_points) as avg_dk, COUNT(*) as games
+          SELECT AVG(${pointsCol}) as avg_dk, COUNT(*) as games
           FROM historical_games
           WHERE player_name LIKE ? AND team = ?
             AND game_date NOT IN (${placeholders})
@@ -513,6 +518,7 @@ class ProjectionService {
    * @param {string} options.slateDate - Slate date for backtesting (YYYY-MM-DD)
    * @param {boolean} options.isHome - Whether player is at home
    * @param {boolean} options.isB2B - Whether this is a back-to-back game
+   * @param {string} options.site - DFS site for historical fantasy points (default draftkings)
    */
   async calculateEnhancedProjection(player, options = {}) {
     const {
@@ -532,18 +538,18 @@ class ProjectionService {
       is_home
     } = player;
 
-    const { slateRoster = [], slateDate = null, isHome = is_home, isB2B = (rest_days === 0) } = options;
+    const { slateRoster = [], slateDate = null, isHome = is_home, isB2B = (rest_days === 0), site = 'draftkings' } = options;
 
     // RotoWire baseline
     const rotowireBaseline = rotowire_projection || projected_points || 0;
 
     // Get historical data
-    const historical = await this.getPlayerHistoricalStats(name, slateDate);
-    const matchup = opponent ? await this.getMatchupHistory(name, opponent, slateDate) : { games: 0, avgDk: 0 };
+    const historical = await this.getPlayerHistoricalStats(name, slateDate, site);
+    const matchup = opponent ? await this.getMatchupHistory(name, opponent, slateDate, site) : { games: 0, avgDk: 0 };
 
     // Detect usage bump opportunity
     const usageBump = slateRoster.length > 0
-      ? await this.detectUsageBump(name, team, slateRoster, slateDate)
+      ? await this.detectUsageBump(name, team, slateRoster, slateDate, site)
       : { hasUsageBump: false, bump: 0, missingPlayers: [] };
 
     // If no historical data, fall back to original method
@@ -725,7 +731,7 @@ class ProjectionService {
   /**
    * Batch calculate enhanced projections for all players in a slate
    */
-  async calculateSlateEnhancedProjections(players, slateDate = null) {
+  async calculateSlateEnhancedProjections(players, slateDate = null, site = 'draftkings') {
     console.log(`\n🧠 Calculating ENHANCED projections for ${players.length} players...`);
 
     // Build slate roster for usage bump detection
@@ -756,7 +762,8 @@ class ProjectionService {
         slateRoster,
         slateDate,
         isHome,
-        isB2B
+        isB2B,
+        site
       });
 
       // Track stats
