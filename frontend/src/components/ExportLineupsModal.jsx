@@ -29,7 +29,7 @@ function downloadCsv(csv, filename) {
   window.URL.revokeObjectURL(url);
 }
 
-const stamp = () => new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
+const stamp = () => new Date().toISOString().slice(0, 16).replace(/\D/g, '');
 
 /**
  * Bulk export lineups as a site upload CSV.
