@@ -967,34 +967,6 @@ class RotowireService {
       throw error;
     }
   }
-
-  async fetchSlates() {
-    try {
-      // This endpoint may vary - adjust as needed
-      const url = `${this.baseUrl}/slates.php`;
-
-      const response = await fetch(url, {
-        headers: {
-          'accept': 'application/json, text/plain, */*',
-          'cookie': this.cookie,
-          'Referer': 'https://www.rotowire.com/daily/nba/optimizer.php'
-        },
-        method: 'GET'
-      });
-
-      if (!response.ok) {
-        // If slates endpoint doesn't exist, return empty array
-        console.warn('Slates endpoint not available');
-        return [];
-      }
-
-      const data = await response.json();
-      return data;
-    } catch (error) {
-      console.warn('Could not fetch slates:', error.message);
-      return [];
-    }
-  }
 }
 
 export default new RotowireService();

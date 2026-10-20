@@ -4,7 +4,7 @@ import { createTables } from './schema.js';
 console.log('🔄 Initializing database...');
 
 try {
-  createTables(db);
+  await createTables(db);
   console.log('✅ Database initialization complete!');
 } catch (error) {
   console.error('❌ Database initialization failed:', error);
