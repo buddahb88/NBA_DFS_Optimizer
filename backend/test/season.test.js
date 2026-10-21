@@ -43,6 +43,7 @@ test('getCurrentSeason derives from the given date (defaults to now)', () => {
 test('seasonStartDate uses known opening nights, else October 1st', () => {
   assert.equal(seasonStartDate('2024-25'), '2024-10-22');
   assert.equal(seasonStartDate('2025-26'), '2025-10-21');
+  assert.equal(seasonStartDate('2026-27'), '2026-10-20');
   assert.equal(seasonStartDate('2030-31'), '2030-10-01');
   assert.throws(() => seasonStartDate('2024'));
 });
@@ -62,9 +63,9 @@ test('listSeasons returns newest first, from 2024-25 to current by default', () 
 test('getSeasonsInfo returns the payload for GET /api/historical/seasons', () => {
   assert.deepEqual(getSeasonsInfo(new Date(2026, 9, 21)), {
     current: '2026-27',
-    currentStartDate: '2026-10-01',
+    currentStartDate: '2026-10-20',
     seasons: [
-      { value: '2026-27', startDate: '2026-10-01', current: true },
+      { value: '2026-27', startDate: '2026-10-20', current: true },
       { value: '2025-26', startDate: '2025-10-21', current: false },
       { value: '2024-25', startDate: '2024-10-22', current: false },
     ],

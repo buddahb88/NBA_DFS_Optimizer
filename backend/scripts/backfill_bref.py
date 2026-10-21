@@ -31,7 +31,7 @@ DB_PATH = Path(__file__).parent.parent / 'data' / 'nba_dfs.db'
 
 
 # Season helpers -- mirror backend/src/utils/season.js (seasons roll over October 1st)
-KNOWN_SEASON_STARTS = {'2024-25': '2024-10-22', '2025-26': '2025-10-21'}
+KNOWN_SEASON_STARTS = {'2024-25': '2024-10-22', '2025-26': '2025-10-21', '2026-27': '2026-10-20'}
 
 
 def season_for_date(date_str: str) -> str:
