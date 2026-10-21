@@ -145,6 +145,12 @@ describe('getPlayerResults', () => {
     assert.equal(luka.value, 5.273); // 58 / 11
   });
 
+  test('salary tiers follow the site salary scale', async () => {
+    const report = await results.getResults({ site: 'fanduel' });
+    // $11,000 is 8K+ on DraftKings but 9.6K+ on FanDuel's $60K cap
+    assert.deepEqual(report.bySalaryTier.map(t => [t.group, t.players]), [['9.6K+', 1]]);
+  });
+
   test('slateId and status filters', async () => {
     const s1 = await results.getPlayerResults({ slateId: 's1' });
     assert.equal(s1.length, 7);

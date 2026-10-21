@@ -16,8 +16,9 @@
  * DNP / INACTIVE / PENDING counts alongside.
  *
  * Aggregates (overall, by salary tier, position and date) are per site, since
- * salary scales differ. When no slateId is given, a player on several slates of
- * the same site and date is scored once, from the most recent snapshot.
+ * salary scales differ; tiers come from SALARY_TIERS_BY_SITE. When no slateId
+ * is given, a player on several slates of the same site and date is scored
+ * once, from the most recent snapshot.
  */
 
 import db from '../config/database.js';
@@ -25,7 +26,7 @@ import { DEFAULT_SITE, getSiteConfig } from '../config/sites.js';
 import { SITE_POINTS_COLUMNS } from './scoring.js';
 import { canonicalTeam } from '../utils/playerKey.js';
 import {
-  computeErrorMetrics, salaryTier, basePositions, SALARY_TIERS, DK_POSITIONS
+  computeErrorMetrics, salaryTier, salaryTiers, basePositions, DK_POSITIONS
 } from './projectionBacktestService.js';
 
 export const RESULT_STATUSES = ['PLAYED', 'DNP', 'INACTIVE', 'PENDING'];
@@ -249,7 +250,7 @@ export async function getResults(options = {}) {
   return {
     filters: { from, to, site, slateId },
     overall: aggregateResults(rows),
-    bySalaryTier: groupBy(rows, r => salaryTier(r.salary), SALARY_TIERS.map(t => t.label)),
+    bySalaryTier: groupBy(rows, r => salaryTier(r.salary, site), salaryTiers(site).map(t => t.label)),
     byPosition: groupBy(rows, r => basePositions(r.position), DK_POSITIONS),
     byDate: groupBy(rows, r => r.date)
   };

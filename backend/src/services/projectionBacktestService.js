@@ -29,12 +29,34 @@ import projectionService from './projectionService.js';
 import { fantasyPointsColumn } from './scoring.js';
 import { playerKey } from '../utils/playerKey.js';
 
-export const SALARY_TIERS = [
-  { label: '<4K', min: 0, max: 3999 },
-  { label: '4K-5.9K', min: 4000, max: 5999 },
-  { label: '6K-7.9K', min: 6000, max: 7999 },
-  { label: '8K+', min: 8000, max: Infinity }
-];
+// Salary tiers per site. FanDuel and Yahoo break at the same share of the
+// cap as DraftKings' 4K/6K/8K on $50K (8%, 12%, 16%): 4.8K/7.2K/9.6K on
+// FanDuel's $60K and $16/$24/$32 on Yahoo's $200. A tier runs from its min up
+// to the next tier's min.
+export const SALARY_TIERS_BY_SITE = Object.freeze({
+  draftkings: [
+    { label: '<4K', min: 0 },
+    { label: '4K-5.9K', min: 4000 },
+    { label: '6K-7.9K', min: 6000 },
+    { label: '8K+', min: 8000 }
+  ],
+  fanduel: [
+    { label: '<4.8K', min: 0 },
+    { label: '4.8K-7.1K', min: 4800 },
+    { label: '7.2K-9.5K', min: 7200 },
+    { label: '9.6K+', min: 9600 }
+  ],
+  yahoo: [
+    { label: '<$16', min: 0 },
+    { label: '$16-23', min: 16 },
+    { label: '$24-31', min: 24 },
+    { label: '$32+', min: 32 }
+  ]
+});
+
+export const SALARY_TIERS = SALARY_TIERS_BY_SITE[DEFAULT_SITE];
+
+export const salaryTiers = (site) => SALARY_TIERS_BY_SITE[getSiteConfig(site).key];
 
 export const DK_POSITIONS = ['PG', 'SG', 'SF', 'PF', 'C'];
 
@@ -117,10 +139,10 @@ export function resolveRawProjection(row, raw = parseRawData(row.raw_data)) {
   return toNum(raw?.pts ?? raw?.points ?? raw?.proj);
 }
 
-export function salaryTier(salary) {
+export function salaryTier(salary, site = DEFAULT_SITE) {
   const s = toNum(salary);
-  if (s === null) return 'unknown';
-  return (SALARY_TIERS.find(t => s >= t.min && s <= t.max) || { label: 'unknown' }).label;
+  if (s === null || s < 0) return 'unknown';
+  return salaryTiers(site).findLast(t => s >= t.min).label;
 }
 
 /**
@@ -366,7 +388,7 @@ export function joinProjectionsToActuals(playerRows, gameRows, { factorFn = null
 /**
  * Build the full report from joined samples.
  */
-export function buildReport(samples, { unmatched = 0, skipped = 0, factorNames = [] } = {}) {
+export function buildReport(samples, { unmatched = 0, skipped = 0, factorNames = [], site = DEFAULT_SITE } = {}) {
   const overall = summarizeGroup(samples);
   const withRaw = samples.filter(s => Number.isFinite(s.rawProjection));
   const adjustedRows = withRaw.filter(s => Math.abs(s.projected - s.rawProjection) > 0.05);
@@ -389,7 +411,7 @@ export function buildReport(samples, { unmatched = 0, skipped = 0, factorNames =
     // Accuracy restricted to rows where our projection differs from RotoWire:
     // the cleanest read on whether the adjustments themselves help.
     adjustedOnly: adjustedRows.length ? summarizeGroup(adjustedRows) : null,
-    bySalaryTier: breakdownBy(samples, s => salaryTier(s.salary), SALARY_TIERS.map(t => t.label)),
+    bySalaryTier: breakdownBy(samples, s => salaryTier(s.salary, site), salaryTiers(site).map(t => t.label)),
     byPosition: breakdownBy(samples, s => basePositions(s.position), DK_POSITIONS),
     factors,
     insights: buildInsights({ overall, adjustedRows, factors, sampleSize: samples.length })
@@ -514,7 +536,7 @@ export async function runProjectionBacktest(options = {}) {
   }
 
   const { samples, unmatched, skipped } = joinProjectionsToActuals(inRange, gameRows, { factorFn, pointsColumn });
-  const report = buildReport(samples, { unmatched, skipped, factorNames: includeFactors ? FACTOR_NAMES : [] });
+  const report = buildReport(samples, { unmatched, skipped, factorNames: includeFactors ? FACTOR_NAMES : [], site });
   report.generatedAt = new Date().toISOString();
   report.filters = { from, to, slateId, site };
   if (includeSamples) {

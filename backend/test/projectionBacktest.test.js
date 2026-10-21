@@ -59,6 +59,22 @@ test('helpers: names, dates, tiers, positions, raw projection', () => {
   assert.equal(svc.salaryTier(3500), '<4K');
   assert.equal(svc.salaryTier(6000), '6K-7.9K');
   assert.equal(svc.salaryTier(9200), '8K+');
+  assert.equal(svc.salaryTier(9200, 'draftkings'), '8K+');
+});
+
+test('salary tiers are site-aware: same share of the cap as DK 4K/6K/8K', () => {
+  assert.deepEqual(svc.salaryTiers('fanduel').map(t => t.label), ['<4.8K', '4.8K-7.1K', '7.2K-9.5K', '9.6K+']);
+  assert.equal(svc.salaryTier(4700, 'fanduel'), '<4.8K');
+  assert.equal(svc.salaryTier(4800, 'fanduel'), '4.8K-7.1K');
+  assert.equal(svc.salaryTier(9500, 'fanduel'), '7.2K-9.5K');
+  assert.equal(svc.salaryTier(10500, 'fanduel'), '9.6K+');
+  assert.deepEqual(svc.salaryTiers('yahoo').map(t => t.label), ['<$16', '$16-23', '$24-31', '$32+']);
+  assert.equal(svc.salaryTier(15, 'yahoo'), '<$16');
+  assert.equal(svc.salaryTier(16, 'yahoo'), '$16-23');
+  assert.equal(svc.salaryTier(31.5, 'yahoo'), '$24-31');
+  assert.equal(svc.salaryTier(45, 'yahoo'), '$32+');
+  assert.equal(svc.salaryTier(null, 'yahoo'), 'unknown');
+  assert.deepEqual(svc.salaryTiers().map(t => t.label), svc.SALARY_TIERS.map(t => t.label));
   assert.deepEqual(svc.basePositions('PG,SG,G,UTIL'), ['PG', 'SG']);
   assert.equal(svc.resolveRawProjection({ rotowire_projection: 30, raw_data: '{"pts":"25"}' }), 30);
   assert.equal(svc.resolveRawProjection({ rotowire_projection: null, raw_data: '{"pts":"25.5"}' }), 25.5);
@@ -162,6 +178,7 @@ test('runProjectionBacktest scores snapshots after the live slate is gone, by pl
   assert.equal(fd.sample.playerGames, 1);
   assert.equal(fd.overall.mae, 8); // 55 - 47 FanDuel points
   assert.equal(fd.filters.site, 'fanduel');
+  assert.deepEqual(fd.bySalaryTier.map(t => t.group), ['9.6K+']); // $10,500 on FanDuel
 });
 
 async function insertSnapshot(slateId, site, gameDate, name, team, position, salary, proj, floor, ceiling) {
