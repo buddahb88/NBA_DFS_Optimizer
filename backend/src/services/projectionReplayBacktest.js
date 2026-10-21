@@ -87,7 +87,7 @@ export function inferOutPlayers(prior, todayByTeam) {
  * Point-in-time archetype DVP contexts: contextFor(date) aggregates the
  * date's season's expectation rows before that date.
  */
-async function createDvpContexts(site) {
+export async function createDvpContexts(site) {
   const seasons = new Map();
   const loadSeason = async (season) => {
     if (!seasons.has(season)) {
