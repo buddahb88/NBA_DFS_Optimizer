@@ -18,9 +18,11 @@
  *   for players whose season_avg is at least minAvg (default STREAK_MIN_AVG).
  * - consistency_score = 100 * (1 - coefficient of variation), floored at 0;
  *   sd = 0 scores 100.
- * - A player "without" a teammate: the team's games (team_game_stats) between the
- *   teammate's first and last appearance for that team this season (a box score
- *   row or a game_player_status listing) in which he has no minutes > 0 row.
+ * - A player "without" a teammate: the team's games (team_game_stats) from the
+ *   teammate's first appearance for that team this season (a box score row or a
+ *   game_player_status listing) through the window's end, in which he has no
+ *   minutes > 0 row. He is a missing regular only if his latest team is this
+ *   one, so a season-ending absence counts and a trade ends the span.
  *   ESPN lists only healthy DNP-CD players, so injured players are usually
  *   absent; game_player_status (or a minutes = 0 row) only labels the absence
  *   DNP-CD, anything else is OUT.
@@ -533,7 +535,7 @@ class InsightsService {
       WITH missing(player_key, team) AS (${valuesSql(missingRows, 2)}),
       slate(player_key, team) AS (${valuesSql(slateRows, 2)}),
       roster AS (
-        SELECT m.player_key, m.team, MIN(a.game_date) AS first_date, MAX(a.game_date) AS last_date
+        SELECT m.player_key, m.team, MIN(a.game_date) AS first_date
         FROM missing m
         JOIN (
           SELECT player_key, team, game_date FROM historical_games WHERE 1 = 1${range.sql}
@@ -556,7 +558,7 @@ class InsightsService {
             WHERE z.game_id = t.game_id AND z.player_key = r.player_key AND COALESCE(z.minutes, 0) = 0
           ) THEN 1 ELSE 0 END AS dnp
         FROM roster r
-        JOIN team_game_stats t ON t.team = r.team AND t.game_date >= r.first_date AND t.game_date <= r.last_date
+        JOIN team_game_stats t ON t.team = r.team AND t.game_date >= r.first_date AND t.game_date <= ?
       )
       SELECT l.missing_key, l.team, h.player_key,
         SUM(CASE WHEN l.played = 0 THEN 1 ELSE 0 END) AS games_without,
@@ -571,7 +573,7 @@ class InsightsService {
       JOIN slate sl ON sl.player_key = h.player_key AND sl.team = h.team
       WHERE h.minutes > 0 AND h.${col} IS NOT NULL AND h.player_key <> l.missing_key
       GROUP BY l.missing_key, l.team, h.player_key
-    `, [...missingRows.flat(), ...slateRows.flat(), ...range.params, ...range.params]);
+    `, [...missingRows.flat(), ...slateRows.flat(), ...range.params, ...range.params, window.endDate]);
 
     const missingByKey = new Map(missing.map(m => [`${m.player_key}|${m.team}`, m]));
     const slateByKey = new Map(slate.map(p => [`${p.key}|${p.team}`, p]));

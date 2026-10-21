@@ -84,7 +84,7 @@ async function seed() {
 
   // ── PHI: a missing player absent from the box score entirely ───────
   // ESPN lists only healthy DNP-CD players; Oubre has no game_player_status
-  // rows except one DNP. P0..P13 in March, P14 after his last appearance.
+  // rows except one DNP. P0..P13 in March, then out for the season (P14).
   // Low scores keep both out of the league-wide consistency cards.
   const P = Array.from({ length: 15 }, (_, i) => d(2 * i));
   const ABSENT = new Set([2, 5, 8]);
@@ -434,15 +434,22 @@ describe('missing players and usage bumps', () => {
     assert.equal(bumps.length, 1);
     const maxey = bumps[0];
     assert.equal(maxey.missingPlayer, 'Kelly Oubre Jr.');
-    // P2, P5, P8 (no rows at all) + P11 (DNP); January and P14 are outside his PHI span
-    assert.equal(maxey.gamesWithout, 4);
+    // P2, P5, P8 (no rows at all) + P11 (DNP) + P14 (after his last game); January is before he joined
+    assert.equal(maxey.gamesWithout, 5);
     assert.equal(maxey.gamesWith, 10);
-    assert.equal(maxey.avgWithout, 15);
+    assert.equal(maxey.avgWithout, 18);
     assert.equal(maxey.avgWith, 10);
-    assert.equal(maxey.pctBump, 50);
+    assert.equal(maxey.pctBump, 80);
     assert.equal(maxey.gamesWithoutDnp, 1);
-    assert.equal(maxey.gamesWithoutOut, 3);
+    assert.equal(maxey.gamesWithoutOut, 4);
     assert.equal(maxey.absenceReason, 'MIXED');
+  });
+
+  test('a season-ending absence counts through endDate, not past it', async () => {
+    // P14 is 2026-03-29: outside a window ending the day before
+    const [maxey] = await insights.detectUsageBumps([{ name: 'Tyrese Maxey', team: 'PHI' }], { endDate: '2026-03-28', minAvgDk: 15 });
+    assert.equal(maxey.gamesWithout, 4);
+    assert.equal(maxey.avgWithout, 15);
   });
 
   test('usage bumps accept a site and trimmed payload', async () => {
