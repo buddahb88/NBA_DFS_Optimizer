@@ -17,18 +17,47 @@ const easternDate = (d) => new Intl.DateTimeFormat('en-CA', {
   timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit'
 }).format(d);
 
+// Eastern date of slates.start_time when it is a full timestamp, else null
+function startTimeDate(startTime) {
+  if (startTime instanceof Date && !isNaN(startTime)) return easternDate(startTime);
+  if (typeof startTime === 'string' && /^\d{4}-\d{2}-\d{2}/.test(startTime)) {
+    const parsed = new Date(startTime);
+    if (!isNaN(parsed)) return easternDate(parsed);
+  }
+  return null;
+}
+
 /**
  * Slate game date: Eastern date of slates.start_time when it is a full
  * timestamp (salary imports), else the Eastern date of capture (RotoWire
  * syncs store only a time of day like "7:00 PM").
  */
 export function slateGameDate(startTime, now = new Date()) {
-  if (startTime instanceof Date && !isNaN(startTime)) return easternDate(startTime);
-  if (typeof startTime === 'string' && /^\d{4}-\d{2}-\d{2}/.test(startTime)) {
-    const parsed = new Date(startTime);
-    if (!isNaN(parsed)) return easternDate(parsed);
+  return startTimeDate(startTime) ?? easternDate(now);
+}
+
+/**
+ * RotoWire game date for a players row: the date part of raw_data
+ * game.dateTime (Eastern wall time, e.g. "2026-10-20 21:30:00"), else null.
+ */
+export function rotowireGameDate(rawData) {
+  let raw = rawData;
+  if (typeof raw === 'string') {
+    try { raw = JSON.parse(raw); } catch { return null; }
   }
-  return easternDate(now);
+  const value = raw?.game?.dateTime ?? raw?.game?.date;
+  const m = typeof value === 'string' ? value.match(/^(\d{4}-\d{2}-\d{2})/) : null;
+  return m ? m[1] : null;
+}
+
+/**
+ * Game date for one snapshot row: a full slate start_time (salary imports,
+ * authoritative for that slate), else the player's RotoWire game.dateTime
+ * (so a slate synced the day after its games keeps the real date), else the
+ * Eastern capture date.
+ */
+export function playerGameDate(player, startTime, now = new Date()) {
+  return startTimeDate(startTime) ?? rotowireGameDate(player.raw_data) ?? easternDate(now);
 }
 
 const UPSERT_SQLITE = `
@@ -89,7 +118,6 @@ export async function snapshotSlate(slateId, { now = new Date() } = {}) {
   if (!slate) return 0;
   const players = await db.all(`SELECT * FROM players WHERE slate_id = ?`, slateId);
 
-  const gameDate = slateGameDate(slate.start_time, now);
   const site = slate.site || DEFAULT_SITE;
   const snapshotDate = easternDate(now);
   const capturedAt = DATABASE_TYPE === 'azuresql' ? now : now.toISOString();
@@ -99,7 +127,7 @@ export async function snapshotSlate(slateId, { now = new Date() } = {}) {
     const key = playerKey(p.name);
     if (!key) continue;
     const row = {
-      snapshotDate, gameDate, slateId, site, playerKey: key,
+      snapshotDate, gameDate: playerGameDate(p, slate.start_time, now), slateId, site, playerKey: key,
       playerName: p.name,
       team: p.team ?? null,
       opponent: p.opponent ?? null,
@@ -137,4 +165,4 @@ export async function snapshotAllSlates(options = {}) {
   return written;
 }
 
-export default { snapshotSlate, snapshotAllSlates, slateGameDate };
+export default { snapshotSlate, snapshotAllSlates, slateGameDate, playerGameDate, rotowireGameDate };

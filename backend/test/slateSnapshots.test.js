@@ -165,6 +165,31 @@ describe('snapshotSlate', () => {
     assert.equal(row.site, 'draftkings');
   });
 
+  test('RotoWire slate synced the day after uses each player\'s game.dateTime, not the capture date', async () => {
+    const raw = (dateTime) => JSON.stringify({ game: { dateTime } });
+    await seedSlate('s1', [
+      rwPlayer('rw1', 'Victor Wembanyama', { rawData: raw('2026-10-20 21:30:00') }),
+      // No raw_data date: falls back to the capture date
+      rwPlayer('rw2', 'Luka Doncic')
+    ], { startTime: '7:00 PM' });
+    // 12:41 PM ET on the 21st, after the 20th's games
+    await snapshots.snapshotSlate('s1', { now: new Date('2026-10-21T16:41:00Z') });
+
+    const rows = await snapshotRows();
+    const wemby = rows.find(r => r.player_key === 'victor wembanyama');
+    assert.equal(wemby.game_date, '2026-10-20');
+    assert.equal(wemby.snapshot_date, '2026-10-21');
+    assert.equal(rows.find(r => r.player_key === 'luka doncic').game_date, '2026-10-21');
+  });
+
+  test('a full slate start_time (salary import) wins over RotoWire raw_data', async () => {
+    await seedSlate('s1', [rwPlayer('rw1', 'Luka Doncic', { rawData: JSON.stringify({ game: { dateTime: '2026-10-19 19:00:00' } }) })],
+      { startTime: '2026-10-22T02:30:00.000Z' });
+    await snapshots.snapshotSlate('s1', { now: new Date('2026-10-21T16:00:00Z') });
+    const [row] = await snapshotRows();
+    assert.equal(row.game_date, '2026-10-21');
+  });
+
   test('re-snapshotting the same slate updates the latest values instead of duplicating', async () => {
     await seedSlate('s1', [rwPlayer('rw1', 'Luka Doncic'), rwPlayer('rw2', 'LeBron James')],
       { startTime: '2026-10-21T23:00:00.000Z' });
