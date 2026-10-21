@@ -11,6 +11,7 @@ import pLimit from 'p-limit';
 import db from '../config/database.js';
 import { computeFantasyPoints } from './scoring.js';
 import { getCurrentSeason, seasonForDate } from '../utils/season.js';
+import { playerKey, canonicalTeam } from '../utils/playerKey.js';
 
 const DATABASE_TYPE = process.env.DATABASE_TYPE || 'sqlite';
 
@@ -54,16 +55,11 @@ class NBAStatsService {
   }
 
   /**
-   * Normalize a name by removing diacritics and converting to lowercase
-   * e.g., "Luka Dončić" → "luka doncic"
+   * Normalize a name to its player_key (see utils/playerKey.js)
+   * e.g., "Luka Dončić" → "luka doncic", "Jaren Jackson Jr." → "jaren jackson"
    */
   normalizeName(name) {
-    if (!name) return '';
-    return name
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .toLowerCase()
-      .trim();
+    return playerKey(name);
   }
 
   /**
@@ -288,7 +284,7 @@ class NBAStatsService {
             ON target.player_id = source.player_id AND target.game_id = source.game_id
             WHEN MATCHED THEN
               UPDATE SET
-                player_name = @player_name, team = @team, opponent = @opponent, position = @position,
+                player_name = @player_name, player_key = @player_key, team = @team, opponent = @opponent, position = @position,
                 game_date = @game_date, season = @season, is_home = @is_home,
                 minutes = @minutes, points = @points, rebounds = @rebounds, assists = @assists,
                 steals = @steals, blocks = @blocks, turnovers = @turnovers,
@@ -298,19 +294,20 @@ class NBAStatsService {
                 dk_fantasy_points = @dk_fantasy_points, fd_fantasy_points = @fd_fantasy_points,
                 yahoo_fantasy_points = @yahoo_fantasy_points, rest_days = @rest_days, is_back_to_back = @is_back_to_back
             WHEN NOT MATCHED THEN
-              INSERT (player_id, player_name, team, opponent, position, game_id, game_date, season, is_home,
+              INSERT (player_id, player_name, player_key, team, opponent, position, game_id, game_date, season, is_home,
                       minutes, points, rebounds, assists, steals, blocks, turnovers,
                       fg_made, fg_attempted, fg3_made, fg3_attempted, ft_made, ft_attempted,
                       oreb, dreb, plus_minus, dk_fantasy_points, fd_fantasy_points, yahoo_fantasy_points, rest_days, is_back_to_back)
-              VALUES (@player_id, @player_name, @team, @opponent, @position, @game_id, @game_date, @season, @is_home,
+              VALUES (@player_id, @player_name, @player_key, @team, @opponent, @position, @game_id, @game_date, @season, @is_home,
                       @minutes, @points, @rebounds, @assists, @steals, @blocks, @turnovers,
                       @fg_made, @fg_attempted, @fg3_made, @fg3_attempted, @ft_made, @ft_attempted,
                       @oreb, @dreb, @plus_minus, @dk_fantasy_points, @fd_fantasy_points, @yahoo_fantasy_points, @rest_days, @is_back_to_back);
           `, {
             player_id: game.player_id,
             player_name: game.player_name,
-            team: game.team,
-            opponent: game.opponent,
+            player_key: playerKey(game.player_name),
+            team: canonicalTeam(game.team),
+            opponent: canonicalTeam(game.opponent),
             position: game.position || null,
             game_id: game.game_id,
             game_date: game.game_date,
@@ -349,12 +346,12 @@ class NBAStatsService {
       // SQLite: Use transaction with prepared statement
       const stmt = db.prepare(`
         INSERT OR REPLACE INTO historical_games (
-          player_id, player_name, team, opponent, position, game_id, game_date, season, is_home,
+          player_id, player_name, player_key, team, opponent, position, game_id, game_date, season, is_home,
           minutes, points, rebounds, assists, steals, blocks, turnovers,
           fg_made, fg_attempted, fg3_made, fg3_attempted, ft_made, ft_attempted,
           oreb, dreb, plus_minus, dk_fantasy_points, fd_fantasy_points, yahoo_fantasy_points, rest_days, is_back_to_back
         ) VALUES (
-          @player_id, @player_name, @team, @opponent, @position, @game_id, @game_date, @season, @is_home,
+          @player_id, @player_name, @player_key, @team, @opponent, @position, @game_id, @game_date, @season, @is_home,
           @minutes, @points, @rebounds, @assists, @steals, @blocks, @turnovers,
           @fg_made, @fg_attempted, @fg3_made, @fg3_attempted, @ft_made, @ft_attempted,
           @oreb, @dreb, @plus_minus, @dk_fantasy_points, @fd_fantasy_points, @yahoo_fantasy_points, @rest_days, @is_back_to_back
@@ -368,8 +365,9 @@ class NBAStatsService {
             stmt.run({
               player_id: game.player_id,
               player_name: game.player_name,
-              team: game.team,
-              opponent: game.opponent,
+              player_key: playerKey(game.player_name),
+              team: canonicalTeam(game.team),
+              opponent: canonicalTeam(game.opponent),
               position: game.position || null,
               game_id: game.game_id,
               game_date: game.game_date,
@@ -964,8 +962,9 @@ class NBAStatsService {
     const gameData = {
       player_id: null, // Not available from Basketball Reference
       player_name: game.player_name,
-      team: this.teamAbbreviations[game.team] || game.team, // Convert full name to abbrev if needed
-      opponent: this.teamAbbreviations[game.opponent] || game.opponent,
+      player_key: playerKey(game.player_name),
+      team: canonicalTeam(this.teamAbbreviations[game.team] || game.team), // Convert full name to abbrev if needed
+      opponent: canonicalTeam(this.teamAbbreviations[game.opponent] || game.opponent),
       position: null,
       game_id: `${game.game_date}_${game.team}_${game.opponent}`, // Generate unique ID
       game_date: game.game_date,
@@ -1010,11 +1009,11 @@ class NBAStatsService {
           USING (SELECT @game_id AS game_id, @player_name AS player_name) AS source
           ON target.game_id = source.game_id AND target.player_name = source.player_name
           WHEN NOT MATCHED THEN
-            INSERT (player_id, player_name, team, opponent, position, game_id, game_date, season, is_home,
+            INSERT (player_id, player_name, player_key, team, opponent, position, game_id, game_date, season, is_home,
                     minutes, points, rebounds, assists, steals, blocks, turnovers,
                     fg_made, fg_attempted, fg3_made, fg3_attempted, ft_made, ft_attempted,
                     oreb, dreb, plus_minus, dk_fantasy_points, fd_fantasy_points, yahoo_fantasy_points, rest_days, is_back_to_back)
-            VALUES (@player_id, @player_name, @team, @opponent, @position, @game_id, @game_date, @season, @is_home,
+            VALUES (@player_id, @player_name, @player_key, @team, @opponent, @position, @game_id, @game_date, @season, @is_home,
                     @minutes, @points, @rebounds, @assists, @steals, @blocks, @turnovers,
                     @fg_made, @fg_attempted, @fg3_made, @fg3_attempted, @ft_made, @ft_attempted,
                     @oreb, @dreb, @plus_minus, @dk_fantasy_points, @fd_fantasy_points, @yahoo_fantasy_points, @rest_days, @is_back_to_back);
@@ -1023,12 +1022,12 @@ class NBAStatsService {
       } else {
         const result = await db.run(`
           INSERT OR IGNORE INTO historical_games (
-            player_id, player_name, team, opponent, position, game_id, game_date, season, is_home,
+            player_id, player_name, player_key, team, opponent, position, game_id, game_date, season, is_home,
             minutes, points, rebounds, assists, steals, blocks, turnovers,
             fg_made, fg_attempted, fg3_made, fg3_attempted, ft_made, ft_attempted,
             oreb, dreb, plus_minus, dk_fantasy_points, fd_fantasy_points, yahoo_fantasy_points, rest_days, is_back_to_back
           ) VALUES (
-            @player_id, @player_name, @team, @opponent, @position, @game_id, @game_date, @season, @is_home,
+            @player_id, @player_name, @player_key, @team, @opponent, @position, @game_id, @game_date, @season, @is_home,
             @minutes, @points, @rebounds, @assists, @steals, @blocks, @turnovers,
             @fg_made, @fg_attempted, @fg3_made, @fg3_attempted, @ft_made, @ft_attempted,
             @oreb, @dreb, @plus_minus, @dk_fantasy_points, @fd_fantasy_points, @yahoo_fantasy_points, @rest_days, @is_back_to_back

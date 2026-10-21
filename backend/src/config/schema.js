@@ -3,6 +3,7 @@ import { migrateSiteColumns } from './siteMigrations.js';
 import { migrateSiteFantasyPoints } from './scoringMigrations.js';
 import { migrateProjectionOverrides } from './projectionOverrideMigrations.js';
 import { migratePlayerSettings } from './playerSettingsMigrations.js';
+import { migratePlayerKey } from './playerKeyMigrations.js';
 
 /**
  * Create all database tables
@@ -24,6 +25,9 @@ export const createTables = async (db) => {
 
   // historical_games.fd_fantasy_points / yahoo_fantasy_points
   await migrateSiteFantasyPoints(db);
+
+  // historical_games.player_key (+ backfill and (player_key, game_date) index)
+  await migratePlayerKey(db);
 
   // projection_overrides (manual minutes/points per slate)
   await migrateProjectionOverrides(db);
@@ -290,6 +294,10 @@ async function createAzureSqlTables(db) {
       CREATE INDEX idx_historical_season ON historical_games(season);
     IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_historical_team')
       CREATE INDEX idx_historical_team ON historical_games(team);
+    IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_historical_team_date')
+      CREATE INDEX idx_historical_team_date ON historical_games(team, game_date);
+    IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_historical_opponent_date')
+      CREATE INDEX idx_historical_opponent_date ON historical_games(opponent, game_date);
   `);
 
   console.log('✅ Azure SQL schema ready!');
@@ -564,6 +572,8 @@ async function createSqliteTables(db) {
     CREATE INDEX IF NOT EXISTS idx_historical_team ON historical_games(team);
     CREATE INDEX IF NOT EXISTS idx_historical_opponent ON historical_games(opponent);
     CREATE INDEX IF NOT EXISTS idx_historical_usg_pct ON historical_games(usg_pct);
+    CREATE INDEX IF NOT EXISTS idx_historical_team_date ON historical_games(team, game_date);
+    CREATE INDEX IF NOT EXISTS idx_historical_opponent_date ON historical_games(opponent, game_date);
   `);
 
   if (newTables.length > 0) {
