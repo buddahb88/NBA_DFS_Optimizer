@@ -5,6 +5,7 @@ import rotowireService from '../services/rotowireService.js';
 import espnScraperService from '../services/espnScraperService.js';
 import hashtagBasketballService from '../services/hashtagBasketballService.js';
 import projectionService from '../services/projectionService.js';
+import { snapshotAllSlates, snapshotSlate } from '../services/slateSnapshotService.js';
 import { DEFAULT_SITE, isValidSite } from '../config/sites.js';
 
 const router = express.Router();
@@ -61,6 +62,10 @@ router.post('/:slateId/sync', async (req, res) => {
     // STEP 4: Clear existing data and store new slate + players
     console.log(`🔄 Step 4/4: Storing slate and player data...`);
 
+    // Keep the outgoing salaries/projections/ownership before they are wiped
+    const preserved = await snapshotAllSlates();
+    console.log(`  📸 Snapshotted ${preserved} player row(s) before clearing`);
+
     // Clear all existing slates and players (single active slate model)
     console.log(`  🗑️  Clearing existing slate data...`);
     await playerModel.deleteAll();
@@ -76,6 +81,7 @@ router.post('/:slateId/sync', async (req, res) => {
 
     // Bulk insert players (with defense-adjusted projections)
     await playerModel.bulkCreateOrUpdate(slateId, players);
+    await snapshotSlate(slateId);
 
     console.log(`✅ Complete! Synced ${players.length} players with matchup-adjusted projections (overall defense + pace + position defense)`);
 

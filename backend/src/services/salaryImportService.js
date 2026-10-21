@@ -20,6 +20,7 @@ import db, { DATABASE_TYPE } from '../config/database.js';
 import { getSiteConfig, getEligibleSlots, isValidSite } from '../config/sites.js';
 import { parseCsv } from '../utils/csvParser.js';
 import { normalizeName, normalizeTeam } from '../utils/nameNormalizer.js';
+import { snapshotSlate } from './slateSnapshotService.js';
 
 export class SalaryImportError extends Error {
   constructor(message, status = 400) {
@@ -490,6 +491,8 @@ export async function importSalaries({ csvText, site: siteHint, slateId, slateNa
   report.missingFromCsv = slateRows
     .filter(r => !claimed.has(r.id))
     .map(r => ({ name: r.name, team: r.team, salary: r.salary }));
+
+  await snapshotSlate(targetId);
 
   return report;
 }

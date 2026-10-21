@@ -4,6 +4,8 @@ import { migrateSiteFantasyPoints } from './scoringMigrations.js';
 import { migrateProjectionOverrides } from './projectionOverrideMigrations.js';
 import { migratePlayerSettings } from './playerSettingsMigrations.js';
 import { migratePlayerKey } from './playerKeyMigrations.js';
+import { migrateLineupPersistence } from './lineupMigrations.js';
+import { migrateSlatePlayerSnapshots } from './snapshotMigrations.js';
 
 /**
  * Create all database tables
@@ -28,6 +30,12 @@ export const createTables = async (db) => {
 
   // historical_games.player_key (+ backfill and (player_key, game_date) index)
   await migratePlayerKey(db);
+
+  // Saved lineups survive slate resyncs (no slate/player cascades, denormalized players)
+  await migrateLineupPersistence(db);
+
+  // slate_player_snapshots (salary/projection/ownership/Vegas history across syncs)
+  await migrateSlatePlayerSnapshots(db);
 
   // projection_overrides (manual minutes/points per slate)
   await migrateProjectionOverrides(db);
@@ -429,8 +437,7 @@ async function createSqliteTables(db) {
       total_salary INTEGER NOT NULL,
       projected_points REAL,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (slate_id) REFERENCES slates(slate_id) ON DELETE CASCADE
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
 
@@ -441,8 +448,7 @@ async function createSqliteTables(db) {
       lineup_id INTEGER NOT NULL,
       player_id INTEGER NOT NULL,
       position_slot TEXT NOT NULL,
-      FOREIGN KEY (lineup_id) REFERENCES lineups(id) ON DELETE CASCADE,
-      FOREIGN KEY (player_id) REFERENCES players(id) ON DELETE CASCADE
+      FOREIGN KEY (lineup_id) REFERENCES lineups(id) ON DELETE CASCADE
     )
   `);
 
