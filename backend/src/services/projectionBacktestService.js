@@ -17,7 +17,8 @@
  *   - Comparison against the raw RotoWire projection (rotowire_projection
  *     column, falling back to raw_data.pts) to see if our adjustments help
  *   - Per-factor attribution for the stateless adjustment factors in
- *     projectionService (defense, dvp, pace, rest, vegas, blowout)
+ *     projectionService (defense, dvp, pace, rest, vegas, blowout), plus
+ *     dvp_legacy (the old points-allowed DVP) to compare against dvp
  *
  * The pure metric functions are exported separately so they can be unit
  * tested without a database.
@@ -452,7 +453,7 @@ function buildInsights({ overall, adjustedRows, factors, sampleSize }) {
 // Database loading
 // ---------------------------------------------------------------------------
 
-export const FACTOR_NAMES = ['defense', 'dvp', 'pace', 'rest', 'vegas', 'blowout'];
+export const FACTOR_NAMES = ['defense', 'dvp', 'dvp_legacy', 'pace', 'rest', 'vegas', 'blowout'];
 
 /**
  * Recompute the stateless adjustment factors from stored player fields using
@@ -460,10 +461,11 @@ export const FACTOR_NAMES = ['defense', 'dvp', 'pace', 'rest', 'vegas', 'blowout
  * pace and the defense/DVP fallbacks use *current* team defense tables, not
  * point-in-time values.
  */
-function computeFactors(row) {
+function computeFactors(row, dvpOptions = {}) {
   return {
     defense: projectionService.getDefenseAdjustment(row.opponent, toNum(row.opp_def_eff)),
-    dvp: projectionService.getDvpAdjustment(row.opponent, row.position, toNum(row.dvp_pts_allowed)),
+    dvp: projectionService.getDvpAdjustment({ ...row, dvp_pts_allowed: toNum(row.dvp_pts_allowed) }, dvpOptions),
+    dvp_legacy: projectionService.getLegacyDvpAdjustment(row.opponent, row.position, toNum(row.dvp_pts_allowed)),
     pace: projectionService.getPaceAdjustment(row.opponent, row.team),
     rest: projectionService.getRestAdjustment(toNum(row.rest_days)),
     vegas: projectionService.getVegasAdjustment(toNum(row.vegas_implied_total), toNum(row.vegas_over_under)),
@@ -526,13 +528,13 @@ export async function runProjectionBacktest(options = {}) {
 
   let factorFn = null;
   if (includeFactors) {
+    let dvpOptions = {};
     try {
-      await projectionService.loadDefenseRankings();
-      await projectionService.loadPositionDefenseData();
+      dvpOptions = await projectionService.loadMatchupData({ site });
     } catch (e) {
       // Tables may be empty/missing; factors that need them evaluate to 0.
     }
-    factorFn = computeFactors;
+    factorFn = (row) => computeFactors(row, dvpOptions);
   }
 
   const { samples, unmatched, skipped } = joinProjectionsToActuals(inRange, gameRows, { factorFn, pointsColumn });

@@ -15,6 +15,9 @@
  * compares the legacy model with the minutes x FPPM model):
  *   node scripts/projectionBacktest.js --replay [--from ...] [--to ...]
  *                                      [--site draftkings|fanduel|yahoo] [--no-legacy] [--json]
+ *                                      [--dvp [--dvp-weights 0.25,0.5,1] [--dvp-cap 2]]
+ *   --dvp also re-runs the legacy model with DVP off, the old points-allowed
+ *   DVP and the archetype DVP at each weight, to compare the DVP signals.
  *
  * Works with SQLite (default) or Azure SQL (DATABASE_TYPE=azuresql in backend/.env).
  */
@@ -60,6 +63,16 @@ function printMetricTable(title, rows) {
   }
 }
 
+function dvpVariants() {
+  const weights = (argValue('--dvp-weights') || '0.25,0.5,0.75,1').split(',').map(Number);
+  const cap = argValue('--dvp-cap') !== null ? Number(argValue('--dvp-cap')) : undefined;
+  return [
+    { label: 'dvp off', mode: 'off' },
+    { label: 'dvp legacy (pts allowed)', mode: 'legacy' },
+    ...weights.map(weight => ({ label: `dvp archetype w=${weight}`, mode: 'archetype', weight, cap }))
+  ];
+}
+
 function printReplay(report) {
   const row = (label, m) => console.log(
     `${label.padEnd(26)}${pad(m?.n ?? 0, 7)}${pad(fmt(m?.mae), 8)}${pad(fmt(m?.rmse), 8)}${pad(fmt(m?.bias), 8)}${pad(fmt(m?.r2, 3), 8)}${pad(fmt(m?.correlation, 3), 8)}`
@@ -80,6 +93,14 @@ function printReplay(report) {
   row('minutes x FPPM', report.points.minutesModel);
   row('minutes x FPPM, no injury', report.points.minutesModelNoInjury);
   for (const b of report.blends) row(`blend w=${b.weight}`, b);
+
+  if (report.dvpVariants?.length) {
+    console.log('\nLEGACY MODEL BY DVP SIGNAL (adj = rows with a non-zero DVP, |adj| = mean size)');
+    console.log(`${''.padEnd(26)}${pad('n', 7)}${pad('MAE', 8)}${pad('RMSE', 8)}${pad('bias', 8)}${pad('adj', 8)}${pad('|adj|', 8)}`);
+    for (const v of report.dvpVariants) {
+      console.log(`${v.label.padEnd(26)}${pad(v.n, 7)}${pad(fmt(v.mae, 3), 8)}${pad(fmt(v.rmse, 3), 8)}${pad(fmt(v.bias, 3), 8)}${pad(v.adjusted, 8)}${pad(fmt(v.meanAbsAdjustment), 8)}`);
+    }
+  }
 
   console.log('\nTEAMMATE OUT ROWS ONLY');
   header();
@@ -106,7 +127,8 @@ try {
       from: options.from,
       to: options.to,
       site: argValue('--site') || 'draftkings',
-      legacy: !args.includes('--no-legacy')
+      legacy: !args.includes('--no-legacy'),
+      dvpVariants: args.includes('--dvp') ? dvpVariants() : []
     });
     if (asJson) console.log(JSON.stringify(report, null, 2));
     else printReplay(report);

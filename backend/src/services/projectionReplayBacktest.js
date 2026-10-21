@@ -12,6 +12,8 @@
  *              blend + adjustments, no RotoWire input available in replay)
  *   - minutes: minutes x FPPM model, with and without injury redistribution
  *   - blends of the two at several weights
+ *   - optionally (dvpVariants) the legacy model under several DVP settings,
+ *     e.g. off vs legacy points-allowed vs archetype defense at a few weights
  *
  * Replay limits (read results with these in mind):
  *   - No RotoWire projections, Vegas lines or injury reports exist for past
@@ -19,6 +21,9 @@
  *     who appeared in the team's recent games but has no box score that day.
  *   - Only players who played are scored (DNPs have no box score row).
  *   - Defense rankings used by the legacy model are current, not point-in-time.
+ *     The archetype DVP is point-in-time: team_archetype_defense is rebuilt
+ *     for each date from that season's games before it (the prior season's
+ *     full table before the first game). Archetype labels are season-level.
  */
 
 import db from '../config/database.js';
@@ -26,6 +31,9 @@ import projectionService from './projectionService.js';
 import { computeErrorMetrics } from './projectionBacktestService.js';
 import { HISTORY_COLUMNS, toGameLogs } from './minutesProjectionService.js';
 import { blendProjection, playerKey, projectPlayers, resolveConfig } from './minutesModel.js';
+import { aggregateDefense, GROUPINGS, loadSeasonExpectations, previousSeason } from './archetypeDefenseService.js';
+import { buildDvpContext } from './dvpAdjustment.js';
+import { seasonForDate } from '../utils/season.js';
 
 const DEFAULT_WEIGHTS = [0, 0.25, 0.4, 0.5, 0.6, 0.75, 1];
 const WARMUP_DAYS = 14;
@@ -75,6 +83,40 @@ export function inferOutPlayers(prior, todayByTeam) {
   return out;
 }
 
+/**
+ * Point-in-time archetype DVP contexts: contextFor(date) aggregates the
+ * date's season's expectation rows before that date.
+ */
+async function createDvpContexts(site) {
+  const seasons = new Map();
+  const loadSeason = async (season) => {
+    if (!seasons.has(season)) {
+      const [games, archetypes] = await Promise.all([
+        loadSeasonExpectations(season),
+        db.all('SELECT player_key, archetype FROM player_archetypes WHERE season = ?', season)
+      ]);
+      seasons.set(season, { games, archetypes: new Map(archetypes.map(r => [r.player_key, r.archetype])) });
+    }
+    return seasons.get(season);
+  };
+  const aggregate = (games) => GROUPINGS.flatMap(grouping => aggregateDefense(games, { site, grouping }));
+
+  return async function contextFor(date) {
+    const season = seasonForDate(date);
+    const prior = previousSeason(season);
+    const current = await loadSeason(season);
+    const previous = await loadSeason(prior);
+    const before = current.games.filter(g => g.game_date < date);
+    return buildDvpContext({
+      defenseRows: before.length ? aggregate(before) : aggregate(previous.games),
+      archetypes: current.archetypes,
+      priorArchetypes: previous.archetypes,
+      season: before.length ? season : prior,
+      site
+    });
+  };
+}
+
 function summarize(samples, field) {
   return computeErrorMetrics(samples.map(s => ({ projected: s[field], actual: s.actual })));
 }
@@ -87,18 +129,21 @@ function summarize(samples, field) {
  * @param {number[]} [options.weights]
  * @param {boolean} [options.legacy=true] - also run the legacy model (slower)
  * @param {Object} [options.config] - minutes model config overrides
+ * @param {Array} [options.dvpVariants] - [{ label, mode, weight, cap }] DVP
+ *   configs to also run the legacy model under (needs legacy)
  */
 export async function runReplayBacktest(options = {}) {
   const { site = 'draftkings', weights = DEFAULT_WEIGHTS, legacy = true } = options;
+  const dvpVariants = legacy ? options.dvpVariants || [] : [];
   const config = resolveConfig(options.config);
 
   const rows = await db.all(`
-    SELECT ${HISTORY_COLUMNS}
+    SELECT ${HISTORY_COLUMNS}, position
     FROM historical_games
     WHERE minutes > 0
     ORDER BY game_date
   `);
-  const logs = toGameLogs(rows, site);
+  const logs = toGameLogs(rows, site).map((g, i) => ({ ...g, position: rows[i].position }));
   if (!logs.length) {
     return { sample: { playerGames: 0, dates: 0 }, insights: ['No box scores in historical_games.'] };
   }
@@ -108,9 +153,11 @@ export async function runReplayBacktest(options = {}) {
   const to = options.to || allDates[allDates.length - 1];
   const dates = allDates.filter(d => d >= from && d <= to);
 
+  const contextFor = legacy ? await createDvpContexts(site) : null;
   const samples = [];
   let priorEnd = 0;
   for (const date of dates) {
+    const dvpContext = contextFor ? await contextFor(date) : null;
     while (priorEnd < logs.length && logs[priorEnd].date < date) priorEnd++;
     const prior = logs.slice(0, priorEnd);
     const today = logs.filter(g => g.date === date);
@@ -139,15 +186,25 @@ export async function runReplayBacktest(options = {}) {
       if (!m.hasModel) continue;
 
       let legacyProjection = null;
+      const dvp = {};
       if (legacy) {
-        const result = await projectionService.calculateEnhancedProjection({
+        const player = {
           name: g.name,
           team: g.team,
           opponent: g.opponent,
+          position: g.position,
           rest_days: g.isB2B ? 0 : 1
-        }, { slateDate: date, site, isB2B: g.isB2B });
+        };
+        const project = (dvpConfig) => projectionService.calculateEnhancedProjection(player, {
+          slateDate: date, site, isB2B: g.isB2B, dvp: { config: dvpConfig, context: dvpContext }
+        });
+        const result = await project(undefined);
         if (!result.enhanced) continue;
         legacyProjection = result.enhanced_projection;
+        for (const v of dvpVariants) {
+          const r = await project({ mode: v.mode, weight: v.weight, cap: v.cap });
+          dvp[v.label] = { projected: r.enhanced_projection, adjustment: r.adjustments.dvp };
+        }
       }
 
       samples.push({
@@ -157,6 +214,7 @@ export async function runReplayBacktest(options = {}) {
         actual: g.fp,
         actualMinutes: g.minutes,
         legacy: legacyProjection,
+        dvp,
         minutes: m.points,
         minutesNoInjury: m0.points,
         projectedMinutes: m.minutes,
@@ -195,6 +253,17 @@ export async function runReplayBacktest(options = {}) {
       minutesModelNoInjury: summarize(samples, 'minutesNoInjury')
     },
     blends,
+    dvpVariants: dvpVariants.map(v => {
+      const rowsWithAdj = samples.filter(s => s.dvp[v.label]?.adjustment);
+      return {
+        ...v,
+        ...computeErrorMetrics(samples.map(s => ({ projected: s.dvp[v.label].projected, actual: s.actual }))),
+        adjusted: rowsWithAdj.length,
+        meanAbsAdjustment: rowsWithAdj.length
+          ? round(rowsWithAdj.reduce((sum, s) => sum + Math.abs(s.dvp[v.label].adjustment), 0) / rowsWithAdj.length)
+          : 0
+      };
+    }),
     injuryAffected: {
       legacy: legacy ? summarize(injured, 'legacy') : null,
       minutesModel: summarize(injured, 'minutes'),

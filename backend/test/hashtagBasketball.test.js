@@ -80,16 +80,16 @@ test('fetchAndStorePositionDefense surfaces upsert failures', async () => {
   }
 });
 
-test('getDvpAdjustment: pre-joined pts_allowed is real points centered near league average', () => {
-  const avg = projectionService.getDvpAdjustment('UTA', 'PG', projectionService.LEAGUE_AVG_DVP_PTS);
+test('getLegacyDvpAdjustment: pre-joined pts_allowed is real points centered near league average', () => {
+  const avg = projectionService.getLegacyDvpAdjustment('UTA', 'PG', projectionService.LEAGUE_AVG_DVP_PTS);
   assert.equal(avg, 0);
-  assert.ok(projectionService.getDvpAdjustment('UTA', 'PG', 26.3) > 0);
-  assert.ok(projectionService.getDvpAdjustment('NYK', 'C', 19.2) < 0);
+  assert.ok(projectionService.getLegacyDvpAdjustment('UTA', 'PG', 26.3) > 0);
+  assert.ok(projectionService.getLegacyDvpAdjustment('NYK', 'C', 19.2) < 0);
   // Realistic spread stays a modest adjustment
-  assert.ok(Math.abs(projectionService.getDvpAdjustment('UTA', 'PG', 26.3)) < 3);
+  assert.ok(Math.abs(projectionService.getLegacyDvpAdjustment('UTA', 'PG', 26.3)) < 3);
 });
 
-test('getDvpAdjustment: ignores implausible pre-joined values and falls back to the 1-150 rank', () => {
+test('getLegacyDvpAdjustment: ignores implausible pre-joined values and falls back to the 1-150 rank', () => {
   const saved = projectionService.positionDefenseData;
   projectionService.positionDefenseData = {
     UTA_PG: { rank: 150 },
@@ -97,8 +97,8 @@ test('getDvpAdjustment: ignores implausible pre-joined values and falls back to 
   };
   try {
     // 47.0 is a stale FG% value written by the old mis-aligned parser
-    const weak = projectionService.getDvpAdjustment('UTA', 'PG', 47.0);
-    const elite = projectionService.getDvpAdjustment('OKC', 'PG', null);
+    const weak = projectionService.getLegacyDvpAdjustment('UTA', 'PG', 47.0);
+    const elite = projectionService.getLegacyDvpAdjustment('OKC', 'PG', null);
     assert.ok(weak > 0);
     assert.ok(elite < 0);
     assert.ok(Math.abs(weak + elite) < 0.1, 'rank scale should be centered on the 1-150 midpoint');

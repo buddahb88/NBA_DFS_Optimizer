@@ -19,7 +19,7 @@
  *   Historical Blend = (Season Avg × 0.35) + (L3 Avg × 0.25) + (Matchup Avg × 0.15) + (RotoWire × 0.25)
  *   Adjusted Projection = Historical Blend
  *                         + Defense Adjustment (opponent def eff)
- *                         + DVP Adjustment (position-specific defense)
+ *                         + DVP Adjustment (opponent vs archetype / G/F/C, dvpAdjustment.js)
  *                         + Pace Adjustment (game pace expectation)
  *                         + Rest Adjustment (B2B penalty, extra rest boost)
  *                         + Vegas Adjustment (implied total correlation)
@@ -34,6 +34,7 @@ import { normalizeForRankings, normalizeForVsPosition } from '../utils/teamMappi
 import db from '../config/database.js';
 import { fantasyPointsColumn } from './scoring.js';
 import { applyMinutesModel } from './minutesProjectionService.js';
+import { archetypeDvpAdjustment, loadDvpContext, resolveDvpConfig } from './dvpAdjustment.js';
 
 const DATABASE_TYPE = process.env.DATABASE_TYPE || 'sqlite';
 
@@ -41,6 +42,7 @@ class ProjectionService {
   constructor() {
     this.defenseRankings = null;
     this.positionDefenseData = null;
+    this.dvpContexts = {}; // `${date}|${site}` -> archetype DVP context
     this.historicalCache = {}; // Cache for historical lookups
 
     // League averages (2024-25 season baselines)
@@ -462,6 +464,7 @@ class ProjectionService {
    */
   clearCache() {
     this.historicalCache = {};
+    this.dvpContexts = {};
   }
 
   /**
@@ -493,6 +496,27 @@ class ProjectionService {
       console.log(`📊 Loaded position defense data: ${Object.keys(this.positionDefenseData).length} entries`);
     }
     return this.positionDefenseData;
+  }
+
+  /**
+   * Load everything the matchup adjustments read. Shared by the recalculate
+   * (calculateAdjustedProjection) and enhanced paths so both use the same
+   * DVP signal. Returns the DVP options for getDvpAdjustment; options.dvp
+   * ({ config, context }) overrides the defaults (replay backtest, tests).
+   */
+  async loadMatchupData({ slateDate = null, site = 'draftkings', dvp = {} } = {}) {
+    await this.loadDefenseRankings();
+    await this.loadPositionDefenseData();
+    // Read per call: .env is loaded after this module is imported
+    const config = resolveDvpConfig(dvp.config || {});
+    let context = dvp.context ?? null;
+    if (!context && config.mode === 'archetype') {
+      // Keyed by date so a long-running server picks up the nightly refresh
+      const key = `${slateDate || new Date().toISOString().slice(0, 10)}|${site}`;
+      if (!this.dvpContexts[key]) this.dvpContexts[key] = await loadDvpContext({ slateDate, site });
+      context = this.dvpContexts[key];
+    }
+    return { config, context };
   }
 
   /**
@@ -545,7 +569,7 @@ class ProjectionService {
       is_home
     } = player;
 
-    const { slateRoster = [], slateDate = null, isHome = is_home, isB2B = (rest_days === 0), site = 'draftkings' } = options;
+    const { slateRoster = [], slateDate = null, isHome = is_home, isB2B = (rest_days === 0), site = 'draftkings', dvp = {} } = options;
 
     // RotoWire baseline
     const rotowireBaseline = rotowire_projection || projected_points || 0;
@@ -561,7 +585,7 @@ class ProjectionService {
 
     // If no historical data, fall back to original method
     if (historical.seasonGames < 3) {
-      const fallback = await this.calculateAdjustedProjection(player);
+      const fallback = await this.calculateAdjustedProjection(player, { slateDate, site, dvp });
       return {
         ...fallback,
         enhanced: false,
@@ -661,11 +685,10 @@ class ProjectionService {
     }
 
     // 5. Defense/DVP/Pace/Vegas adjustments (from original method)
-    await this.loadDefenseRankings();
-    await this.loadPositionDefenseData();
+    const dvpOptions = await this.loadMatchupData({ slateDate, site, dvp });
 
     adjustments.defense = this.getDefenseAdjustment(opponent, opp_def_eff);
-    adjustments.dvp = this.getDvpAdjustment(opponent, position, dvp_pts_allowed);
+    adjustments.dvp = this.getDvpAdjustment(player, dvpOptions);
     adjustments.pace = this.getPaceAdjustment(opponent, team);
     adjustments.vegas = this.getVegasAdjustment(vegas_implied_total, vegas_over_under);
     adjustments.blowout = this.getBlowoutAdjustment(vegas_spread);
@@ -823,9 +846,10 @@ class ProjectionService {
    * (Kept for backwards compatibility)
    *
    * @param {Object} player - Player data with RotoWire projection and matchup info
+   * @param {Object} options - { slateDate, site, dvp } (see loadMatchupData)
    * @returns {Object} - Adjusted projection with breakdown of factors
    */
-  async calculateAdjustedProjection(player) {
+  async calculateAdjustedProjection(player, options = {}) {
     const {
       name,
       rotowire_projection,  // Base projection from RotoWire
@@ -855,8 +879,7 @@ class ProjectionService {
     }
 
     // Load defense data
-    await this.loadDefenseRankings();
-    await this.loadPositionDefenseData();
+    const dvpOptions = await this.loadMatchupData(options);
 
     // Calculate each adjustment
     const adjustments = {};
@@ -865,9 +888,9 @@ class ProjectionService {
     // Higher def_eff = worse defense = positive adjustment
     adjustments.defense = this.getDefenseAdjustment(opponent, opp_def_eff);
 
-    // 2. DVP (DEFENSE VS POSITION) ADJUSTMENT
-    // Higher DVP pts allowed = easier matchup = positive adjustment
-    adjustments.dvp = this.getDvpAdjustment(opponent, position, dvp_pts_allowed);
+    // 2. DVP (DEFENSE VS ARCHETYPE / POSITION) ADJUSTMENT
+    // Opponent allows more than expected to this archetype = positive adjustment
+    adjustments.dvp = this.getDvpAdjustment(player, dvpOptions);
 
     // 3. PACE ADJUSTMENT
     // Faster pace = more possessions = positive adjustment
@@ -930,10 +953,25 @@ class ProjectionService {
   }
 
   /**
-   * DVP (Defense vs Position) Adjustment
+   * DVP Adjustment, per the configured mode (dvpAdjustment.js):
+   * 'archetype' = capped, weighted opponent x archetype FP over expectation
+   * (falling back to G/F/C, then 0); 'legacy' = getLegacyDvpAdjustment; 'off' = 0.
+   * @param {Object} player - { name, opponent, position, dvp_pts_allowed }
+   * @param {Object} dvpOptions - { config, context } from loadMatchupData
+   */
+  getDvpAdjustment(player, { config = resolveDvpConfig(), context = null } = {}) {
+    if (config.mode === 'off') return 0;
+    if (config.mode === 'legacy') {
+      return this.getLegacyDvpAdjustment(player.opponent, player.position, player.dvp_pts_allowed);
+    }
+    return archetypeDvpAdjustment(player, context, config).value;
+  }
+
+  /**
+   * Legacy DVP (Defense vs Position) Adjustment
    * How many fantasy points the opponent allows to this position
    */
-  getDvpAdjustment(opponent, position, preJoinedDvp) {
+  getLegacyDvpAdjustment(opponent, position, preJoinedDvp) {
     const primaryPosition = this.getPrimaryPosition(position);
     if (!primaryPosition) return 0;
 
