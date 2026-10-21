@@ -10,6 +10,7 @@ import { migrateEspnBoxScores } from './espnMigrations.js';
 import { migratePlayerSeasonProfiles } from './playerProfileMigrations.js';
 import { migrateSyncRuns } from './syncRunMigrations.js';
 import { migratePlayerArchetypes } from './archetypeMigrations.js';
+import { migrateTeamArchetypeDefense } from './archetypeDefenseMigrations.js';
 
 /**
  * Create all database tables
@@ -46,6 +47,8 @@ export const createTables = async (db) => {
 
   // player_archetypes (rule-based archetype per player-season)
   await migratePlayerArchetypes(db);
+  // team_archetype_defense (opponent x archetype / G-F-C performance vs expectation)
+  await migrateTeamArchetypeDefense(db);
 
   // Saved lineups survive slate resyncs (no slate/player cascades, denormalized players)
   await migrateLineupPersistence(db);

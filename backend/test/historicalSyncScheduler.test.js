@@ -166,6 +166,19 @@ describe('runIncrementalSync', () => {
     assert.ok(run.finished_at);
   });
 
+  test('refreshes team_archetype_defense for each synced season, even after a failure', async () => {
+    vi.spyOn(espn, 'syncDates').mockRejectedValueOnce(new Error('ESPN down')).mockResolvedValueOnce(result());
+    const refreshDefense = vi.fn().mockRejectedValueOnce(new Error('db busy')).mockResolvedValue({});
+
+    const runs = await scheduler.runIncrementalSync({ now: at('2026-10-22'), refreshDefense });
+    assert.equal(runs.length, 1);
+    assert.deepEqual(refreshDefense.mock.calls, [['2026-27']]);
+
+    await db.run(`INSERT INTO historical_games (player_name, team, opponent, game_date) VALUES ('A', 'BOS', 'NYK', '2026-06-10')`);
+    await scheduler.runIncrementalSync({ now: at('2026-10-22'), refreshDefense });
+    assert.deepEqual(refreshDefense.mock.calls.slice(1), [['2025-26'], ['2026-27']]);
+  });
+
   test('skips when another sync is running', async () => {
     await syncRuns.start({ source: 'espn', season: '2026-27' });
     const syncDates = vi.spyOn(espn, 'syncDates');

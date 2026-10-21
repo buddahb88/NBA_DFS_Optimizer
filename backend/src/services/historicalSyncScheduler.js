@@ -5,13 +5,15 @@
  * HISTORICAL_SYNC_CRON schedule (server local time, off when unset), load
  * every completed game from the latest stored game_date through yesterday
  * from ESPN. Missed days are caught up on the next run. Each season walked
- * is recorded in sync_runs as source 'espn-scheduled'.
+ * is recorded in sync_runs as source 'espn-scheduled'. Afterwards each
+ * season's team_archetype_defense is rebuilt from the new games.
  */
 
 import cron from 'node-cron';
 import db from '../config/database.js';
 import espnBoxScoreService from './espnBoxScoreService.js';
 import syncRunService from './syncRunService.js';
+import { refreshSeasonDefense } from './archetypeDefenseService.js';
 import { listSeasons, seasonForDate } from '../utils/season.js';
 
 export const SCHEDULED_SOURCE = 'espn-scheduled';
@@ -43,11 +45,11 @@ async function lastLoadedGameDate() {
 }
 
 /**
- * Load all completed games since the last loaded game_date. Returns the
- * sync_runs ids written ([] when already current), or null when another
- * sync is already running.
+ * Load all completed games since the last loaded game_date, then refresh
+ * team_archetype_defense for those seasons. Returns the sync_runs ids
+ * written ([] when already current), or null when another sync is running.
  */
-export async function runIncrementalSync({ now = new Date() } = {}) {
+export async function runIncrementalSync({ now = new Date(), refreshDefense = refreshSeasonDefense } = {}) {
   const running = await syncRunService.active();
   if (running) {
     console.log(`⏭️ Scheduled historical sync skipped: ${running.source} sync #${running.id} is running`);
@@ -76,6 +78,11 @@ export async function runIncrementalSync({ now = new Date() } = {}) {
     } catch (error) {
       console.error(`❌ Scheduled historical sync ${season} failed:`, error.message);
       await syncRunService.finish(id, { gamesInserted: 0, error: error.message });
+    }
+    try {
+      await refreshDefense(season);
+    } catch (error) {
+      console.error(`❌ Archetype defense refresh ${season} failed:`, error.message);
     }
   }
   return runIds;
