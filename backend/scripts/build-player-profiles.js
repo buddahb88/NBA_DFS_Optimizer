@@ -6,7 +6,8 @@
  * Recomputes per-season role profiles (usage, assist/rebound/steal/block
  * rates, shot profile, fantasy points per minute, per-36) from
  * historical_games + team_game_stats for every season from --from (default
- * 2024-25) through the current one. Each season's rows are replaced.
+ * 2024-25) through the current one. Each season's rows are replaced, and its
+ * player_archetypes are reclassified (see scripts/build-player-archetypes.js).
  *
  * Usage:
  *   node scripts/build-player-profiles.js [--from 2024-25] [--season 2026-27]
@@ -25,6 +26,7 @@ dotenv.config({ path: path.join(__dirname, '../.env') });
 const { default: db } = await import('../src/config/database.js');
 const { createTables } = await import('../src/config/schema.js');
 const { refreshProfiles, FIRST_PROFILE_SEASON } = await import('../src/services/playerProfileService.js');
+const { refreshSeasonArchetypes } = await import('../src/services/archetypeService.js');
 const { listSeasons } = await import('../src/utils/season.js');
 
 function arg(name) {
@@ -40,6 +42,8 @@ try {
 
   for (const result of await refreshProfiles(seasons)) {
     console.log(`✓ ${result.season}: ${result.players} players from ${result.games} player-games`);
+    // Archetypes are derived from profiles; reclassify so they never go stale
+    await refreshSeasonArchetypes(result.season);
   }
 
   console.log('\nTop usage (min 20 games, 25 mpg) by season:');

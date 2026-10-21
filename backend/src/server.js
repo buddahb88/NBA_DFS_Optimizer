@@ -23,6 +23,7 @@ import dashboardRouter from './routes/dashboard.js';
 import resultsRouter from './routes/results.js';
 import syncRunService from './services/syncRunService.js';
 import { startHistoricalSyncScheduler } from './services/historicalSyncScheduler.js';
+import archetypesRouter from './routes/archetypes.js';
 
 // Get directory paths for ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -62,6 +63,7 @@ app.use('/api/player-settings', playerSettingsRouter);
 app.use('/api/lateswap', lateSwapRouter);
 app.use('/api/dashboard', dashboardRouter);
 app.use('/api/results', resultsRouter);
+app.use('/api/archetypes', archetypesRouter);
 
 // Health check
 app.get('/api/health', (req, res) => {
