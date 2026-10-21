@@ -20,6 +20,24 @@ from azure.storage.blob import BlobServiceClient
 import os
 
 
+# Season helpers -- mirror backend/src/utils/season.js (seasons roll over October 1st)
+KNOWN_SEASON_STARTS = {'2024-25': '2024-10-22', '2025-26': '2025-10-21'}
+
+
+def season_for_date(date_str: str) -> str:
+    year, month = int(date_str[:4]), int(date_str[5:7])
+    start_year = year if month >= 10 else year - 1
+    return f"{start_year}-{(start_year + 1) % 100:02d}"
+
+
+def season_start_date(season: str) -> str:
+    return KNOWN_SEASON_STARTS.get(season, f"{season[:4]}-10-01")
+
+
+def season_end_year(season: str) -> int:
+    return int(season[:4]) + 1
+
+
 def calculate_dk_fantasy_points(row: Dict) -> float:
     """Calculate DraftKings fantasy points from box score stats"""
     pts = row.get('PTS', 0) or 0
@@ -262,17 +280,23 @@ def main(mytimer: func.TimerRequest, outputblob: func.Out[str]) -> None:
         if latest_date:
             start_date = (datetime.strptime(latest_date, '%Y-%m-%d') + timedelta(days=1)).strftime('%Y-%m-%d')
         else:
-            start_date = '2024-10-22'  # Season start
+            start_date = season_start_date(season_for_date(yesterday))
 
         logging.info(f"Fetching games from {start_date} to {yesterday}")
 
-        # Get season schedule
-        season_year = 2025  # 2024-25 season
-        try:
-            schedule = get_schedule(season_year)
-        except Exception as e:
-            logging.error(f"Failed to get schedule: {e}")
-            schedule = pd.DataFrame()
+        # Season schedules keyed by end year (basketball_reference uses 2025 for 2024-25);
+        # fetched lazily so a range spanning the offseason covers both seasons
+        schedules = {}
+
+        def schedule_for(date_str):
+            season_year = season_end_year(season_for_date(date_str))
+            if season_year not in schedules:
+                try:
+                    schedules[season_year] = get_schedule(season_year)
+                except Exception as e:
+                    logging.error(f"Failed to get {season_year} schedule: {e}")
+                    schedules[season_year] = pd.DataFrame()
+            return schedules[season_year]
 
         # Fetch new games
         new_games = []
@@ -283,6 +307,7 @@ def main(mytimer: func.TimerRequest, outputblob: func.Out[str]) -> None:
             date_str = current_date.strftime('%Y-%m-%d')
             logging.info(f"Processing {date_str}...")
 
+            schedule = schedule_for(date_str)
             if len(schedule) > 0:
                 date_col = 'DATE' if 'DATE' in schedule.columns else 'Date'
                 games_today = schedule[schedule[date_col] == date_str]

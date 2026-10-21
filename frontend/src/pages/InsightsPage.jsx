@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { playersAPI, historicalAPI } from '../services/api';
 import { useSlate } from '../context/SlateContext';
+import { toSeasonOptions } from './insights/seasonOptions';
 
 // Helper to format date for input
 const formatDateForInput = (date) => {
@@ -82,7 +83,7 @@ function InsightsPage() {
   const [missingPlayers, setMissingPlayers] = useState([]);
 
   // Date filter state for backtesting
-  const [startDate, setStartDate] = useState('2025-10-21'); // Season start
+  const [startDate, setStartDate] = useState(''); // Current season start, loaded from /historical/seasons
   const [endDate, setEndDate] = useState(getYesterday());
   const [dateFilterEnabled, setDateFilterEnabled] = useState(false);
 
@@ -90,20 +91,15 @@ function InsightsPage() {
   const [dataStatus, setDataStatus] = useState(null);
   const [syncProgress, setSyncProgress] = useState(null);
   const [isSyncing, setIsSyncing] = useState(false);
-  const [selectedSeasons, setSelectedSeasons] = useState(['2024-25']); // Default to current season
+  const [selectedSeasons, setSelectedSeasons] = useState([]); // Defaults to current season once loaded
 
-  // Available seasons (most recent first)
-  const availableSeasons = [
-    { value: '2025-26', label: '2025-26' },
-    { value: '2024-25', label: '2024-25 (Current)' },
-    { value: '2023-24', label: '2023-24' },
-    { value: '2022-23', label: '2022-23' },
-    { value: '2021-22', label: '2021-22' },
-    { value: '2020-21', label: '2020-21' },
-  ];
+  // Available seasons (most recent first), served by the backend season util
+  const [availableSeasons, setAvailableSeasons] = useState([]);
+  const [currentSeason, setCurrentSeason] = useState(null);
 
   useEffect(() => {
     checkDataStatus();
+    loadSeasons();
   }, []);
 
   // (Re)load when the top-bar slate changes; wait for the slate list first
@@ -134,6 +130,18 @@ function InsightsPage() {
     return () => clearInterval(interval);
   }, [isSyncing]);
 
+  const loadSeasons = async () => {
+    try {
+      const res = await historicalAPI.getSeasons();
+      setAvailableSeasons(toSeasonOptions(res.data));
+      setCurrentSeason(res.data?.current || null);
+      if (res.data?.current) setSelectedSeasons(prev => (prev.length ? prev : [res.data.current]));
+      if (res.data?.currentStartDate) setStartDate(prev => prev || res.data.currentStartDate);
+    } catch (e) {
+      console.error('Error loading seasons:', e);
+    }
+  };
+
   const checkDataStatus = async () => {
     try {
       const res = await historicalAPI.getStatus();
@@ -159,7 +167,7 @@ function InsightsPage() {
     try {
       setIsSyncing(true);
       setSyncProgress({ status: 'starting', mode: 'nba-api', message: 'Connecting to NBA Stats API...' });
-      await historicalAPI.startNbaApiSync('2024-25', dataStatus.latestGame);
+      await historicalAPI.startNbaApiSync(currentSeason || undefined, dataStatus.latestGame);
     } catch (e) {
       console.error('Error starting NBA API sync:', e);
       setIsSyncing(false);

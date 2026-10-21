@@ -10,6 +10,7 @@ import axios from 'axios';
 import pLimit from 'p-limit';
 import db from '../config/database.js';
 import { computeFantasyPoints } from './scoring.js';
+import { getCurrentSeason, seasonForDate } from '../utils/season.js';
 
 const DATABASE_TYPE = process.env.DATABASE_TYPE || 'sqlite';
 
@@ -138,7 +139,7 @@ class NBAStatsService {
   /**
    * Fetch all active NBA players
    */
-  async fetchAllPlayers() {
+  async fetchAllPlayers(season = getCurrentSeason()) {
     console.log('📋 Fetching NBA player list...');
 
     try {
@@ -146,7 +147,7 @@ class NBAStatsService {
         headers: this.headers,
         params: {
           LeagueID: '00',
-          Season: '2024-25',
+          Season: season,
           IsOnlyCurrentSeason: 1
         },
         timeout: 30000
@@ -180,7 +181,7 @@ class NBAStatsService {
   /**
    * Fetch game log for a single player
    */
-  async fetchPlayerGameLog(playerId, playerName, season = '2024-25', retryCount = 0) {
+  async fetchPlayerGameLog(playerId, playerName, season = getCurrentSeason(), retryCount = 0) {
     try {
       const response = await axios.get(`${this.baseUrl}/playergamelog`, {
         headers: this.headers,
@@ -441,7 +442,7 @@ class NBAStatsService {
   /**
    * Fetch all game logs for the current season with concurrency
    */
-  async fetchSeasonGameLogs(season = '2024-25', progressCallback = null) {
+  async fetchSeasonGameLogs(season = getCurrentSeason(), progressCallback = null) {
     console.log(`\n🏀 ═══════════════════════════════════════════════════`);
     console.log(`   FETCHING ${season} SEASON GAME LOGS`);
     console.log(`═══════════════════════════════════════════════════════\n`);
@@ -449,7 +450,7 @@ class NBAStatsService {
     const startTime = Date.now();
 
     // Get all active players
-    const players = await this.fetchAllPlayers();
+    const players = await this.fetchAllPlayers(season);
 
     let totalGames = 0;
     let processedPlayers = 0;
@@ -968,7 +969,7 @@ class NBAStatsService {
       position: null,
       game_id: `${game.game_date}_${game.team}_${game.opponent}`, // Generate unique ID
       game_date: game.game_date,
-      season: '2024-25',
+      season: seasonForDate(game.game_date),
       is_home: game.is_home,
       minutes: game.minutes || 0,
       points: game.points || 0,
@@ -1092,7 +1093,7 @@ class NBAStatsService {
   /**
    * Fetch game logs incrementally (only games after lastDate)
    */
-  async fetchIncrementalGameLogs(season = '2024-25', lastDate = null, progressCallback = null) {
+  async fetchIncrementalGameLogs(season = getCurrentSeason(), lastDate = null, progressCallback = null) {
     console.log(`\n🏀 ═══════════════════════════════════════════════════`);
     console.log(`   INCREMENTAL UPDATE: Games after ${lastDate || 'beginning'}`);
     console.log(`═══════════════════════════════════════════════════════\n`);
@@ -1100,7 +1101,7 @@ class NBAStatsService {
     const startTime = Date.now();
 
     // Get all active players
-    const players = await this.fetchAllPlayers();
+    const players = await this.fetchAllPlayers(season);
 
     let totalGames = 0;
     let processedPlayers = 0;

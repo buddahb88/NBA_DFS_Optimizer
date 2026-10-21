@@ -106,9 +106,11 @@ export const chatAPI = {
 export const historicalAPI = {
   // Data status and sync
   getStatus: () => api.get('/historical/status'),
-  startSync: (forceFullSync = false, seasons = ['2024-25']) =>
+  // Season list + current season; omitted season args default server-side
+  getSeasons: () => api.get('/historical/seasons'),
+  startSync: (forceFullSync = false, seasons) =>
     api.post('/historical/sync', { forceFullSync, seasons }, { timeout: 60000 }),
-  startNbaApiSync: (season = '2024-25', fromDate = null) =>
+  startNbaApiSync: (season, fromDate = null) =>
     api.post('/historical/sync/nba-api', { season, fromDate }, { timeout: 60000 }),
   getSyncStatus: () => api.get('/historical/sync/status'),
 

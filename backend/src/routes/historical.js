@@ -7,6 +7,7 @@
 
 import express from 'express';
 import nbaStatsService from '../services/nbaStatsService.js';
+import { getCurrentSeason, getSeasonsInfo } from '../utils/season.js';
 
 const router = express.Router();
 
@@ -34,6 +35,14 @@ router.get('/status', async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
+});
+
+/**
+ * GET /api/historical/seasons
+ * Season list (newest first) and the current season, so clients never hardcode seasons
+ */
+router.get('/seasons', (req, res) => {
+  res.json({ success: true, ...getSeasonsInfo() });
 });
 
 /**
@@ -214,7 +223,7 @@ router.post('/sync/nba-api', async (req, res) => {
     });
   }
 
-  const { season = '2024-25', fromDate } = req.body;
+  const { season = getCurrentSeason(), fromDate } = req.body;
 
   // Get current data status to determine start date
   const status = await nbaStatsService.getDataStatus();

@@ -29,6 +29,24 @@ except ImportError:
 # Database path
 DB_PATH = Path(__file__).parent.parent / 'data' / 'nba_dfs.db'
 
+
+# Season helpers -- mirror backend/src/utils/season.js (seasons roll over October 1st)
+KNOWN_SEASON_STARTS = {'2024-25': '2024-10-22', '2025-26': '2025-10-21'}
+
+
+def season_for_date(date_str: str) -> str:
+    year, month = int(date_str[:4]), int(date_str[5:7])
+    start_year = year if month >= 10 else year - 1
+    return f"{start_year}-{(start_year + 1) % 100:02d}"
+
+
+def season_start_date(season: str) -> str:
+    return KNOWN_SEASON_STARTS.get(season, f"{season[:4]}-10-01")
+
+
+def season_end_year(season: str) -> int:
+    return int(season[:4]) + 1
+
 # Team abbreviation mappings
 TEAM_ABBREVS = {
     'Atlanta Hawks': 'ATL', 'Boston Celtics': 'BOS', 'Brooklyn Nets': 'BRK',
@@ -162,7 +180,7 @@ def fetch_single_game(date_str: str, home_team: str, away_team: str) -> list:
                     'team': team,
                     'opponent': opponent,
                     'game_date': date_str,
-                    'season': '2024-25',
+                    'season': season_for_date(date_str),
                     'is_home': 1 if is_home else 0,
                     'minutes': parse_minutes(row.get('MP')),
                     'points': int(row.get('PTS', 0) or 0),
@@ -228,7 +246,7 @@ def insert_games(conn: sqlite3.Connection, games: list) -> int:
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 game['player_name'], game['team'], game['opponent'],
-                game['game_date'], game.get('season', '2024-25'), game['is_home'],
+                game['game_date'], game.get('season') or season_for_date(game['game_date']), game['is_home'],
                 game['minutes'], game['points'], game['rebounds'],
                 game['assists'], game['steals'], game['blocks'], game['turnovers'],
                 game['fg_made'], game['fg_attempted'], game['fg3_made'],
@@ -268,7 +286,7 @@ def main():
     elif latest_in_db:
         start_date = (datetime.strptime(latest_in_db, '%Y-%m-%d') + timedelta(days=1)).strftime('%Y-%m-%d')
     else:
-        start_date = '2024-10-22'
+        start_date = season_start_date(season_for_date(datetime.now().strftime('%Y-%m-%d')))
 
     end_date = args.to_date or (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
 
