@@ -125,17 +125,13 @@ LIMIT 10
 
 Analyze if usage is trending up or down recently.
 
-### Step 9: DVP Context
-```sql
-SELECT
-  tdvp.position, tdvp.dk_pts_allowed, tdvp.rank as dvp_rank
-FROM team_defense_vs_position tdvp
-WHERE tdvp.team = 'OPP'  -- tonight's opponent
-  AND tdvp.position IN ('PG', 'SG', 'SF', 'PF', 'C')
-ORDER BY tdvp.rank
+### Step 9: Matchup Context
 ```
+Use: mcp__nba-dfs-sqlite__archetype_matchups
+```
+Find the player in the result. `fp_over_expectation` is the fantasy points per player-game tonight's opponent allows above (+) or below (-) expectation to the player's archetype (`games` = sample); `position_fp_over_expectation` is the same for his G/F/C bucket. Say which season the numbers come from.
 
-Show how the opponent defends this player's position.
+Show how the opponent defends this player's archetype.
 
 ### Step 10: Teammate Context
 Identify key teammates and check if any are out:

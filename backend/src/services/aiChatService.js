@@ -10,9 +10,30 @@ import optimizerService from './optimizerService.js';
 import nbaStatsService from './nbaStatsService.js';
 import { SITE_KEYS } from '../config/sites.js';
 import { resolveSite } from '../utils/resolveSite.js';
+import { getCurrentSeason } from '../utils/season.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// History / matchup tables documented in database-schema.yaml, in prompt order
+const HISTORY_TABLES = ['historical_games', 'player_season_profiles', 'player_archetypes', 'team_archetype_defense', 'slate_player_snapshots'];
+
+const formatColumn = (col) => `- **${col.name}** (${col.type}): ${col.description}${col.valid_values ? `\n  Valid values: ${JSON.stringify(col.valid_values)}` : ''}${col.range ? ` (Range: ${col.range.join(' to ')})` : ''}${col.notes ? `\n  Notes: ${col.notes}` : ''}`;
+const formatExample = (ex) => (typeof ex === 'string' ? `\`\`\`sql\n${ex}\n\`\`\`` : `**${ex.description}:**\n\`\`\`sql\n${ex.query}\n\`\`\``);
+
+/** One database-schema.yaml table as a prompt section: description, columns, example queries, notes. */
+function formatTableSection(name, table) {
+  const examples = table.example_queries?.length
+    ? `\n**Example Queries:**\n${table.example_queries.map(formatExample).join('\n\n')}\n`
+    : '';
+  return `### ${name}
+
+**Description:** ${table.description}
+
+**Columns:**
+${table.columns.map(formatColumn).join('\n')}
+${examples}${table.notes ? `\n**Notes:**\n${table.notes}` : ''}`;
+}
 
 class AIChatService {
   constructor() {
@@ -114,12 +135,19 @@ class AIChatService {
 You have access to the following tables:
 1. **players** - Core player data with projections, stats, salaries, and matchup metrics (PRIMARY TABLE)
 2. **slates** - DFS contest slate information
-3. **team_defense_rankings** - Team defensive efficiency, pace, and advanced stats (from ESPN)
-4. **team_defense_vs_position** - Position-specific defensive rankings (DVP) (from HashtagBasketball)
-5. **lineups** - Saved DFS lineups
-6. **lineup_players** - Junction table linking players to lineups
-7. **chat_sessions** - AI chat conversation sessions
-8. **chat_messages** - Individual chat messages
+3. **team_archetype_defense** - How each defense does vs each player archetype and G/F/C position, relative to expectation (THE matchup table; the projections use it)
+4. **player_archetypes** - Each player's archetype per season
+5. **player_season_profiles** - Each player's season role profile (usage, assist/rebound rates, per-36, fantasy points per minute)
+6. **historical_games** - ESPN game logs for every game since 2024-25 (keyed by player_key)
+7. **slate_player_snapshots** - Saved past slates (salary, projection, projected ownership) to compare with actual results
+8. **team_defense_rankings** - Team defensive efficiency, pace, and advanced stats (from ESPN)
+9. **team_defense_vs_position** - Legacy position DVP from HashtagBasketball (REAL points allowed, not fantasy points)
+10. **lineups** - Saved DFS lineups
+11. **lineup_players** - Junction table linking players to lineups
+12. **chat_sessions** - AI chat conversation sessions
+13. **chat_messages** - Individual chat messages
+
+The current NBA season is ${getCurrentSeason()}. Seasons are labelled like '2025-26'.
 
 ### Players Table (Primary table for queries)
 
@@ -132,25 +160,11 @@ ${Object.entries(schema.tables.players.common_filters).map(([name, sql]) => `- $
 ### Example Queries:
 ${schema.tables.players.example_queries.basic.map(ex => `**${ex.description}:**\n\`\`\`sql\n${ex.query}\n\`\`\`\n`).join('\n')}
 
-### Team Defense Rankings Table
+${HISTORY_TABLES.map(name => formatTableSection(name, schema.tables[name])).join('\n\n')}
 
-**Description:** ${schema.tables.team_defense_rankings.description}
+${formatTableSection('team_defense_rankings', schema.tables.team_defense_rankings)}
 
-**Important Columns:**
-${schema.tables.team_defense_rankings.columns.map(col => `- **${col.name}** (${col.type}): ${col.description}${col.range ? ` (Range: ${col.range.join('-')})` : ''}${col.notes ? `\n  Notes: ${col.notes}` : ''}`).join('\n')}
-
-**Example Queries:**
-${schema.tables.team_defense_rankings.example_queries.map(ex => typeof ex === 'string' ? `\`\`\`sql\n${ex}\n\`\`\`` : `**${ex.description}:**\n\`\`\`sql\n${ex.query}\n\`\`\``).join('\n\n')}
-
-### Team Defense vs Position Table (DVP)
-
-**Description:** ${schema.tables.team_defense_vs_position.description}
-
-**Important Columns:**
-${schema.tables.team_defense_vs_position.columns.map(col => `- **${col.name}** (${col.type}): ${col.description}${col.range ? ` (Range: ${col.range.join('-')})` : ''}${col.notes ? `\n  Notes: ${col.notes}` : ''}`).join('\n')}
-
-**Example Queries:**
-${schema.tables.team_defense_vs_position.example_queries.map(ex => typeof ex === 'string' ? `\`\`\`sql\n${ex}\n\`\`\`` : `**${ex.description}:**\n\`\`\`sql\n${ex.query}\n\`\`\``).join('\n\n')}
+${formatTableSection('team_defense_vs_position (legacy DVP)', schema.tables.team_defense_vs_position)}
 
 ### Slates Table
 
@@ -169,10 +183,10 @@ ${schema.query_tips.map(tip => `- ${tip}`).join('\n')}
 - To exclude injured: \`WHERE (injury_status IS NULL OR injury_status = '' OR injury_status NOT IN ('OUT', 'Doubtful'))\`
 
 **IMPORTANT MATCHUP DATA:**
-- The players table has PRE-JOINED matchup data: dvp_pts_allowed and opp_def_eff
-- Use team_defense_rankings for pace and overall defensive efficiency analysis
-- Use team_defense_vs_position for detailed position-specific matchup analysis
-- All defensive data is auto-populated when slates are loaded!
+- For matchup questions use team_archetype_defense.fp_over_expectation: fantasy points per player-game a defense allows above (+) or below (-) what that archetype normally scores. Filter site, season and group_by, and mention the games sample
+- Link tonight's players to it: players -> player_season_profiles (by name) -> player_archetypes (same season) -> team_archetype_defense (team = players.opponent)
+- players.dvp_pts_allowed and team_defense_vs_position.pts_allowed are REAL points allowed to a position (about 18-28), NOT fantasy points; treat them as a secondary, legacy signal
+- players.opp_def_eff is pre-joined from team_defense_rankings; use that table for pace and overall defensive efficiency
 `;
     }
 

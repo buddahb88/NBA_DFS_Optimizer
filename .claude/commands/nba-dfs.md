@@ -9,7 +9,9 @@ You have access to the `nba-dfs-sqlite` MCP server:
 - `mcp__nba-dfs-sqlite__query` - Run any SELECT SQL query
 - `mcp__nba-dfs-sqlite__get_current_slate` - Get current slate info
 - `mcp__nba-dfs-sqlite__search_player` - Find player by name
-- `mcp__nba-dfs-sqlite__player_history` - Player's recent games + averages
+- `mcp__nba-dfs-sqlite__player_history` - Player's recent games + per-season averages
+- `mcp__nba-dfs-sqlite__player_profile` - Player's season role profile (usage, rates) + archetype
+- `mcp__nba-dfs-sqlite__archetype_matchups` - Tonight's players vs their opponent's archetype defense
 - `mcp__nba-dfs-sqlite__value_plays` - High pts/$ plays under salary cap
 - `mcp__nba-dfs-sqlite__gpp_plays` - Low ownership + high ceiling plays
 - `mcp__nba-dfs-sqlite__game_stacks` - Games by Vegas total for stacking
@@ -23,12 +25,26 @@ You have access to the `nba-dfs-sqlite` MCP server:
 - floor, ceiling, rostership, leverage_score
 - vegas_implied_total, vegas_spread, vegas_over_under
 - boom_probability, bust_probability, volatility
-- injury_status, rest_days, dvp_pts_allowed
+- injury_status, rest_days
+- dvp_pts_allowed - legacy DVP: REAL points the opponent allows to the position (about 18-28), not fantasy points
 
-### `historical_games` - 7000+ Game Logs
-- player_name, team, opponent, game_date
-- dk_fantasy_points, minutes, points, rebounds, assists, steals, blocks, turnovers
-- usg_pct, ts_pct, is_home, is_back_to_back, rest_days
+### `historical_games` - ESPN Game Logs (every game since 2024-25)
+- player_key (match key: 'luka doncic', 'jaren jackson'), player_name, team, opponent, game_date
+- season ('2025-26'), season_type ('regular' / 'play-in' / 'playoffs'), is_starter
+- dk_fantasy_points, fd_fantasy_points, minutes, points, rebounds, assists, steals, blocks, turnovers
+- ts_pct, is_home, is_back_to_back, rest_days
+- usg_pct / off_rtg / def_rtg are empty - use `player_season_profiles`
+
+### `player_season_profiles` / `player_archetypes` - Roles per Season
+- One row per (season, player_key): minutes_pg, usg_pct, ast_pct, reb_pct (fractions), per-36, dk_fppm
+- archetype: primary_creator, point_forward, scoring_guard, bench_scorer, stretch_big, rim_running_big, three_and_d_wing, spot_up_shooter, role_player, unclassified
+
+### `team_archetype_defense` - Matchups
+- team (the defense) x group_key (archetype, or G/F/C when group_by = 'position'), per season and site
+- fp_over_expectation: fantasy points per player-game allowed above (+) / below (-) expectation; `games` = sample
+
+### `slate_player_snapshots` - Past Slates
+- Salary, projection, projected ownership per (game_date, site, slate_id, player_key); join to historical_games for actuals
 
 ## How to Respond
 

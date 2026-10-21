@@ -12,6 +12,9 @@ import BaseAgent from './BaseAgent.js';
 import db from '../config/database.js';
 import nbaStatsService from '../services/nbaStatsService.js';
 
+// Tables query_historical_data may read (at least one must be referenced)
+const ANALYSIS_TABLES = ['historical_games', 'player_season_profiles', 'player_archetypes', 'team_archetype_defense', 'slate_player_snapshots'];
+
 const SYSTEM_PROMPT = `You are an NBA analytics expert specializing in DFS insights.
 
 Your job is to:
@@ -21,24 +24,32 @@ Your job is to:
 4. Analyze roster context and player correlations
 5. Provide data-driven insights with statistical backing
 
-HISTORICAL DATA AVAILABLE (historical_games table - 7000+ games):
-- player_name, team, opponent, game_date, season
+HISTORICAL DATA AVAILABLE (historical_games - ESPN game logs, every game since the 2024-25 season):
+- player_key (match key, e.g. 'luka doncic'), player_name, team, opponent, position (G/F/C), game_date
+- season ('2025-26'), season_type ('regular' / 'play-in' / 'playoffs'), is_starter
 - is_home (1=home, 0=away)
 - is_back_to_back (1=B2B, 0=normal rest)
 - rest_days (days since last game)
 - minutes, points, rebounds, assists, steals, blocks, turnovers
 - fg_made, fg_attempted, fg_pct, fg3_made, fg3_attempted, fg3_pct
-- ft_made, ft_attempted, ft_pct, oreb, dreb, plus_minus
-- dk_fantasy_points (DraftKings fantasy points scored)
-- usg_pct (usage rate), ts_pct (true shooting), efg_pct
-- off_rtg, def_rtg, bpm (box plus/minus)
+- ft_made, ft_attempted, ft_pct, oreb, dreb, plus_minus, ts_pct, efg_pct
+- dk_fantasy_points, fd_fantasy_points, yahoo_fantasy_points
+- usg_pct, off_rtg, def_rtg, bpm are EMPTY - use player_season_profiles for usage and rates
+
+ROLE AND MATCHUP TABLES (join on player_key and season):
+- player_season_profiles: per (season, player_key) - games, minutes_pg, usg_pct, ast_pct, reb_pct, three_pa_rate (fractions), pts/reb/ast/fg3m_per36, dk_fppm
+- player_archetypes: per (season, player_key) - archetype, secondary_archetype (primary_creator, point_forward, scoring_guard, bench_scorer, stretch_big, rim_running_big, three_and_d_wing, spot_up_shooter, role_player, unclassified)
+- team_archetype_defense: per (season, site, group_by 'archetype'/'position', team = defense, group_key) - fp_over_expectation = fantasy points per player-game allowed above (+) / below (-) what those players normally score, shrunk toward 0 when games are few; pts/reb/ast/fg3m/stocks_delta likewise. Always filter season, site and group_by
+- slate_player_snapshots: past slates per (game_date, site, slate_id, player_key) - salary, projected_points, rostership (projected ownership)
 
 Key Analysis Types You Can Run:
 - B2B performance: WHERE is_back_to_back = 1
 - Rest advantage: GROUP BY rest_days
-- Matchup history: WHERE opponent = 'XXX'
+- Matchup history: WHERE opponent = 'XXX' (small samples - weigh against archetype defense)
+- Archetype matchup: team_archetype_defense WHERE team = opponent AND group_by = 'archetype' AND group_key = the player's archetype
 - Home/Away splits: WHERE is_home = 1 or 0
-- Usage trends: AVG(usg_pct) over time periods
+- Season-over-season role change: compare player_season_profiles rows (usg_pct, minutes_pg)
+- Projection accuracy: slate_player_snapshots joined to historical_games on player_key and game_date
 - Value analysis: dk_fantasy_points vs expected (use 5x salary as benchmark)
 
 CRITICAL - NO HALLUCINATION RULES:
@@ -489,7 +500,7 @@ class AnalystAgent extends BaseAgent {
 
       {
         name: 'query_historical_data',
-        description: 'Execute a custom SQL query against the historical_games table. Use this for complex analysis like B2B splits, rest day analysis, multi-condition filters. Table has: player_name, team, opponent, game_date, is_home, is_back_to_back, rest_days, minutes, points, rebounds, assists, steals, blocks, turnovers, dk_fantasy_points, usg_pct, ts_pct, plus_minus, off_rtg, def_rtg.',
+        description: `Execute a custom SQL query against the history tables (${ANALYSIS_TABLES.join(', ')}). Use this for complex analysis like B2B splits, rest day analysis, archetype matchups, role changes, multi-condition filters. historical_games has: player_key, player_name, team, opponent, game_date, season, season_type, is_home, is_back_to_back, rest_days, minutes, points, rebounds, assists, steals, blocks, turnovers, dk_fantasy_points, ts_pct, plus_minus.`,
         parameters: {
           type: 'object',
           properties: {
@@ -507,13 +518,13 @@ class AnalystAgent extends BaseAgent {
         execute: async ({ query, explanation }) => {
           console.log(`\n🔍 [AnalystAgent] Custom query: ${explanation}`);
 
-          // Security: Only allow SELECT queries on historical_games
+          // Security: Only allow SELECT queries on the history tables
           const normalizedQuery = query.trim().toUpperCase();
           if (!normalizedQuery.startsWith('SELECT')) {
             return { success: false, error: 'Only SELECT queries are allowed' };
           }
-          if (!query.toLowerCase().includes('historical_games')) {
-            return { success: false, error: 'Query must reference the historical_games table' };
+          if (!ANALYSIS_TABLES.some(table => new RegExp(`\\b${table}\\b`, 'i').test(query))) {
+            return { success: false, error: `Query must reference one of: ${ANALYSIS_TABLES.join(', ')}` };
           }
           if (/\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE)\b/i.test(query)) {
             return { success: false, error: 'Only read-only SELECT queries are allowed' };

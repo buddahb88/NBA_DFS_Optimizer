@@ -16,6 +16,7 @@ import {
 import Database from 'better-sqlite3';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { archetypeMatchups, playerHistory, playerProfile } from './queries.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -77,7 +78,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           properties: {
             table: {
               type: 'string',
-              description: 'Table name (players, historical_games, slates, team_defense_rankings, team_defense_vs_position)',
+              description: 'Table name (players, slates, historical_games, slate_player_snapshots, player_season_profiles, player_archetypes, team_archetype_defense, team_defense_rankings, team_defense_vs_position)',
             },
           },
           required: ['table'],
@@ -115,7 +116,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'player_history',
-        description: 'Get recent game history for a player',
+        description: 'Get recent games played (all season types) and per-season regular-season averages for a player. Matches accents/suffixes via player_key',
         inputSchema: {
           type: 'object',
           properties: {
@@ -130,6 +131,42 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
           },
           required: ['name'],
+        },
+      },
+      {
+        name: 'player_profile',
+        description: "Get a player's season role profiles (usage, assist/rebound rates as fractions, per-36, fantasy points per minute) and archetype for each season",
+        inputSchema: {
+          type: 'object',
+          properties: {
+            name: {
+              type: 'string',
+              description: 'Player name',
+            },
+          },
+          required: ['name'],
+        },
+      },
+      {
+        name: 'archetype_matchups',
+        description: "Tonight's healthy players with their matchup from team_archetype_defense: fp_over_expectation = fantasy points per player-game the opponent allows above (+) or below (-) expectation to the player's archetype, plus the G/F/C DvP value. Softest matchups first. Defaults to the slate's site and the latest season with 20+ defenses at 10+ games",
+        inputSchema: {
+          type: 'object',
+          properties: {
+            site: {
+              type: 'string',
+              description: "draftkings, fanduel or yahoo (default: the slate's site)",
+            },
+            season: {
+              type: 'string',
+              description: 'Season such as 2025-26 (default: latest season with enough games)',
+            },
+            limit: {
+              type: 'number',
+              description: 'Number of results (default 50)',
+              default: 50,
+            },
+          },
         },
       },
       {
@@ -297,41 +334,36 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case 'player_history': {
-        const playerName = args.name;
-        const limit = args.limit || 10;
-
-        const history = db
-          .prepare(
-            `SELECT game_date, opponent, dk_fantasy_points, minutes, points, rebounds, assists, steals, blocks, turnovers, usg_pct, is_home, is_back_to_back
-             FROM historical_games
-             WHERE LOWER(player_name) LIKE LOWER(?)
-             ORDER BY game_date DESC
-             LIMIT ?`
-          )
-          .all(`%${playerName}%`, limit);
-
-        // Calculate averages
-        const stats = db
-          .prepare(
-            `SELECT
-               COUNT(*) as games,
-               ROUND(AVG(dk_fantasy_points), 1) as avg_dk,
-               ROUND(MIN(dk_fantasy_points), 1) as min_dk,
-               ROUND(MAX(dk_fantasy_points), 1) as max_dk,
-               ROUND(AVG(minutes), 1) as avg_min,
-               ROUND(AVG(points), 1) as avg_pts,
-               ROUND(AVG(rebounds), 1) as avg_reb,
-               ROUND(AVG(assists), 1) as avg_ast
-             FROM historical_games
-             WHERE LOWER(player_name) LIKE LOWER(?)`
-          )
-          .get(`%${playerName}%`);
-
+        const result = playerHistory(db, args.name, args.limit || 10);
         return {
           content: [
             {
               type: 'text',
-              text: JSON.stringify({ recentGames: history, seasonStats: stats }, null, 2),
+              text: JSON.stringify(result, null, 2),
+            },
+          ],
+        };
+      }
+
+      case 'player_profile': {
+        const profiles = playerProfile(db, args.name);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(profiles, null, 2),
+            },
+          ],
+        };
+      }
+
+      case 'archetype_matchups': {
+        const result = archetypeMatchups(db, { site: args?.site, season: args?.season, limit: args?.limit || 50 });
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(result, null, 2),
             },
           ],
         };

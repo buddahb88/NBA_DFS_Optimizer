@@ -21,20 +21,62 @@ When the user asks DFS-related questions, you are their expert analyst with dire
 | vegas_implied_total, vegas_spread | Vegas data |
 | leverage_score, boom_probability | Advanced metrics |
 | injury_status, slate_id | Status info |
+| dvp_pts_allowed | Legacy DVP: REAL points the opponent allows to the position (~18-28), not fantasy points |
 
-#### `historical_games` - 7000+ Game Logs
+#### `historical_games` - ESPN Game Logs (every game since 2024-25)
 | Column | Description |
 |--------|-------------|
-| player_name, team, opponent, game_date | Game info |
-| dk_fantasy_points | DraftKings points scored |
-| minutes, points, rebounds, assists, steals, blocks, turnovers | Stats |
-| usg_pct, ts_pct, off_rtg, def_rtg | Advanced stats |
+| player_key | Match key: accent/punctuation/suffix-free name ('luka doncic', 'jaren jackson') |
+| player_name, team, opponent, position, game_date | Game info (position is ESPN G/F/C) |
+| season, season_type, is_starter | '2025-26'; 'regular' / 'play-in' / 'playoffs' |
+| dk_fantasy_points, fd_fantasy_points, yahoo_fantasy_points | Fantasy points scored |
+| minutes, points, rebounds, assists, steals, blocks, turnovers, fg3_made | Stats |
+| ts_pct | True shooting (usg_pct / off_rtg / def_rtg / bpm are empty - use player_season_profiles) |
 | is_home, is_back_to_back, rest_days | Situational |
+
+#### `player_season_profiles` - Season Role Profiles
+| Column | Description |
+|--------|-------------|
+| season, player_key, player_name, team, position | One row per (season, player_key) |
+| games, starts, minutes_pg | Sample and role |
+| usg_pct, ast_pct, reb_pct, stl_pct, blk_pct, three_pa_rate, ts_pct | Rates as fractions (0.31 = 31%) |
+| pts_per36, reb_per36, ast_per36, fg3m_per36, dk_fppm, fd_fppm | Production |
+
+#### `player_archetypes` - Archetype per Season
+| Column | Description |
+|--------|-------------|
+| season, player_key | One row per (season, player_key) |
+| archetype, secondary_archetype | primary_creator, point_forward, scoring_guard, bench_scorer, stretch_big, rim_running_big, three_and_d_wing, spot_up_shooter, role_player, unclassified |
+
+#### `team_archetype_defense` - Matchups (what the projections use)
+| Column | Description |
+|--------|-------------|
+| season, site, group_by | Always filter these; group_by is 'archetype' or 'position' (G/F/C) |
+| team, group_key | Defending team x archetype key (or G/F/C) |
+| games, player_games | Sample size; under ~10 games values are mostly shrunk to 0 |
+| fp_over_expectation | Fantasy points per player-game allowed above (+) / below (-) expectation |
+| pts_delta, reb_delta, ast_delta, fg3m_delta, stocks_delta | Same, per stat |
+
+Early in a season use the prior season until 20+ defenses have 10+ games (the `archetype_matchups` tool does this).
+
+#### `slate_player_snapshots` - Past Slates
+| Column | Description |
+|--------|-------------|
+| game_date, site, slate_id, player_key, player_name | One row per player per synced slate |
+| salary, projected_points, projected_minutes, floor, ceiling, rostership | Pre-game values (rostership = projected ownership) |
+| vegas_implied_total, vegas_spread, over_under, injury_status | Context at last sync |
+
+Join to `historical_games` on player_key + game_date for actual results.
 
 #### `slates` - Available Slates
 | Column | Description |
 |--------|-------------|
-| slate_id, name, start_time | Slate identifiers |
+| slate_id, name, start_time, site | Slate identifiers |
+
+#### `team_defense_vs_position` - Legacy DVP
+HashtagBasketball position DVP. `pts_allowed` is REAL points per game (not fantasy points); prefer `team_archetype_defense`.
+
+Link slate players to the history tables with `player_key = LOWER(players.name) OR player_name = players.name`.
 
 ### MCP Server Tools (nba-dfs-sqlite)
 
@@ -45,7 +87,9 @@ You have access to the **nba-dfs-sqlite** MCP server with these tools:
 | `query` | Execute any SELECT SQL query |
 | `get_current_slate` | Get current slate info |
 | `search_player` | Search player by name (current + historical) |
-| `player_history` | Get player's recent game log |
+| `player_history` | Get player's recent game log + per-season averages |
+| `player_profile` | Get player's season role profiles and archetypes |
+| `archetype_matchups` | Tonight's players vs their opponent's archetype defense |
 | `value_plays` | Find value plays under salary threshold |
 | `gpp_plays` | Find low-ownership, high-ceiling GPP plays |
 | `game_stacks` | Get games by Vegas totals for stacking |
@@ -54,7 +98,7 @@ You have access to the **nba-dfs-sqlite** MCP server with these tools:
 
 Use these MCP tools directly instead of bash/sqlite3 commands.
 
-Setup: the server is not an npm workspace, so install its deps once with `cd mcp-servers/sqlite && npm install`. It reads the DB path from `NBA_DFS_DB_PATH` (set in `.mcp.json`).
+Setup: the server is not an npm workspace, so install its deps once with `cd mcp-servers/sqlite && npm install`. It reads the DB path from `NBA_DFS_DB_PATH` (set in `.mcp.json`). Tool queries live in `mcp-servers/sqlite/queries.js` (tests: `npm test` there).
 
 ### Analysis Modes
 

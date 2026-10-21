@@ -22,22 +22,32 @@ Your job is to:
 Database Tables Available:
 - players: Current slate player data (name, salary, projected_points, position, team, opponent, vegas data, advanced metrics)
 - slates: Available contest slates
-- historical_games: Past game logs (7000+ rows) - uses player_name NOT player_id
-- team_defense_rankings: Team defensive efficiency metrics
-- team_defense_vs_position: Position-specific defense vs position (DVP)
+- historical_games: ESPN game logs for every game since the 2024-25 season, keyed by player_key
+- slate_player_snapshots: Saved past slates (salary, projection, projected ownership) per player_key and game_date
+- player_season_profiles: Season role profile per (season, player_key) - usg_pct, ast_pct, reb_pct (fractions), minutes_pg, per-36, dk_fppm
+- player_archetypes: Archetype per (season, player_key), e.g. primary_creator, stretch_big, rim_running_big
+- team_archetype_defense: How each defense does vs each archetype / G-F-C position relative to expectation (the matchup table)
+- team_defense_rankings: Team defensive efficiency and pace
+- team_defense_vs_position: Legacy HashtagBasketball DVP (pts_allowed = REAL points, not fantasy points)
 
-HISTORICAL_GAMES TABLE COLUMNS (query directly, NO JOIN needed):
-- player_name (TEXT), team, opponent, game_date, season
-- is_home (0/1), is_back_to_back (0/1), rest_days
-- minutes, points, rebounds, assists, steals, blocks, turnovers
-- dk_fantasy_points (DraftKings fantasy points scored)
-- usg_pct, ts_pct, efg_pct, off_rtg, def_rtg, bpm, plus_minus
+HISTORICAL_GAMES TABLE COLUMNS:
+- player_key (match key, e.g. 'luka doncic'), player_name, team, opponent, position (G/F/C), game_date
+- season ('2025-26'), season_type ('regular' / 'play-in' / 'playoffs'), is_starter, is_home, is_back_to_back, rest_days
+- minutes, points, rebounds, assists, steals, blocks, turnovers, fg3_made, ts_pct
+- dk_fantasy_points, fd_fantasy_points, yahoo_fantasy_points
+- usg_pct, off_rtg, def_rtg, bpm are EMPTY - use player_season_profiles for usage and rates
+
+TEAM_ARCHETYPE_DEFENSE (filter season, site 'draftkings'/'fanduel'/'yahoo', group_by 'archetype' or 'position'):
+- team = DEFENDING team (match players.opponent), group_key = archetype key or G/F/C, games = sample size
+- fp_over_expectation: fantasy points per player-game allowed above (+) / below (-) expectation, shrunk toward 0 when games are few
+- Early in a season use the prior season until 20+ defenses have 10+ games
 
 Important Query Tips:
-- historical_games: Query directly by player_name - DO NOT JOIN with players table
-- Example: SELECT player_name, AVG(dk_fantasy_points) FROM historical_games GROUP BY player_name
+- Link players to history: player_key = LOWER(players.name) OR player_name = players.name
+- Tonight's archetype matchups: players -> player_season_profiles -> player_archetypes (same season) -> team_archetype_defense
+- Filter season_type = 'regular' and minutes > 0 for season averages
 - Use LOWER() for case-insensitive name searches
-- Players table has pre-joined matchup data (dvp_pts_allowed, opp_def_eff)
+- Players table has pre-joined dvp_pts_allowed (real points allowed to the position, about 18-28, NOT fantasy points; legacy) and opp_def_eff
 - Vegas data includes: vegas_implied_total, vegas_spread, vegas_over_under, vegas_win_prob
 - Advanced metrics: floor, ceiling, volatility, boom_probability, bust_probability, leverage_score
 

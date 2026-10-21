@@ -9,15 +9,22 @@
 # 5. chat_sessions - AI chat conversation sessions
 # 6. chat_messages - Individual chat messages
 # 7. team_defense_rankings - Team defensive efficiency, pace, and advanced stats (from ESPN)
-# 8. team_defense_vs_position - Position-specific defensive rankings (DVP) (from HashtagBasketball)
+# 8. team_defense_vs_position - Legacy position DVP from HashtagBasketball (REAL points allowed, not fantasy points)
+# 9. historical_games - ESPN box-score game logs, 2024-25 season onward (keyed by player_key)
+# 10. slate_player_snapshots - Saved copy of every synced slate's player rows (past salaries/projections/ownership)
+# 11. player_season_profiles - Per-season role profile per player (usage, assist rate, rebound rate, per-36)
+# 12. player_archetypes - Per-season archetype per player, classified from player_season_profiles
+# 13. team_archetype_defense - How each defense performs vs each archetype / G-F-C position, relative to expectation
 #
 # KEY MATCHUP ANALYSIS TABLES:
+# - team_archetype_defense: THE matchup table. fp_over_expectation = fantasy points per player-game a
+#   defense allows above (+) or below (-) what those players normally score. This is what the projections use.
 # - team_defense_rankings: Overall team defense quality (def_eff), pace, offensive efficiency
-# - team_defense_vs_position: How each team defends each position (pts_allowed per position)
-# - players.dvp_pts_allowed: Pre-joined DVP data for each player's matchup
+# - team_defense_vs_position / players.dvp_pts_allowed: legacy HashtagBasketball real points allowed per position
 # - players.opp_def_eff: Pre-joined defensive efficiency for each player's opponent
 #
-# IMPORTANT: All defensive data is auto-populated on slate load and pre-joined to players table!
+# Players link to the history tables by player_key: player_key = LOWER(players.name) OR player_name = players.name
+# (player_key is the accent/punctuation/suffix-free name, e.g. 'luka doncic', 'jaren jackson').
 
 tables:
   slates:
@@ -150,9 +157,9 @@ tables:
       # Defensive Matchup Data
       - name: dvp_pts_allowed
         type: REAL
-        description: "Defense vs Position - fantasy points allowed to this position by opponent"
-        range: [30, 65]
-        notes: "Higher = easier matchup. ≥45 = great, 35-45 = average, ≤35 = tough"
+        description: "Legacy DVP - real points (not fantasy points) the opponent allows per game to this player's primary position (HashtagBasketball)"
+        range: [18, 28]
+        notes: "Higher = easier, but the spread between teams is only a few points. For matchups prefer team_archetype_defense.fp_over_expectation"
       - name: opp_def_eff
         type: REAL
         description: "Opponent's overall defensive efficiency (from team_defense_rankings)"
@@ -271,9 +278,8 @@ tables:
       high_total_games: "WHERE vegas_over_under >= 230"
       leverage_plays: "WHERE rostership <= 10 AND projected_points >= 30"
       chalk_plays: "WHERE rostership >= 25"
-      great_matchups: "WHERE dvp_pts_allowed >= 45 AND opp_def_eff > 118"
-      tough_matchups: "WHERE dvp_pts_allowed <= 35 OR opp_def_eff < 108"
-      matchup_upside: "WHERE dvp_pts_allowed >= 45 AND usage >= 25 AND projected_points >= 35"
+      weak_defense: "WHERE opp_def_eff > 118"
+      elite_defense: "WHERE opp_def_eff < 108"
       # Advanced metric filters
       safe_cash_plays: "WHERE floor >= 30 AND volatility < 0.20 AND bust_probability < 25"
       high_ceiling_gpp: "WHERE ceiling >= 50 AND boom_probability >= 25"
@@ -298,14 +304,24 @@ tables:
         - description: "Punt plays with upside"
           query: "SELECT name, salary, projected_points, projected_minutes, fpts_last3 FROM players WHERE salary <= 4500 AND projected_minutes >= 20 AND fpts_last3 >= 15 AND (injury_status IS NULL OR injury_status = '')"
 
-        - description: "Players with elite matchups (high DVP and weak defense)"
-          query: "SELECT name, position, opponent, dvp_pts_allowed, opp_def_eff, projected_points, usage FROM players WHERE dvp_pts_allowed >= 45 AND opp_def_eff > 118 AND (injury_status IS NULL OR injury_status = '') ORDER BY projected_points DESC LIMIT 10"
+        - description: "Best archetype matchups tonight (defense allows the most fantasy points over expectation to the player's archetype)"
+          query: |
+            SELECT p.name, p.position, p.opponent, p.salary, p.projected_points, a.archetype,
+                   ROUND(d.fp_over_expectation, 2) AS fp_over_expectation, d.games, d.season
+            FROM players p
+            JOIN player_season_profiles sp ON (sp.player_key = LOWER(p.name) OR sp.player_name = p.name)
+            JOIN player_archetypes a ON a.player_key = sp.player_key AND a.season = sp.season
+            JOIN team_archetype_defense d ON d.team = p.opponent AND d.season = a.season
+              AND d.site = 'draftkings' AND d.group_by = 'archetype' AND d.group_key = a.archetype
+            WHERE d.season = (SELECT season FROM team_archetype_defense
+                              WHERE group_by = 'position' AND site = 'draftkings' AND games >= 10
+                              GROUP BY season HAVING COUNT(DISTINCT team) >= 20
+                              ORDER BY season DESC LIMIT 1)
+              AND (p.injury_status IS NULL OR p.injury_status = '')
+            ORDER BY d.fp_over_expectation DESC LIMIT 15
 
-        - description: "High usage players with great positional matchups"
-          query: "SELECT name, salary, usage, dvp_pts_allowed, projected_points, value FROM players WHERE usage >= 27 AND dvp_pts_allowed >= 45 AND (injury_status IS NULL OR injury_status = '') ORDER BY value_gpp DESC"
-
-        - description: "Value plays exploiting weak defenses"
-          query: "SELECT name, salary, value, projected_points, opp_def_eff, dvp_pts_allowed FROM players WHERE value >= 5.5 AND (opp_def_eff > 118 OR dvp_pts_allowed >= 45) AND (injury_status IS NULL OR injury_status = '') ORDER BY value DESC"
+        - description: "Value plays facing weak defenses"
+          query: "SELECT name, salary, value, projected_points, opp_def_eff FROM players WHERE value >= 5.5 AND opp_def_eff > 118 AND (injury_status IS NULL OR injury_status = '') ORDER BY value DESC"
 
       advanced_metrics:
         - description: "Safe cash game plays (high floor, low volatility, low bust risk)"
@@ -485,7 +501,7 @@ tables:
       - Data is refreshed from ESPN.com every time a slate is loaded
 
   team_defense_vs_position:
-    description: "Position-specific defensive rankings (DVP) - how well teams defend each position"
+    description: "Legacy position DVP from HashtagBasketball - REAL points (not fantasy points) each team allows per game to each position. Superseded for matchup analysis by team_archetype_defense"
     columns:
       - name: id
         type: INTEGER
@@ -504,9 +520,9 @@ tables:
         notes: "150 positions total (30 teams × 5 positions). ≤40 = elite, 110-150 = weak"
       - name: pts_allowed
         type: REAL
-        description: "Fantasy points allowed to this position per game"
-        range: [30, 65]
-        notes: "Higher = easier matchup for offensive players. ≥45 = great, 35-45 = average, ≤35 = tough"
+        description: "Real points (not fantasy points) allowed to this position per game"
+        range: [18, 28]
+        notes: "Higher = easier for offense, but teams are only a few points apart. Compare teams with rank rather than absolute thresholds"
       - name: fg_pct_allowed
         type: REAL
         description: "Field goal percentage allowed to this position"
@@ -539,24 +555,409 @@ tables:
       - description: "Find toughest matchups for point guards"
         query: "SELECT team, position, pts_allowed, rank FROM team_defense_vs_position WHERE position = 'PG' ORDER BY pts_allowed ASC LIMIT 5"
 
-      - description: "Players with great DVP matchups"
+      - description: "Tonight's players with their legacy positional DVP (primary position = first listed)"
         query: |
-          SELECT p.name, p.position, p.opponent, t.pts_allowed, p.projected_points
+          SELECT p.name, p.position, p.opponent, t.pts_allowed, t.rank, p.projected_points
           FROM players p
           JOIN team_defense_vs_position t ON p.opponent = t.team
-          WHERE t.position = SUBSTR(p.position, 1, 2)
-          AND t.pts_allowed >= 45
-          ORDER BY p.projected_points DESC
+          WHERE t.position = RTRIM(SUBSTR(p.position, 1, 2), ',/')
+          ORDER BY t.rank DESC, p.projected_points DESC
 
       - description: "All defensive matchups for a specific team"
         query: "SELECT position, pts_allowed, rank FROM team_defense_vs_position WHERE team = 'LAL' ORDER BY position"
 
     notes: |
-      - DVP (Defense vs Position) shows position-specific matchup quality
-      - pts_allowed is the key metric for DFS - higher is better for offense
+      - pts_allowed is REAL points scored by the position, not DraftKings fantasy points
+      - Prefer team_archetype_defense for matchups: it is relative to each player's own baseline and is what the projections use
       - Multi-position players (e.g., PG,SG) use their PRIMARY position (first listed)
       - Data is auto-populated from HashtagBasketball.com on slate load
       - Combined with team_defense_rankings.def_eff for complete matchup analysis
+
+  historical_games:
+    description: "ESPN box-score game logs, one row per player per game, every game since the 2024-25 season (regular season, play-in and playoffs). Refreshed by the nightly historical sync"
+    columns:
+      - name: player_key
+        type: TEXT
+        description: "Accent/punctuation/suffix-free match key ('luka doncic', 'jaren jackson'). Use it to join to player_season_profiles / player_archetypes / slate_player_snapshots"
+      - name: player_name
+        type: TEXT
+        description: "ESPN display name"
+      - name: espn_player_id
+        type: TEXT
+        description: "ESPN athlete id"
+      - name: team
+        type: TEXT
+        description: "Player's team (canonical 3-letter code, same as players.team)"
+      - name: opponent
+        type: TEXT
+        description: "Opponent team code"
+      - name: position
+        type: TEXT
+        description: "ESPN position, mostly G / F / C"
+      - name: game_id
+        type: TEXT
+        description: "ESPN game id"
+      - name: game_date
+        type: DATE
+        description: "Game date (YYYY-MM-DD)"
+      - name: season
+        type: TEXT
+        description: "Season label, e.g. '2025-26'"
+      - name: season_type
+        type: TEXT
+        description: "Game type"
+        valid_values: ["regular", "play-in", "playoffs"]
+        notes: "Filter season_type = 'regular' for season averages"
+      - name: is_home
+        type: INTEGER
+        description: "1 = home, 0 = away"
+      - name: is_starter
+        type: INTEGER
+        description: "1 = started the game"
+      - name: rest_days
+        type: INTEGER
+        description: "Days since the player's previous game"
+      - name: is_back_to_back
+        type: INTEGER
+        description: "1 = second night of a back-to-back"
+      - name: minutes
+        type: REAL
+        description: "Minutes played (0 = DNP)"
+      - name: points
+        type: INTEGER
+        description: "Points"
+      - name: rebounds
+        type: INTEGER
+        description: "Total rebounds"
+      - name: assists
+        type: INTEGER
+        description: "Assists"
+      - name: steals
+        type: INTEGER
+        description: "Steals"
+      - name: blocks
+        type: INTEGER
+        description: "Blocks"
+      - name: turnovers
+        type: INTEGER
+        description: "Turnovers"
+      - name: fg3_made
+        type: INTEGER
+        description: "Three-pointers made"
+      - name: fg_attempted
+        type: INTEGER
+        description: "Field goal attempts"
+      - name: ft_attempted
+        type: INTEGER
+        description: "Free throw attempts"
+      - name: ts_pct
+        type: REAL
+        description: "True shooting % for the game"
+      - name: dk_fantasy_points
+        type: REAL
+        description: "DraftKings fantasy points scored"
+      - name: fd_fantasy_points
+        type: REAL
+        description: "FanDuel fantasy points scored"
+      - name: yahoo_fantasy_points
+        type: REAL
+        description: "Yahoo fantasy points scored"
+
+    example_queries:
+      - description: "A player's last 10 games"
+        query: "SELECT game_date, opponent, minutes, points, rebounds, assists, dk_fantasy_points FROM historical_games WHERE player_key = 'jalen brunson' AND minutes > 0 ORDER BY game_date DESC LIMIT 10"
+
+      - description: "Season averages for tonight's players (regular season)"
+        query: |
+          SELECT p.name, h.season, COUNT(*) AS games, ROUND(AVG(h.minutes), 1) AS mpg,
+                 ROUND(AVG(h.dk_fantasy_points), 1) AS avg_dk
+          FROM players p
+          JOIN historical_games h ON (h.player_key = LOWER(p.name) OR h.player_name = p.name)
+          WHERE h.season_type = 'regular' AND h.minutes > 0
+          GROUP BY p.name, h.season
+          ORDER BY p.name, h.season DESC
+
+      - description: "Back-to-back split for a player"
+        query: "SELECT is_back_to_back, COUNT(*) AS games, ROUND(AVG(dk_fantasy_points), 1) AS avg_dk FROM historical_games WHERE player_key = 'jalen brunson' AND season_type = 'regular' AND minutes > 0 GROUP BY is_back_to_back"
+
+    notes: |
+      - usg_pct, off_rtg, def_rtg, bpm, ast_pct and the other rate columns are EMPTY (ESPN does not provide them). Use player_season_profiles for usage and rates
+      - player_id is empty; identify players by player_key
+      - Rows with minutes = 0 are DNPs; exclude them from averages
+
+  slate_player_snapshots:
+    description: "Copy of every synced slate's player rows (a slate sync wipes players and slates). One row per (game_date, site, slate_id, player_key) with the latest pre-game salary, projection, ownership, Vegas and injury values. Join to historical_games on player_key + game_date for actual results"
+    columns:
+      - name: game_date
+        type: DATE
+        description: "Date the slate's games are played"
+      - name: snapshot_date
+        type: DATE
+        description: "Date the snapshot was taken"
+      - name: slate_id
+        type: TEXT
+        description: "Slate identifier"
+      - name: site
+        type: TEXT
+        description: "DFS site"
+        valid_values: ["draftkings", "fanduel", "yahoo"]
+      - name: player_key
+        type: TEXT
+        description: "Match key (same as historical_games.player_key)"
+      - name: player_name
+        type: TEXT
+        description: "Player name as synced"
+      - name: team
+        type: TEXT
+        description: "Team code"
+      - name: opponent
+        type: TEXT
+        description: "Opponent team code"
+      - name: position
+        type: TEXT
+        description: "Site position(s)"
+      - name: salary
+        type: INTEGER
+        description: "Salary on that slate"
+      - name: projected_points
+        type: REAL
+        description: "Projection at the last sync"
+      - name: projected_minutes
+        type: REAL
+        description: "Projected minutes"
+      - name: floor
+        type: REAL
+        description: "Projected floor"
+      - name: ceiling
+        type: REAL
+        description: "Projected ceiling"
+      - name: rostership
+        type: REAL
+        description: "Projected ownership % (not actual ownership)"
+      - name: vegas_implied_total
+        type: REAL
+        description: "Team implied total"
+      - name: vegas_spread
+        type: REAL
+        description: "Point spread"
+      - name: over_under
+        type: REAL
+        description: "Game total"
+      - name: injury_status
+        type: TEXT
+        description: "Injury status at the last sync"
+      - name: is_confirmed
+        type: INTEGER
+        description: "1 = lineup confirmed"
+      - name: captured_at
+        type: DATETIME
+        description: "When the row was last written"
+
+    example_queries:
+      - description: "Projection vs actual DK points for past slates"
+        query: |
+          SELECT s.game_date, s.player_name, s.salary, s.projected_points,
+                 h.dk_fantasy_points AS actual, ROUND(h.dk_fantasy_points - s.projected_points, 1) AS diff
+          FROM slate_player_snapshots s
+          JOIN historical_games h ON h.player_key = s.player_key AND h.game_date = s.game_date
+          WHERE s.site = 'draftkings'
+          ORDER BY s.game_date DESC, diff DESC
+          LIMIT 20
+
+    notes: |
+      - Only slates synced since snapshots were added are here; it may be empty or short
+      - rostership is projected ownership, not actual contest ownership
+
+  player_season_profiles:
+    description: "Per-season regular-season role profile per player, computed in-house from historical_games. One row per (season, player_key). Rates are FRACTIONS (0.31 = 31%)"
+    columns:
+      - name: season
+        type: TEXT
+        description: "Season label, e.g. '2025-26'"
+      - name: player_key
+        type: TEXT
+        description: "Match key"
+      - name: player_name
+        type: TEXT
+        description: "Player name"
+      - name: team
+        type: TEXT
+        description: "Latest team that season"
+      - name: teams
+        type: TEXT
+        description: "Every team that season, in order"
+      - name: position
+        type: TEXT
+        description: "ESPN position (G / F / C)"
+      - name: games
+        type: INTEGER
+        description: "Games played"
+      - name: starts
+        type: INTEGER
+        description: "Games started"
+      - name: minutes_pg
+        type: REAL
+        description: "Minutes per game"
+      - name: usg_pct
+        type: REAL
+        description: "Usage rate (fraction)"
+        notes: "Median ~0.18, 90th percentile ~0.27"
+      - name: ast_pct
+        type: REAL
+        description: "Assist rate (fraction)"
+      - name: reb_pct
+        type: REAL
+        description: "Total rebound rate (fraction)"
+      - name: stl_pct
+        type: REAL
+        description: "Steal rate (fraction)"
+      - name: blk_pct
+        type: REAL
+        description: "Block rate (fraction)"
+      - name: three_pa_rate
+        type: REAL
+        description: "Share of shots that are threes (fraction)"
+      - name: ts_pct
+        type: REAL
+        description: "True shooting (fraction)"
+      - name: dk_fppm
+        type: REAL
+        description: "DraftKings fantasy points per minute"
+      - name: fd_fppm
+        type: REAL
+        description: "FanDuel fantasy points per minute"
+      - name: pts_per36
+        type: REAL
+        description: "Points per 36 minutes"
+      - name: reb_per36
+        type: REAL
+        description: "Rebounds per 36 minutes"
+      - name: ast_per36
+        type: REAL
+        description: "Assists per 36 minutes"
+      - name: fg3m_per36
+        type: REAL
+        description: "Threes made per 36 minutes"
+
+    example_queries:
+      - description: "Highest-usage players last season (20+ games)"
+        query: "SELECT player_name, team, games, minutes_pg, ROUND(usg_pct * 100, 1) AS usg, dk_fppm FROM player_season_profiles WHERE season = '2025-26' AND games >= 20 ORDER BY usg_pct DESC LIMIT 15"
+
+      - description: "Profiles for tonight's players"
+        query: |
+          SELECT p.name, sp.season, sp.minutes_pg, ROUND(sp.usg_pct * 100, 1) AS usg, sp.dk_fppm
+          FROM players p
+          JOIN player_season_profiles sp ON (sp.player_key = LOWER(p.name) OR sp.player_name = p.name)
+          ORDER BY p.name, sp.season DESC
+
+  player_archetypes:
+    description: "Per-season archetype per player, classified from player_season_profiles by rules in config/archetypes.js. One row per (season, player_key)"
+    columns:
+      - name: season
+        type: TEXT
+        description: "Season label"
+      - name: player_key
+        type: TEXT
+        description: "Match key"
+      - name: archetype
+        type: TEXT
+        description: "Primary archetype key"
+        valid_values: ["primary_creator", "point_forward", "scoring_guard", "bench_scorer", "stretch_big", "rim_running_big", "three_and_d_wing", "spot_up_shooter", "role_player", "unclassified"]
+        notes: "unclassified = below 10 games / 200 minutes that season; use the prior season's archetype instead"
+      - name: secondary_archetype
+        type: TEXT
+        description: "Next matching archetype, if any"
+      - name: rule_trace
+        type: TEXT
+        description: "JSON explaining which rules passed/failed"
+
+    example_queries:
+      - description: "Archetypes of tonight's players"
+        query: |
+          SELECT p.name, a.season, a.archetype, a.secondary_archetype
+          FROM players p
+          JOIN player_season_profiles sp ON (sp.player_key = LOWER(p.name) OR sp.player_name = p.name)
+          JOIN player_archetypes a ON a.player_key = sp.player_key AND a.season = sp.season
+          ORDER BY p.name, a.season DESC
+
+  team_archetype_defense:
+    description: "How each defense performs against each player archetype (group_by 'archetype') and each G/F/C position (group_by 'position', in-house DvP), RELATIVE TO EXPECTATION: each player-game is compared with that player's own season-to-date per-minute rate x actual minutes. Full-season numbers per (season, site, group_by, team, group_key). This is what the projection DVP adjustment uses"
+    columns:
+      - name: season
+        type: TEXT
+        description: "Season label"
+      - name: site
+        type: TEXT
+        description: "DFS scoring"
+        valid_values: ["draftkings", "fanduel", "yahoo"]
+      - name: group_by
+        type: TEXT
+        description: "Grouping"
+        valid_values: ["archetype", "position"]
+      - name: team
+        type: TEXT
+        description: "DEFENDING team code (match to players.opponent)"
+      - name: group_key
+        type: TEXT
+        description: "Archetype key (see player_archetypes.archetype) or G / F / C"
+      - name: games
+        type: INTEGER
+        description: "Distinct games in the sample"
+        notes: "Under ~10 games the numbers are mostly shrunk toward 0"
+      - name: player_games
+        type: INTEGER
+        description: "Player-games in the sample"
+      - name: avg_minutes
+        type: REAL
+        description: "Average minutes per player-game"
+      - name: avg_fp
+        type: REAL
+        description: "Average actual fantasy points per player-game"
+      - name: avg_expected_fp
+        type: REAL
+        description: "Average expected fantasy points per player-game"
+      - name: fp_over_expectation
+        type: REAL
+        description: "KEY METRIC: fantasy points per player-game allowed above (+) or below (-) expectation, shrunk toward 0 by games / (games + 10)"
+        range: [-6, 7]
+        notes: "+1.5 or more = soft spot, -1.5 or less = tough. Compare within a group_key"
+      - name: fp_over_expectation_raw
+        type: REAL
+        description: "Same before shrinkage"
+      - name: shrink
+        type: REAL
+        description: "Shrink factor applied (games / (games + 10))"
+      - name: pts_delta
+        type: REAL
+        description: "Real points per player-game over expectation (shrunk)"
+      - name: reb_delta
+        type: REAL
+        description: "Rebounds over expectation (shrunk)"
+      - name: ast_delta
+        type: REAL
+        description: "Assists over expectation (shrunk)"
+      - name: fg3m_delta
+        type: REAL
+        description: "Threes made over expectation (shrunk)"
+      - name: stocks_delta
+        type: REAL
+        description: "Steals + blocks over expectation (shrunk)"
+
+    example_queries:
+      - description: "Softest defenses vs Primary Creators on DraftKings"
+        query: "SELECT team, games, ROUND(fp_over_expectation, 2) AS fp_over_exp, ROUND(ast_delta, 2) AS ast_delta FROM team_archetype_defense WHERE season = '2025-26' AND site = 'draftkings' AND group_by = 'archetype' AND group_key = 'primary_creator' ORDER BY fp_over_expectation DESC LIMIT 10"
+
+      - description: "In-house G/F/C DvP for one defense"
+        query: "SELECT group_key, games, ROUND(fp_over_expectation, 2) AS fp_over_exp, ROUND(reb_delta, 2) AS reb_delta FROM team_archetype_defense WHERE season = '2025-26' AND site = 'draftkings' AND group_by = 'position' AND team = 'LAL'"
+
+      - description: "Which season to use (latest with 20+ defenses at 10+ games)"
+        query: "SELECT season FROM team_archetype_defense WHERE group_by = 'position' AND site = 'draftkings' AND games >= 10 GROUP BY season HAVING COUNT(DISTINCT team) >= 20 ORDER BY season DESC LIMIT 1"
+
+    notes: |
+      - Always filter site, season and group_by; otherwise rows from every site/season/grouping mix together
+      - Early in a season the current season is thin; use the prior season until 20+ defenses have 10+ games
+      - Positions are ESPN's coarse G / F / C, not PG/SG/SF/PF/C
+      - Player -> archetype: players -> player_season_profiles (by name) -> player_archetypes (same season)
 
 # DFS Constraints (DraftKings)
 dfs_rules:
@@ -598,11 +999,13 @@ query_tips:
   - "High ownership = rostership >= 25, Low ownership = rostership <= 10"
   - "Team abbreviations: LAL, BOS, GSW, MIA, etc. (3-letter uppercase)"
   - "Always order by projected_points DESC or value DESC for best results"
-  - "Great matchups: dvp_pts_allowed >= 45 (high) AND opp_def_eff > 118 (weak defense)"
-  - "Tough matchups: dvp_pts_allowed <= 35 (low) OR opp_def_eff < 108 (elite defense)"
-  - "DVP pts_allowed: Higher is better for offense (easier matchup)"
+  - "Matchups: use team_archetype_defense.fp_over_expectation (fantasy points per player-game above/below expectation, + = soft). Join players -> player_season_profiles -> player_archetypes -> team_archetype_defense"
+  - "team_archetype_defense: filter site ('draftkings'/'fanduel'/'yahoo'), season and group_by ('archetype' or 'position'). Check games: under ~10 the value is heavily shrunk toward 0"
+  - "Early in a season use the prior season for team_archetype_defense until 20+ defenses have 10+ games in the current one"
+  - "dvp_pts_allowed / team_defense_vs_position.pts_allowed are REAL points (about 18-28), NOT fantasy points"
   - "opp_def_eff: Higher is better for offense (weaker defense to face)"
-  - "For complete matchup analysis, check BOTH dvp_pts_allowed AND opp_def_eff"
+  - "Link players to history by name: player_key = LOWER(players.name) OR player_name = players.name"
+  - "historical_games has every game since 2024-25; filter season_type = 'regular' for season averages. usg_pct/off_rtg/def_rtg/bpm are empty there - use player_season_profiles"
   # Advanced metrics tips
   - "CASH GAMES: Filter by floor >= 30 AND volatility < 0.20 AND bust_probability < 25"
   - "GPP TOURNAMENTS: Sort by leverage_score DESC for maximum differentiation"
@@ -650,10 +1053,18 @@ dfs_strategy:
       ORDER BY t.pace DESC, p.projected_points DESC
 
   matchup_stacking:
-    description: "Combine DVP, defensive efficiency, and pace for elite matchup spots"
+    description: "Combine archetype defense and pace for elite matchup spots"
     sql_example: |
-      SELECT p.name, p.salary, p.dvp_pts_allowed, p.opp_def_eff, t.pace, p.projected_points
+      SELECT p.name, p.salary, a.archetype, ROUND(d.fp_over_expectation, 2) AS fp_over_expectation, t.pace, p.projected_points
       FROM players p
+      JOIN player_season_profiles sp ON (sp.player_key = LOWER(p.name) OR sp.player_name = p.name)
+      JOIN player_archetypes a ON a.player_key = sp.player_key AND a.season = sp.season
+      JOIN team_archetype_defense d ON d.team = p.opponent AND d.season = a.season
+        AND d.site = 'draftkings' AND d.group_by = 'archetype' AND d.group_key = a.archetype
       JOIN team_defense_rankings t ON p.opponent = t.team
-      WHERE p.dvp_pts_allowed >= 45 AND p.opp_def_eff > 118 AND t.pace > 100
+      WHERE d.season = (SELECT season FROM team_archetype_defense
+                        WHERE group_by = 'position' AND site = 'draftkings' AND games >= 10
+                        GROUP BY season HAVING COUNT(DISTINCT team) >= 20
+                        ORDER BY season DESC LIMIT 1)
+        AND d.fp_over_expectation >= 1 AND t.pace > 100
       ORDER BY p.value_gpp DESC
