@@ -37,6 +37,13 @@ async function game(name, team, opp, date, minutes, dk, { fd = dk, yahoo = dk } 
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `, name, playerKey(name), team, opp, gameId(date, team, opp), date, seasonForDate(date),
   minutes, Math.round(dk), dk, fd, yahoo);
+  // Every box score has a team row per side (the team's schedule)
+  for (const [t, o] of [[team, opp], [opp, team]]) {
+    await db.run(`
+      INSERT OR IGNORE INTO team_game_stats (game_id, game_date, season, team, opponent)
+      VALUES (?, ?, ?, ?, ?)
+    `, gameId(date, team, opp), date, seasonForDate(date), t, o);
+  }
 }
 
 async function status(name, team, opp, date, value = 'INACTIVE') {
@@ -74,6 +81,21 @@ async function seed() {
     await game('Ja Morant', 'MEM', 'NOP', lastSeason(i), 34, 100);
     await status('Jaren Jackson Jr.', 'MEM', 'NOP', lastSeason(i), 'INACTIVE');
   }
+
+  // ── PHI: a missing player absent from the box score entirely ───────
+  // ESPN lists only healthy DNP-CD players; Oubre has no game_player_status
+  // rows except one DNP. P0..P13 in March, P14 after his last appearance.
+  // Low scores keep both out of the league-wide consistency cards.
+  const P = Array.from({ length: 15 }, (_, i) => d(2 * i));
+  const ABSENT = new Set([2, 5, 8]);
+  for (const [i, date] of P.entries()) {
+    const out = ABSENT.has(i) || i >= 11;
+    if (!out || i === 12 || i === 13) await game('Kelly Oubre Jr.', 'PHI', 'ORL', date, 30, 18);
+    await game('Tyrese Maxey', 'PHI', 'ORL', date, 36, i === 14 ? 30 : (out && i !== 12 && i !== 13) ? 15 : 10);
+  }
+  await status('Kelly Oubre Jr.', 'PHI', 'ORL', P[11], 'DNP');
+  // January: Oubre not on PHI yet
+  for (const i of [0, 1, 2]) await game('Tyrese Maxey', 'PHI', 'ORL', jan(i), 36, 50);
 
   // ── Streaks (BOS) ──────────────────────────────────────────────────
   const S = Array.from({ length: 8 }, (_, i) => d(2 * i));
@@ -401,6 +423,26 @@ describe('missing players and usage bumps', () => {
     assert.equal(ja.dkBump, 10);
     assert.equal(ja.salary, 9000);
     assert.equal(ja.bumpedProjection, 60);
+    // Absence labels: minutes=0 listing and DNP are coach's decisions
+    assert.equal(ja.gamesWithoutDnp, 2);
+    assert.equal(ja.gamesWithoutOut, 1);
+    assert.equal(ja.absenceReason, 'MIXED');
+  });
+
+  test('games without come from the team schedule, not only game_player_status', async () => {
+    const bumps = await insights.detectUsageBumps([{ name: 'Tyrese Maxey', team: 'PHI' }], { endDate: END, minAvgDk: 15 });
+    assert.equal(bumps.length, 1);
+    const maxey = bumps[0];
+    assert.equal(maxey.missingPlayer, 'Kelly Oubre Jr.');
+    // P2, P5, P8 (no rows at all) + P11 (DNP); January and P14 are outside his PHI span
+    assert.equal(maxey.gamesWithout, 4);
+    assert.equal(maxey.gamesWith, 10);
+    assert.equal(maxey.avgWithout, 15);
+    assert.equal(maxey.avgWith, 10);
+    assert.equal(maxey.pctBump, 50);
+    assert.equal(maxey.gamesWithoutDnp, 1);
+    assert.equal(maxey.gamesWithoutOut, 3);
+    assert.equal(maxey.absenceReason, 'MIXED');
   });
 
   test('usage bumps accept a site and trimmed payload', async () => {

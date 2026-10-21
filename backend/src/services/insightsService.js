@@ -18,8 +18,12 @@
  *   for players whose season_avg is at least minAvg (default STREAK_MIN_AVG).
  * - consistency_score = 100 * (1 - coefficient of variation), floored at 0;
  *   sd = 0 scores 100.
- * - A player "without" a teammate: games where the teammate was listed for the
- *   team (game_player_status DNP/INACTIVE, or a minutes = 0 row) but did not play.
+ * - A player "without" a teammate: the team's games (team_game_stats) between the
+ *   teammate's first and last appearance for that team this season (a box score
+ *   row or a game_player_status listing) in which he has no minutes > 0 row.
+ *   ESPN lists only healthy DNP-CD players, so injured players are usually
+ *   absent; game_player_status (or a minutes = 0 row) only labels the absence
+ *   DNP-CD, anything else is OUT.
  */
 
 import db, { DATABASE_TYPE } from '../config/database.js';
@@ -510,8 +514,8 @@ class InsightsService {
 
   /**
    * Usage bumps: for each missing regular, how the slate teammates scored in
-   * games he was listed for but sat vs games he played, season to date
-   * (through the window's end). Two queries total.
+   * the team's games he missed vs games he played, while he was on the team,
+   * season to date (through the window's end). Two queries total.
    */
   async detectUsageBumps(players, { minGames = 8, minAvgDk = 25, site, ...windowOpts } = {}) {
     const slate = normalizeSlatePlayers(players);
@@ -521,41 +525,53 @@ class InsightsService {
     if (missing.length === 0) return [];
 
     const season = { startDate: window.seasonStartDate, endDate: window.endDate };
-    const hRange = this.dateFilter('h.game_date', season);
-    const sRange = this.dateFilter('s.game_date', season);
+    const range = this.dateFilter('game_date', season);
     const missingRows = missing.map(m => [m.player_key, m.team]);
     const slateRows = [...new Map(slate.map(p => [`${p.key}|${p.team}`, [p.key, p.team]])).values()];
 
     const rows = await db.all(`
       WITH missing(player_key, team) AS (${valuesSql(missingRows, 2)}),
       slate(player_key, team) AS (${valuesSql(slateRows, 2)}),
-      listed AS (
-        SELECT m.player_key AS missing_key, m.team, h.game_id,
-          CASE WHEN h.minutes > 0 THEN 1 ELSE 0 END AS played
+      roster AS (
+        SELECT m.player_key, m.team, MIN(a.game_date) AS first_date, MAX(a.game_date) AS last_date
         FROM missing m
-        JOIN historical_games h ON h.player_key = m.player_key AND h.team = m.team
-        WHERE 1 = 1${hRange.sql}
-        UNION ALL
-        SELECT m.player_key, m.team, s.game_id, 0
-        FROM missing m
-        JOIN game_player_status s ON s.player_key = m.player_key AND s.team = m.team
-        WHERE NOT EXISTS (
-          SELECT 1 FROM historical_games x WHERE x.game_id = s.game_id AND x.player_key = s.player_key
-        )${sRange.sql}
+        JOIN (
+          SELECT player_key, team, game_date FROM historical_games WHERE 1 = 1${range.sql}
+          UNION ALL
+          SELECT player_key, team, game_date FROM game_player_status WHERE 1 = 1${range.sql}
+        ) a ON a.player_key = m.player_key AND a.team = m.team
+        GROUP BY m.player_key, m.team
+      ),
+      team_games AS (
+        SELECT r.player_key AS missing_key, r.team, t.game_id,
+          CASE WHEN EXISTS (
+            SELECT 1 FROM historical_games p
+            WHERE p.game_id = t.game_id AND p.player_key = r.player_key AND p.minutes > 0
+          ) THEN 1 ELSE 0 END AS played,
+          CASE WHEN EXISTS (
+            SELECT 1 FROM game_player_status s
+            WHERE s.game_id = t.game_id AND s.player_key = r.player_key AND s.status = 'DNP'
+          ) OR EXISTS (
+            SELECT 1 FROM historical_games z
+            WHERE z.game_id = t.game_id AND z.player_key = r.player_key AND COALESCE(z.minutes, 0) = 0
+          ) THEN 1 ELSE 0 END AS dnp
+        FROM roster r
+        JOIN team_game_stats t ON t.team = r.team AND t.game_date >= r.first_date AND t.game_date <= r.last_date
       )
       SELECT l.missing_key, l.team, h.player_key,
         SUM(CASE WHEN l.played = 0 THEN 1 ELSE 0 END) AS games_without,
+        SUM(CASE WHEN l.played = 0 AND l.dnp = 1 THEN 1 ELSE 0 END) AS games_without_dnp,
         SUM(l.played) AS games_with,
         AVG(CASE WHEN l.played = 0 THEN h.${col} END) AS avg_without,
         AVG(CASE WHEN l.played = 1 THEN h.${col} END) AS avg_with,
         AVG(CASE WHEN l.played = 0 THEN h.minutes END) AS min_without,
         AVG(CASE WHEN l.played = 1 THEN h.minutes END) AS min_with
-      FROM listed l
+      FROM team_games l
       JOIN historical_games h ON h.game_id = l.game_id AND h.team = l.team
       JOIN slate sl ON sl.player_key = h.player_key AND sl.team = h.team
       WHERE h.minutes > 0 AND h.${col} IS NOT NULL AND h.player_key <> l.missing_key
       GROUP BY l.missing_key, l.team, h.player_key
-    `, [...missingRows.flat(), ...slateRows.flat(), ...hRange.params, ...sRange.params]);
+    `, [...missingRows.flat(), ...slateRows.flat(), ...range.params, ...range.params]);
 
     const missingByKey = new Map(missing.map(m => [`${m.player_key}|${m.team}`, m]));
     const slateByKey = new Map(slate.map(p => [`${p.key}|${p.team}`, p]));
@@ -576,6 +592,8 @@ class InsightsService {
         : round1(r.avg_without);
       const salary = player.salary || 0;
       const sampleSize = r.games_without + r.games_with;
+      const gamesWithoutDnp = r.games_without_dnp;
+      const absenceReason = gamesWithoutDnp === r.games_without ? 'DNP-CD' : gamesWithoutDnp === 0 ? 'OUT' : 'MIXED';
 
       const bump = {
         player: player.name,
@@ -591,6 +609,9 @@ class InsightsService {
         missingPlayerAvg: round1(out.avg_fpts),
         gamesWithout: r.games_without,
         gamesWith: r.games_with,
+        gamesWithoutDnp,
+        gamesWithoutOut: r.games_without - gamesWithoutDnp,
+        absenceReason,
         avgWithout: round1(r.avg_without),
         avgWith: round1(r.avg_with),
         avgMinWithout: round1(r.min_without || 0),
