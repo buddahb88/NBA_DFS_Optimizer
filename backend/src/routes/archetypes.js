@@ -70,6 +70,9 @@ function sendError(res, error) {
  *   team, group  optional filters (defending team, archetype key or G/F/C)
  *   lastNGames   each defense's last N games
  *   startDate, endDate  YYYY-MM-DD window
+ *   seasonFallback  true: without `season`, use last season while the current
+ *                   one is thin (fewer than 20 defenses at 10+ games); `fallback`
+ *                   ({ from, qualifiedDefenses, minDefenses, minGames }) says so
  */
 router.get('/defense', async (req, res) => {
   try {

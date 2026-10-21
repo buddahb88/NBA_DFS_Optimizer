@@ -44,14 +44,14 @@ function NoDefenseData({ season }) {
   );
 }
 
-// Tonight was tiered on last season because the current one is too thin
-function FallbackNote({ season, fallback }) {
+// Auto season fell back to last season because the current one is too thin
+function FallbackNote({ lead, season, fallback }) {
   return (
     <div role="note" className="flex items-start gap-2 rounded-md border border-info/30 bg-info-soft px-3 py-2 text-xs text-fg">
       <IconInfo size={14} className="mt-px shrink-0 text-info" />
       <span>
-        Tiers use {season}: only {fallback.qualifiedDefenses} defenses have {fallback.minGames}+ games in {fallback.from} ({fallback.minDefenses} needed).
-        Pick {fallback.from} under Season to tier on it anyway.
+        {lead} {season}: only {fallback.qualifiedDefenses} defenses have {fallback.minGames}+ games in {fallback.from} ({fallback.minDefenses} needed).
+        Pick {fallback.from} under Season to use it anyway.
       </span>
     </div>
   );
@@ -133,18 +133,21 @@ export default function ArchetypesPage() {
       <Tabs tabs={TABS} value={tab} onChange={setTab} />
 
       {tab === 'heatmap' ? (
-        <Card>
-          <CardHeader
-            title={`Team defense vs ${columnsLabel}`}
-            subtitle={`${season ?? ''}${defense.data?.lastNGames ? ` · each defense's last ${defense.data.lastNGames} games` : ' · full season'} · click a cell for its games`}
-          />
-          <CardBody>{heatmapBody}</CardBody>
-        </Card>
+        <div className="flex flex-col gap-2">
+          {defense.data?.fallback && <FallbackNote lead="Showing" season={defense.data.season} fallback={defense.data.fallback} />}
+          <Card>
+            <CardHeader
+              title={`Team defense vs ${columnsLabel}`}
+              subtitle={`${season ?? ''}${defense.data?.lastNGames ? ` · each defense's last ${defense.data.lastNGames} games` : ' · full season'} · click a cell for its games`}
+            />
+            <CardBody>{heatmapBody}</CardBody>
+          </Card>
+        </div>
       ) : tonight.status === 'error' ? (
         <Card><SectionError error={tonight.error} onRetry={reload} /></Card>
       ) : (
         <div className="flex flex-col gap-2">
-          {tonight.data?.fallback && <FallbackNote season={tonight.data.season} fallback={tonight.data.fallback} />}
+          {tonight.data?.fallback && <FallbackNote lead="Tiers use" season={tonight.data.season} fallback={tonight.data.fallback} />}
           <TonightTable data={tonight.data} stat={filters.stat} loading={tonight.status === 'loading'} emptyState={tonightEmpty} />
         </div>
       )}

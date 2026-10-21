@@ -28,7 +28,7 @@ function load(request, setState, pick = (d) => d) {
  *   defense      GET /archetypes/defense for site + season / grouping / lastNGames
  *   tonight      GET /archetypes/tonight for slateId (+ stat), idle without a slate
  *   cell         drill-down for one heatmap cell: openCell({ team, group, label }),
- *                closeCell(); null when closed
+ *                closeCell(); null when closed. Uses the season the grid loaded.
  * Sections are { status: 'idle' | 'loading' | 'ready' | 'error', data, error }.
  * The stat only re-ranks tonight; the heatmap reads it client-side.
  */
@@ -61,6 +61,9 @@ export default function useArchetypes({ site, slateId, filters }) {
     return load(() => archetypesAPI.getTonight({ ...JSON.parse(paramsJson), slateId, stat }), setTonight);
   }, [paramsJson, slateId, stat, reloadToken]);
 
+  // The season the grid actually shows (Auto may have fallen back to last season)
+  const gridSeason = defense.data?.season ?? null;
+
   const openCell = useCallback(
     ({ team, group, label }) => {
       const id = ++cellRequest.current;
@@ -68,12 +71,16 @@ export default function useArchetypes({ site, slateId, filters }) {
       setCell({ ...base, status: 'loading', data: null, error: null });
       // Only the latest open cell may land
       const settle = (next) => id === cellRequest.current && setCell({ ...base, ...next });
-      archetypesAPI.getCellGames(team, group, JSON.parse(paramsJson)).then(
+      // Pin the grid's season; the drill-down has no fallback of its own
+      const params = JSON.parse(paramsJson);
+      delete params.seasonFallback;
+      if (gridSeason) params.season = gridSeason;
+      archetypesAPI.getCellGames(team, group, params).then(
         (res) => settle(ready(res.data)),
         (err) => settle(failed(err)),
       );
     },
-    [paramsJson],
+    [paramsJson, gridSeason],
   );
 
   const closeCell = useCallback(() => {

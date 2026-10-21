@@ -176,6 +176,24 @@ describe('GET /tonight thin-season fallback', () => {
     assert.equal(body.players[0].archetype, 'scoring_guard');
   });
 
+  test('GET /defense falls back the same way only when asked to', async () => {
+    const auto = await (await fetch(`${baseUrl}/defense?site=yahoo&seasonFallback=true`)).json();
+    assert.equal(auto.season, PRIOR);
+    assert.deepEqual(auto.fallback, { from: CURRENT, qualifiedDefenses: 0, minDefenses: 20, minGames: 10 });
+    assert.equal(auto.rows.length, 24);
+
+    // Default contract unchanged: current season, no fallback
+    const plain = await (await fetch(`${baseUrl}/defense?site=yahoo`)).json();
+    assert.equal(plain.season, CURRENT);
+    assert.equal(plain.fallback, null);
+    assert.equal(plain.rows.length, 6);
+
+    // An explicit season wins over seasonFallback
+    const pinned = await (await fetch(`${baseUrl}/defense?site=yahoo&season=${CURRENT}&seasonFallback=true`)).json();
+    assert.equal(pinned.season, CURRENT);
+    assert.equal(pinned.fallback, null);
+  });
+
   test('an explicit season is never replaced', async () => {
     const body = await (await fetch(`${baseUrl}/tonight?slateId=s2&season=${CURRENT}`)).json();
     assert.equal(body.season, CURRENT);

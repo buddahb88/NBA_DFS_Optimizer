@@ -25,13 +25,17 @@ export const LAST_N_OPTIONS = [
 
 export const DEFAULT_FILTERS = { season: '', grouping: 'archetype', lastNGames: '', stat: 'fp' }
 
-/** Filters + site -> /defense query params, empty values left out. */
+/**
+ * Filters + site -> /defense query params, empty values left out. Auto season
+ * (no season) asks the backend to use last season while the current one is thin.
+ */
 export function defenseParams({ season, grouping, lastNGames }, site) {
   const params = {}
   if (season) params.season = season
   if (grouping) params.grouping = grouping
   if (lastNGames) params.lastNGames = Number(lastNGames)
   if (site) params.site = site
+  if (!season) params.seasonFallback = true
   return params
 }
 

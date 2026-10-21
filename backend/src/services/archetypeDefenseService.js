@@ -49,9 +49,10 @@ const POSITION_BUCKETS = ['G', 'F', 'C'];
 export const STAT_COLUMNS = { fp: 'fp_over_expectation', pts: 'pts_delta', reb: 'reb_delta', ast: 'ast_delta', fg3m: 'fg3m_delta' };
 // Weak tier = the top third of defenses (most allowed over expectation) per group
 const WEAK_TIER_FRACTION = 1 / 3;
-// Tonight without an explicit season: the current season is too thin to tier
-// until this many defenses have played minGames (where shrink reaches 0.5)
-export const TONIGHT_MIN_SEASON = { minDefenses: 20, minGames: DEFAULT_DEFENSE_CONFIG.priorGames };
+// Season fallback (Tonight, and /defense with seasonFallback): without an
+// explicit season, the current season is too thin to use until this many
+// defenses have played minGames (where shrink reaches 0.5)
+export const THIN_SEASON = { minDefenses: 20, minGames: DEFAULT_DEFENSE_CONFIG.priorGames };
 const SITE_ALIASES = { dk: 'draftkings', fd: 'fanduel' };
 const SITE_METRICS = { draftkings: 'dk', fanduel: 'fd', yahoo: 'yahoo' };
 const STATS = ['pts', 'reb', 'ast', 'fg3m', 'stocks'];
@@ -381,21 +382,44 @@ const STORED_SQL = `SELECT ${DEFENSE_COLUMNS.join(', ')}, updated_at FROM team_a
   WHERE season = ? AND site = ? AND group_by = ?
   ORDER BY fp_over_expectation DESC, team, group_key`;
 
+/** Unfiltered defense rows for normalized filters: stored, else computed live. */
+async function loadDefenseRows(f) {
+  const windowed = Boolean(f.lastNGames || f.startDate || f.endDate);
+  let rows = [];
+  if (!windowed) rows = await db.all(STORED_SQL, f.season, f.site, f.grouping);
+  if (rows.length > 0) return { rows, source: 'precomputed' };
+  const games = await loadSeasonExpectations(f.season);
+  return { rows: aggregateDefense(games, f).map(r => ({ season: f.season, ...r })), source: 'live' };
+}
+
+const isTrue = (v) => v === true || v === 'true' || v === '1';
+
 /**
  * Defense vs archetype (or G/F/C) rows. Full season comes from
  * team_archetype_defense; a window, or a season not built yet, is computed live.
+ *
+ * With seasonFallback and no explicit season, a current season with fewer
+ * than THIN_SEASON.minDefenses defenses at minGames+ games is replaced by the
+ * prior season when that one has more; `fallback` ({ from, qualifiedDefenses,
+ * minDefenses, minGames }) says so, null otherwise.
  */
 export async function getDefense(query = {}) {
-  const f = normalizeFilters(query);
-  const windowed = Boolean(f.lastNGames || f.startDate || f.endDate);
+  let f = normalizeFilters(query);
+  let { rows, source } = await loadDefenseRows(f);
 
-  let rows = [];
-  let source = 'precomputed';
-  if (!windowed) rows = await db.all(STORED_SQL, f.season, f.site, f.grouping);
-  if (rows.length === 0) {
-    source = 'live';
-    const games = await loadSeasonExpectations(f.season);
-    rows = aggregateDefense(games, f).map(r => ({ season: f.season, ...r }));
+  let fallback = null;
+  if (isTrue(query.seasonFallback) && !query.season) {
+    const { minDefenses, minGames } = THIN_SEASON;
+    const qualified = qualifiedDefenses(rows, minGames);
+    if (qualified < minDefenses) {
+      const priorFilters = { ...f, season: previousSeason(f.season) };
+      const prior = await loadDefenseRows(priorFilters);
+      if (qualifiedDefenses(prior.rows, minGames) > qualified) {
+        fallback = { from: f.season, qualifiedDefenses: qualified, minDefenses, minGames };
+        f = priorFilters;
+        ({ rows, source } = prior);
+      }
+    }
   }
 
   rows = rows
@@ -403,7 +427,7 @@ export async function getDefense(query = {}) {
     .map(withLabel(f.grouping));
 
   const { team, group, ...filters } = f;
-  return { ...filters, source, config: DEFAULT_DEFENSE_CONFIG, rows };
+  return { ...filters, source, fallback, config: DEFAULT_DEFENSE_CONFIG, rows };
 }
 
 /**
@@ -479,7 +503,7 @@ const SLATE_PLAYERS_SQL = `SELECT player_id, name, team, opponent, position, sal
   FROM players WHERE slate_id = ?`;
 
 /** Defenses with at least minGames distinct games in any group of `rows`. */
-export function qualifiedDefenses(rows, minGames = TONIGHT_MIN_SEASON.minGames) {
+export function qualifiedDefenses(rows, minGames = THIN_SEASON.minGames) {
   const games = new Map();
   for (const r of rows) games.set(r.team, Math.max(games.get(r.team) ?? 0, n(r.games)));
   return [...games.values()].filter(g => g >= minGames).length;
@@ -491,10 +515,9 @@ export function qualifiedDefenses(rows, minGames = TONIGHT_MIN_SEASON.minGames) 
  * matchup first. Archetype falls back to the prior season like the defense
  * aggregation. Site defaults to the slate's.
  *
- * Without an explicit season, a current season with fewer than
- * TONIGHT_MIN_SEASON.minDefenses qualified defenses is tiered on the prior
- * season instead (`fallback` says so); archetypes still come from the
- * requested season.
+ * Without an explicit season, a thin current season is tiered on the prior
+ * season instead (getDefense seasonFallback; `fallback` says so); archetypes
+ * still come from the requested season.
  */
 export async function getTonight(query = {}) {
   if (!query.slateId) throw new DefenseError('slateId is required');
@@ -504,20 +527,10 @@ export async function getTonight(query = {}) {
 
   const { site, error } = await resolveSite(query.site ? (SITE_ALIASES[String(query.site).toLowerCase()] || query.site) : null, query.slateId);
   if (error) throw new DefenseError(error);
-  let defense = await getDefense({ ...query, site, team: null, group: null });
-  const archetypeSeason = defense.season;
-  let fallback = null;
-  if (!query.season) {
-    const { minDefenses, minGames } = TONIGHT_MIN_SEASON;
-    const qualified = qualifiedDefenses(defense.rows, minGames);
-    if (qualified < minDefenses) {
-      const prior = await getDefense({ ...query, season: previousSeason(defense.season), site, team: null, group: null });
-      if (qualifiedDefenses(prior.rows, minGames) > qualified) {
-        fallback = { from: defense.season, qualifiedDefenses: qualified, minDefenses, minGames };
-        defense = prior;
-      }
-    }
-  }
+  const defense = await getDefense({ ...query, site, team: null, group: null, seasonFallback: true });
+  const { fallback } = defense;
+  // Archetypes come from the requested season even when defense fell back
+  const archetypeSeason = fallback?.from ?? defense.season;
   const { season, grouping } = defense;
 
   const [players, current, previous] = await Promise.all([

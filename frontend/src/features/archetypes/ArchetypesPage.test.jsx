@@ -61,16 +61,27 @@ describe('ArchetypesPage', () => {
     const dialog = await screen.findByRole('dialog')
     expect(within(dialog).getByText('NYK vs Scoring Guard / Wing')).toBeInTheDocument()
     expect(await within(dialog).findByText('Some Guard')).toBeInTheDocument()
-    expect(archetypesAPI.getCellGames).toHaveBeenCalledWith('NYK', 'scoring_guard', { grouping: 'archetype', site: 'fanduel' })
+    expect(archetypesAPI.getCellGames).toHaveBeenCalledWith('NYK', 'scoring_guard', { season: '2025-26', grouping: 'archetype', site: 'fanduel' })
   })
 
   it('passes the position toggle and season filter to the grid', async () => {
     renderPage()
     await screen.findByRole('button', { name: /NYK vs Scoring Guard/ })
     fireEvent.click(screen.getByRole('tab', { name: 'Position (G/F/C)' }))
-    expect(archetypesAPI.getDefense).toHaveBeenLastCalledWith({ grouping: 'position', site: 'fanduel' })
+    expect(archetypesAPI.getDefense).toHaveBeenLastCalledWith({ grouping: 'position', site: 'fanduel', seasonFallback: true })
     fireEvent.change(await screen.findByLabelText('Season'), { target: { value: '2025-26' } })
     expect(archetypesAPI.getDefense).toHaveBeenLastCalledWith({ season: '2025-26', grouping: 'position', site: 'fanduel' })
+  })
+
+  it('says when the heatmap shows last season because the current one is thin', async () => {
+    archetypesAPI.getDefense.mockResolvedValue({
+      data: { ...DEFENSE, fallback: { from: '2026-27', qualifiedDefenses: 0, minDefenses: 20, minGames: 10 } },
+    })
+    renderPage()
+    const note = await screen.findByRole('note')
+    expect(note).toHaveTextContent('Showing 2025-26')
+    expect(note).toHaveTextContent('only 0 defenses have 10+ games in 2026-27 (20 needed)')
+    expect(screen.getByText(/^2025-26 · full season/)).toBeInTheDocument()
   })
 
   it('points to Data Status when there is no defense data', async () => {

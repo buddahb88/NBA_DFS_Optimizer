@@ -43,8 +43,8 @@ describe('useArchetypes', () => {
     expect(result.current.defense.data).toEqual(DEFENSE)
     expect(result.current.tonight.data).toEqual(TONIGHT)
 
-    expect(archetypesAPI.getDefense).toHaveBeenCalledWith({ grouping: 'archetype', site: 'fanduel' })
-    expect(archetypesAPI.getTonight).toHaveBeenCalledWith({ grouping: 'archetype', site: 'fanduel', slateId: 's1', stat: 'fp' })
+    expect(archetypesAPI.getDefense).toHaveBeenCalledWith({ grouping: 'archetype', site: 'fanduel', seasonFallback: true })
+    expect(archetypesAPI.getTonight).toHaveBeenCalledWith({ grouping: 'archetype', site: 'fanduel', seasonFallback: true, slateId: 's1', stat: 'fp' })
   })
 
   it('refetches for new filters, but a stat change only refetches tonight', async () => {
@@ -84,10 +84,19 @@ describe('useArchetypes', () => {
     expect(result.current.cell).toMatchObject({ team: 'NYK', group: 'scoring_guard', status: 'loading' })
     await waitFor(() => expect(result.current.cell.status).toBe('ready'))
     expect(result.current.cell.data).toEqual(GAMES)
-    expect(archetypesAPI.getCellGames).toHaveBeenCalledWith('NYK', 'scoring_guard', { grouping: 'archetype', lastNGames: 5, site: 'fanduel' })
+    // The season the grid actually loaded, so a fallen-back grid drills into the same season
+    expect(archetypesAPI.getCellGames).toHaveBeenCalledWith('NYK', 'scoring_guard', { season: '2026-27', grouping: 'archetype', lastNGames: 5, site: 'fanduel' })
 
     act(() => result.current.closeCell())
     expect(result.current.cell).toBeNull()
+  })
+
+  it('drills into last season when the grid fell back to it', async () => {
+    archetypesAPI.getDefense.mockResolvedValue({ data: { ...DEFENSE, season: '2025-26', fallback: { from: '2026-27' } } })
+    const { result } = renderHook(() => useArchetypes(ARGS))
+    await waitFor(() => expect(result.current.defense.status).toBe('ready'))
+    act(() => result.current.openCell({ team: 'NYK', group: 'scoring_guard' }))
+    expect(archetypesAPI.getCellGames).toHaveBeenCalledWith('NYK', 'scoring_guard', { season: '2025-26', grouping: 'archetype', site: 'fanduel' })
   })
 
   it('ignores a drill-down response for a cell that was closed', async () => {

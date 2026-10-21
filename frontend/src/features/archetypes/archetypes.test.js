@@ -65,12 +65,13 @@ describe('formatDelta', () => {
 })
 
 describe('defenseParams', () => {
-  it('drops empty filters', () => {
+  it('drops empty filters and asks for the season fallback on Auto', () => {
     expect(defenseParams({ season: '2026-27', grouping: 'position', lastNGames: '', stat: 'fp' }, 'fanduel')).toEqual({
       season: '2026-27', grouping: 'position', site: 'fanduel',
     })
+    // Auto season: the backend may fall back to last season while the current one is thin
     expect(defenseParams({ season: '', grouping: 'archetype', lastNGames: 10 }, 'draftkings')).toEqual({
-      grouping: 'archetype', lastNGames: 10, site: 'draftkings',
+      grouping: 'archetype', lastNGames: 10, site: 'draftkings', seasonFallback: true,
     })
   })
 
