@@ -9,6 +9,8 @@ import express from 'express';
 import nbaStatsService from '../services/nbaStatsService.js';
 import espnBoxScoreService from '../services/espnBoxScoreService.js';
 import syncRunService from '../services/syncRunService.js';
+import insightsService, { InsightsError } from '../services/insightsService.js';
+import { resolveSite } from '../utils/resolveSite.js';
 import { getCurrentSeason, getSeasonsInfo, seasonForDate } from '../utils/season.js';
 
 const router = express.Router();
@@ -676,167 +678,107 @@ router.get('/teammates/:player', async (req, res) => {
   }
 });
 
+// ─── Insights cards (services/insightsService.js) ───────────────────
+// Every card takes the same options, from the query string (GET) or body (POST):
+// startDate / endDate (YYYY-MM-DD) or lastNDays, site (dk | fd | yahoo, else the
+// slateId's site, else DraftKings), plus limit / minGames / minAvgDk.
+
+function readInt(value, name, fallback, { min = 1 } = {}) {
+  if (value === undefined || value === null || value === '') return fallback;
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < min) {
+    throw new InsightsError(`${name} must be an integer >= ${min}`);
+  }
+  return n;
+}
+
+async function insightsOptions(params, defaults) {
+  const { site, error } = await resolveSite(insightsService.normalizeSite(params.site), params.slateId);
+  if (error) throw new InsightsError(error);
+  const opts = {
+    site,
+    startDate: params.startDate,
+    endDate: params.endDate,
+    lastNDays: params.lastNDays,
+  };
+  for (const [name, fallback] of Object.entries(defaults)) {
+    opts[name] = readInt(params[name], name, fallback, { min: name === 'minAvgDk' ? 0 : 1 });
+  }
+  return opts;
+}
+
+function sendInsightsError(res, error, label) {
+  if (error instanceof InsightsError) {
+    return res.status(error.status).json({ error: error.message });
+  }
+  console.error(`Error ${label}:`, error);
+  return res.status(500).json({ error: error.message });
+}
+
 /**
  * POST /api/historical/slate-insights
- * Analyze all players in the current slate against historical data
- * Returns KPIs: hot streaks, usage bumps, matchup advantages, etc.
+ * Hot/cold streaks, matchup advantages, consistency, boom candidates and
+ * recent performers for the slate's players.
+ * Body: { players: [{ name, team, opponent?, salary?, projected_points? }], ...window, site }
  */
 router.post('/slate-insights', async (req, res) => {
   try {
-    const { players, startDate, endDate } = req.body;
+    const opts = await insightsOptions(req.body || {}, {});
+    const insights = await insightsService.getSlateInsights(req.body.players, opts);
+    res.json({ success: true, site: opts.site, insights });
+  } catch (error) {
+    sendInsightsError(res, error, 'generating slate insights');
+  }
+});
 
-    if (!players || !Array.isArray(players) || players.length === 0) {
-      return res.status(400).json({ error: 'players array is required' });
+/**
+ * League-wide cards. Response keys are unchanged from the original routes.
+ */
+const leagueCards = [
+  ['/hot-streaks', 'getHotStreaks', 'hotStreaks', 5],
+  ['/cold-streaks', 'getColdStreaks', 'coldStreaks', 5],
+  ['/consistency-leaders', 'getConsistencyLeaders', 'leaders', 8],
+  ['/boom-bust-players', 'getBoomBustPlayers', 'players', 8],
+];
+for (const [route, method, key, minGames] of leagueCards) {
+  router.get(route, async (req, res) => {
+    try {
+      const opts = await insightsOptions(req.query, { limit: 20, minGames });
+      const rows = await insightsService[method](opts);
+      res.json({ success: true, site: opts.site, count: rows.length, [key]: rows });
+    } catch (error) {
+      sendInsightsError(res, error, `loading ${route}`);
     }
-
-    const insights = await nbaStatsService.getSlateInsights(players, startDate, endDate);
-
-    res.json({
-      success: true,
-      insights
-    });
-  } catch (error) {
-    console.error('Error generating slate insights:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-/**
- * GET /api/historical/hot-streaks
- * Get players currently on hot streaks (above average recent performance)
- */
-router.get('/hot-streaks', async (req, res) => {
-  try {
-    const { limit = 20, minGames = 5, startDate, endDate } = req.query;
-
-    const hotStreaks = await nbaStatsService.getHotStreaks(parseInt(limit), parseInt(minGames), startDate, endDate);
-
-    res.json({
-      success: true,
-      count: hotStreaks.length,
-      hotStreaks
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-/**
- * GET /api/historical/cold-streaks
- * Get players currently underperforming (below average recent performance)
- */
-router.get('/cold-streaks', async (req, res) => {
-  try {
-    const { limit = 20, minGames = 5, startDate, endDate } = req.query;
-
-    const coldStreaks = await nbaStatsService.getColdStreaks(parseInt(limit), parseInt(minGames), startDate, endDate);
-
-    res.json({
-      success: true,
-      count: coldStreaks.length,
-      coldStreaks
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-/**
- * GET /api/historical/consistency-leaders
- * Get most consistent performers (low variance in DK points)
- */
-router.get('/consistency-leaders', async (req, res) => {
-  try {
-    const { limit = 20, minGames = 8, startDate, endDate } = req.query;
-
-    const leaders = await nbaStatsService.getConsistencyLeaders(parseInt(limit), parseInt(minGames), startDate, endDate);
-
-    res.json({
-      success: true,
-      count: leaders.length,
-      leaders
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-/**
- * GET /api/historical/boom-bust-players
- * Get high-variance players good for GPP tournaments
- */
-router.get('/boom-bust-players', async (req, res) => {
-  try {
-    const { limit = 20, minGames = 8, startDate, endDate } = req.query;
-
-    const players = await nbaStatsService.getBoomBustPlayers(parseInt(limit), parseInt(minGames), startDate, endDate);
-
-    res.json({
-      success: true,
-      count: players.length,
-      players
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
+  });
+}
 
 /**
  * POST /api/historical/usage-bumps
- * Detect players who may benefit from missing teammates
- * Compares tonight's slate roster against historical data to find missing high-usage players
+ * Slate players who score more when a regular missing from tonight's slate sits.
+ * Window defaults to the last 30 days of data.
  */
 router.post('/usage-bumps', async (req, res) => {
   try {
-    const { players, minGames = 8, minAvgDk = 25 } = req.body;
-
-    if (!players || !Array.isArray(players) || players.length === 0) {
-      return res.status(400).json({ error: 'players array is required' });
-    }
-
-    const usageBumps = await nbaStatsService.detectUsageBumps(
-      players,
-      parseInt(minGames),
-      parseInt(minAvgDk)
-    );
-
-    res.json({
-      success: true,
-      count: usageBumps.length,
-      usageBumps
-    });
+    const opts = await insightsOptions(req.body || {}, { minGames: 8, minAvgDk: 25 });
+    const usageBumps = await insightsService.detectUsageBumps(req.body.players, opts);
+    res.json({ success: true, site: opts.site, count: usageBumps.length, usageBumps });
   } catch (error) {
-    console.error('Error detecting usage bumps:', error);
-    res.status(500).json({ error: error.message });
+    sendInsightsError(res, error, 'detecting usage bumps');
   }
 });
 
 /**
  * POST /api/historical/missing-players
- * Get report of high-usage players missing from tonight's slate
+ * Regulars of each slate team who are not on tonight's slate.
+ * Window defaults to the last 30 days of data.
  */
 router.post('/missing-players', async (req, res) => {
   try {
-    const { players, minGames = 5, minAvgDk = 20 } = req.body;
-
-    if (!players || !Array.isArray(players) || players.length === 0) {
-      return res.status(400).json({ error: 'players array is required' });
-    }
-
-    const report = await nbaStatsService.getMissingPlayersReport(
-      players,
-      parseInt(minGames),
-      parseInt(minAvgDk)
-    );
-
-    res.json({
-      success: true,
-      teamsWithMissing: report.length,
-      report
-    });
+    const opts = await insightsOptions(req.body || {}, { minGames: 5, minAvgDk: 20 });
+    const report = await insightsService.getMissingPlayersReport(req.body.players, opts);
+    res.json({ success: true, site: opts.site, teamsWithMissing: report.length, report });
   } catch (error) {
-    console.error('Error getting missing players report:', error);
-    res.status(500).json({ error: error.message });
+    sendInsightsError(res, error, 'getting missing players report');
   }
 });
 

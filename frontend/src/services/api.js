@@ -135,10 +135,11 @@ export const historicalAPI = {
     api.get(`/historical/matchup/${encodeURIComponent(player)}/${opponent}`),
   getTeammateImpact: (player, teammate, team = null) =>
     api.get(`/historical/teammate-impact/${encodeURIComponent(player)}/${encodeURIComponent(teammate)}`, { params: { team } }),
-  getUsageBumps: (players, minGames = 8, minAvgDk = 25) =>
-    api.post('/historical/usage-bumps', { players, minGames, minAvgDk }),
-  getMissingPlayers: (players, minGames = 5, minAvgDk = 20) =>
-    api.post('/historical/missing-players', { players, minGames, minAvgDk }),
+  // params: { startDate, endDate } or { lastNDays }, site, slateId
+  getUsageBumps: (players, minGames = 8, minAvgDk = 25, params = {}) =>
+    api.post('/historical/usage-bumps', { players, minGames, minAvgDk, ...params }),
+  getMissingPlayers: (players, minGames = 5, minAvgDk = 20, params = {}) =>
+    api.post('/historical/missing-players', { players, minGames, minAvgDk, ...params }),
 };
 
 // Minutes x FPPM projections and manual overrides

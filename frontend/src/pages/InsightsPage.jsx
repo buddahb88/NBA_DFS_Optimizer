@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { playersAPI, historicalAPI } from '../services/api';
 import { useSlate } from '../context/SlateContext';
 import { toSeasonOptions } from './insights/seasonOptions';
+import { toInsightsPlayers } from './insights/slatePayload';
 
 // Helper to format date for input
 const formatDateForInput = (date) => {
@@ -210,10 +211,13 @@ function InsightsPage() {
 
         // Get slate-specific insights
         if (playersRes.data?.length > 0) {
+          // slateId lets the backend score with the slate's site
+          const insightsPlayers = toInsightsPlayers(playersRes.data);
+          const slateParams = { ...dateParams, slateId };
           const [insightsRes, usageBumpsRes, missingRes] = await Promise.all([
-            historicalAPI.getSlateInsights(playersRes.data, dateParams),
-            historicalAPI.getUsageBumps(playersRes.data),
-            historicalAPI.getMissingPlayers(playersRes.data),
+            historicalAPI.getSlateInsights(insightsPlayers, slateParams),
+            historicalAPI.getUsageBumps(insightsPlayers, 8, 25, slateParams),
+            historicalAPI.getMissingPlayers(insightsPlayers, 5, 20, slateParams),
           ]);
 
           if (insightsRes.data?.insights) {
@@ -229,11 +233,12 @@ function InsightsPage() {
       }
 
       // Load league-wide data
+      const leagueParams = { ...dateParams, slateId };
       const [hotRes, coldRes, consistentRes, boomRes] = await Promise.all([
-        historicalAPI.getHotStreaks(15, 5, dateParams),
-        historicalAPI.getColdStreaks(15, 5, dateParams),
-        historicalAPI.getConsistencyLeaders(15, 8, dateParams),
-        historicalAPI.getBoomBustPlayers(15, 8, dateParams),
+        historicalAPI.getHotStreaks(15, 5, leagueParams),
+        historicalAPI.getColdStreaks(15, 5, leagueParams),
+        historicalAPI.getConsistencyLeaders(15, 8, leagueParams),
+        historicalAPI.getBoomBustPlayers(15, 8, leagueParams),
       ]);
 
       setLeagueData({
