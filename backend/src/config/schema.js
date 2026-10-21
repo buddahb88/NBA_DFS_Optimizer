@@ -8,6 +8,7 @@ import { migrateLineupPersistence } from './lineupMigrations.js';
 import { migrateSlatePlayerSnapshots } from './snapshotMigrations.js';
 import { migrateEspnBoxScores } from './espnMigrations.js';
 import { migratePlayerSeasonProfiles } from './playerProfileMigrations.js';
+import { migrateSyncRuns } from './syncRunMigrations.js';
 
 /**
  * Create all database tables
@@ -39,6 +40,8 @@ export const createTables = async (db) => {
 
   // player_season_profiles (per-season role profiles from box scores)
   await migratePlayerSeasonProfiles(db);
+  // sync_runs (historical_games sync history and the in-progress lock)
+  await migrateSyncRuns(db);
 
   // Saved lineups survive slate resyncs (no slate/player cascades, denormalized players)
   await migrateLineupPersistence(db);

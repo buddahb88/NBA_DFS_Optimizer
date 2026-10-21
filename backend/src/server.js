@@ -21,6 +21,8 @@ import playerSettingsRouter from './routes/playerSettings.js';
 import lateSwapRouter from './routes/lateswap.js';
 import dashboardRouter from './routes/dashboard.js';
 import resultsRouter from './routes/results.js';
+import syncRunService from './services/syncRunService.js';
+import { startHistoricalSyncScheduler } from './services/historicalSyncScheduler.js';
 
 // Get directory paths for ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -85,6 +87,13 @@ async function startServer() {
   try {
     // Initialize database schema (async for Azure SQL)
     await createTables(db);
+
+    // Syncs left running by a previous process would otherwise hold the sync lock
+    const interrupted = await syncRunService.failInterrupted();
+    if (interrupted) console.warn(`⚠️ Marked ${interrupted} interrupted historical sync run(s) as failed`);
+
+    // Nightly ESPN catch-up of historical_games (off unless HISTORICAL_SYNC_CRON is set)
+    startHistoricalSyncScheduler();
 
     // Start server
     app.listen(PORT, '0.0.0.0', () => {

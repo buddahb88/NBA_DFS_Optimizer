@@ -16,6 +16,7 @@ before(async () => {
   process.env.DATABASE_TYPE = 'sqlite';
   process.env.DATABASE_PATH = path.join(tmpDir, 'test.db');
   db = (await import('../src/config/database.js')).default;
+  await (await import('../src/config/schema.js')).createTables(db);
   nbaStatsService = (await import('../src/services/nbaStatsService.js')).default;
   const router = (await import('../src/routes/historical.js')).default;
 
@@ -64,8 +65,9 @@ test('nba-api sync reports games/players from the service result', async () => {
   assert.deepEqual(incremental.mock.calls[0].slice(0, 2), ['2026-27', '2026-10-21']);
   assert.equal(progress.status, 'complete');
   assert.equal(progress.games, 1234);
-  assert.equal(progress.players, 450);
-  assert.match(progress.message, /1234 games from 450 players/);
+  assert.equal(progress.mode, 'nba-api');
+  assert.equal(progress.season, '2026-27');
+  assert.match(progress.message, /Synced 1234 games/);
 });
 
 test('nba-api sync of an older season ignores the latest game from another season', async () => {

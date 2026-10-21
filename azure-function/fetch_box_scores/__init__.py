@@ -1,6 +1,12 @@
 """
 NBA Box Score Fetcher - Azure Function
 
+LEGACY / NON-CANONICAL: historical_games is now loaded from ESPN by the
+backend (backend/src/services/espnBoxScoreService.js), nightly via the
+HISTORICAL_SYNC_CRON scheduler (backend/src/services/historicalSyncScheduler.js)
+or on demand with POST /api/historical/sync. The blob this function writes is
+only read by the legacy POST /api/historical/sync { source: 'blob' } import.
+
 Timer-triggered function that runs at 3am EST (8am UTC) daily.
 Fetches yesterday's box scores from Basketball Reference and
 uploads to Azure Blob Storage.

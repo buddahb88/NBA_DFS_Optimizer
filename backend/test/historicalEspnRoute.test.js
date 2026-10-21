@@ -9,6 +9,7 @@ import express from 'express';
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nba-dfs-espn-route-'));
 let db;
 let espn;
+let syncRuns;
 let nbaStatsService;
 let currentSeason;
 let server;
@@ -18,6 +19,8 @@ before(async () => {
   process.env.DATABASE_TYPE = 'sqlite';
   process.env.DATABASE_PATH = path.join(tmpDir, 'test.db');
   db = (await import('../src/config/database.js')).default;
+  await (await import('../src/config/schema.js')).createTables(db);
+  syncRuns = (await import('../src/services/syncRunService.js')).default;
   espn = (await import('../src/services/espnBoxScoreService.js')).default;
   nbaStatsService = (await import('../src/services/nbaStatsService.js')).default;
   currentSeason = (await import('../src/utils/season.js')).getCurrentSeason();
@@ -70,7 +73,14 @@ test('POST /sync defaults to ESPN for the current season, resuming from the late
   assert.equal(progress.status, 'complete');
   assert.equal(progress.mode, 'espn');
   assert.equal(progress.games, 5);
-  assert.equal(progress.rows, 120);
+
+  // The run is persisted in sync_runs
+  const [run] = await syncRuns.recent(1);
+  assert.equal(run.source, 'espn');
+  assert.equal(run.season, currentSeason);
+  assert.equal(run.games_inserted, 5);
+  assert.equal(run.error, null);
+  assert.ok(run.finished_at);
 });
 
 test('POST /sync walks the requested seasons oldest first and totals the results', async () => {
@@ -85,8 +95,8 @@ test('POST /sync walks the requested seasons oldest first and totals the results
   // Only the current season resumes from its latest date; older seasons fill gaps
   assert.equal(syncSeason.mock.calls[0][1].resumeFromLatest, false);
   assert.equal(progress.games, 1003);
-  assert.equal(progress.rows, 26078);
-  assert.equal(progress.failed.length, 1);
+  assert.equal(progress.status, 'error');
+  assert.match(progress.error, /^1 failed .*HTTP 500/);
 });
 
 test('forceFullSync refetches games that are already loaded', async () => {
@@ -110,6 +120,34 @@ test('a failing ESPN sync reports an error', async () => {
   const progress = await waitForSync();
   assert.equal(progress.status, 'error');
   assert.equal(progress.error, 'boom');
+});
+
+test('a running sync (e.g. the scheduled one) blocks manual syncs with 409', async () => {
+  const id = await syncRuns.start({ source: 'espn-scheduled', season: currentSeason });
+  try {
+    const res = await post('/sync', {});
+    assert.equal(res.status, 409);
+    assert.equal((await res.json()).progress.mode, 'espn-scheduled');
+    assert.equal((await post('/sync/nba-api', {})).status, 409);
+    assert.equal(syncSeason.mock.calls.length, 0);
+
+    const status = await (await fetch(`${baseUrl}/sync/status`)).json();
+    assert.equal(status.isSyncing, true);
+    assert.equal(status.progress.status, 'syncing');
+    assert.equal(status.lastRun.id, id);
+  } finally {
+    await syncRuns.finish(id, { gamesInserted: 0 });
+  }
+});
+
+test('GET /sync/status lists recent runs newest first', async () => {
+  await post('/sync', { seasons: ['2024-25'] });
+  await waitForSync();
+  const { runs, lastRun } = await (await fetch(`${baseUrl}/sync/status?limit=2`)).json();
+  assert.equal(runs.length, 2);
+  assert.ok(runs[0].id > runs[1].id);
+  assert.equal(lastRun.id, runs[0].id);
+  assert.equal(lastRun.season, '2024-25');
 });
 
 test('GET /status reports the ESPN load', async () => {

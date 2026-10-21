@@ -8,13 +8,24 @@
 import express from 'express';
 import nbaStatsService from '../services/nbaStatsService.js';
 import espnBoxScoreService from '../services/espnBoxScoreService.js';
+import syncRunService from '../services/syncRunService.js';
 import { getCurrentSeason, getSeasonsInfo, seasonForDate } from '../utils/season.js';
 
 const router = express.Router();
 
-// Track sync progress
-let syncProgress = null;
-let isSyncing = false;
+/**
+ * Sync runs and progress live in sync_runs (services/syncRunService.js);
+ * an unfinished run, manual or scheduled, blocks new syncs with a 409.
+ */
+async function rejectIfSyncing(res) {
+  const running = await syncRunService.active();
+  if (!running) return false;
+  res.status(409).json({
+    error: 'Sync already in progress',
+    progress: syncRunService.toProgress(running)
+  });
+  return true;
+}
 
 /**
  * GET /api/historical/status
@@ -97,26 +108,25 @@ router.get('/summary', async (req, res) => {
 router.post('/sync', async (req, res, next) => {
   if (req.body?.source === 'blob') return next();
 
-  if (isSyncing) {
-    return res.status(409).json({
-      error: 'Sync already in progress',
-      progress: syncProgress
-    });
-  }
-
   const { season, seasons: requested, forceFullSync = false, start, end } = req.body || {};
   const current = getCurrentSeason();
   const seasons = [...new Set(requested?.length ? requested : [season || current])].sort();
   const skipLoaded = !forceFullSync;
   const range = start && end ? `${start} → ${end}` : seasons.join(', ');
 
-  isSyncing = true;
-  syncProgress = { status: 'starting', mode: 'espn', seasons, message: `Starting ESPN sync: ${range}` };
+  let runId;
+  try {
+    if (await rejectIfSyncing(res)) return;
+    runId = await syncRunService.start({ source: 'espn', season: start && end ? null : seasons.join(', ') });
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
 
   res.json({
     success: true,
     mode: 'espn',
     seasons,
+    runId,
     message: `Started ESPN box score sync (${range}). Check /api/historical/sync/status for progress.`
   });
 
@@ -127,47 +137,33 @@ router.post('/sync', async (req, res, next) => {
       for (const key of ['dates', 'games', 'rows', 'skipped']) totals[key] += r[key] || 0;
       totals.failed.push(...(r.failed || []));
     };
-    const onProgress = (label) => (p) => {
-      syncProgress = {
-        status: 'syncing',
-        mode: 'espn',
-        season: label,
-        ...p,
-        games: totals.games + p.games,
-        rows: totals.rows + p.rows,
-        percent: p.totalDates > 0 ? Math.round((p.datesProcessed / p.totalDates) * 100) : 0,
-        message: `${label}: ${p.date} (${p.datesProcessed}/${p.totalDates} dates)`
-      };
+    const onProgress = (p) => {
+      syncRunService.progress(runId, totals.games + p.games).catch(() => {});
     };
 
     try {
       if (start && end) {
-        add(await espnBoxScoreService.syncDates(start, end, { skipLoaded, onProgress: onProgress(range) }));
+        add(await espnBoxScoreService.syncDates(start, end, { skipLoaded, onProgress }));
       } else {
         for (const s of seasons) {
           add(await espnBoxScoreService.syncSeason(s, {
             skipLoaded,
             resumeFromLatest: skipLoaded && s === current,
-            onProgress: onProgress(s)
+            onProgress
           }));
         }
       }
 
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-      syncProgress = {
-        status: 'complete',
-        mode: 'espn',
-        seasons,
-        ...totals,
-        elapsed,
-        message: `Synced ${totals.games} games (${totals.rows} player rows) from ESPN in ${elapsed}s` +
-          (totals.failed.length ? `, ${totals.failed.length} failed` : '')
-      };
+      console.log(`✅ ESPN sync (${range}): ${totals.games} games, ${totals.rows} player rows in ${elapsed}s` +
+        (totals.failed.length ? `, ${totals.failed.length} failed` : ''));
+      await syncRunService.finish(runId, {
+        gamesInserted: totals.games,
+        error: syncRunService.failureSummary(totals.failed)
+      });
     } catch (error) {
       console.error('❌ ESPN sync error:', error);
-      syncProgress = { status: 'error', mode: 'espn', error: error.message };
-    } finally {
-      isSyncing = false;
+      await syncRunService.finish(runId, { gamesInserted: totals.games, error: error.message }).catch(() => {});
     }
   });
 });
@@ -187,11 +183,12 @@ router.post('/sync', async (req, res) => {
     });
   }
 
-  if (isSyncing) {
-    return res.status(409).json({
-      error: 'Sync already in progress',
-      progress: syncProgress
-    });
+  let runId;
+  try {
+    if (await rejectIfSyncing(res)) return;
+    runId = await syncRunService.start({ source: 'blob' });
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
   }
 
   // Check current data status (only used for lastGameDate; sync can run without it)
@@ -202,34 +199,20 @@ router.post('/sync', async (req, res) => {
     console.warn('⚠️ Could not read historical data status:', error.message);
   }
 
-  // Start sync in background
-  isSyncing = true;
-  syncProgress = {
-    status: 'starting',
-    mode: 'blob',
-    processed: 0,
-    total: 0,
-    games: 0
-  };
-
   // Send response IMMEDIATELY before starting background work
   res.json({
     success: true,
     mode: 'blob',
+    runId,
     message: 'Started syncing from Azure Blob Storage. Check /api/historical/sync/status for progress.',
     lastGameDate: status.latestGame || null
   });
 
   // Run sync in background
   setImmediate(async () => {
+    let imported = 0;
     try {
       const startTime = Date.now();
-
-      syncProgress = {
-        status: 'fetching',
-        mode: 'blob',
-        message: 'Downloading box_scores.json from Azure Blob Storage...'
-      };
 
       // Fetch box scores from blob storage
       const response = await fetch(blobStorageUrl);
@@ -240,16 +223,7 @@ router.post('/sync', async (req, res) => {
       const boxScores = await response.json();
       console.log(`Downloaded ${boxScores.length} games from blob storage`);
 
-      syncProgress = {
-        status: 'importing',
-        mode: 'blob',
-        total: boxScores.length,
-        processed: 0,
-        message: 'Importing games to database...'
-      };
-
       // Import games to database
-      let imported = 0;
       let skipped = 0;
 
       for (let i = 0; i < boxScores.length; i++) {
@@ -268,48 +242,40 @@ router.post('/sync', async (req, res) => {
 
         // Update progress every 100 games
         if (i % 100 === 0) {
-          syncProgress = {
-            ...syncProgress,
-            processed: i,
-            percent: Math.round((i / boxScores.length) * 100)
-          };
+          await syncRunService.progress(runId, imported).catch(() => {});
         }
       }
 
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-
-      syncProgress = {
-        status: 'complete',
-        mode: 'blob',
-        games: imported,
-        skipped: skipped,
-        total: boxScores.length,
-        elapsed
-      };
+      await syncRunService.finish(runId, { gamesInserted: imported });
 
       console.log(`Sync complete: ${imported} imported, ${skipped} skipped in ${elapsed}s`);
 
     } catch (error) {
       console.error('Sync error:', error);
-      syncProgress = {
-        status: 'error',
-        error: error.message
-      };
-    } finally {
-      isSyncing = false;
+      await syncRunService.finish(runId, { gamesInserted: imported, error: error.message }).catch(() => {});
     }
   });
 });
 
 /**
  * GET /api/historical/sync/status
- * Get current sync progress
+ * Progress of the latest sync run (manual or scheduled) plus recent runs
+ * from sync_runs. Query: { limit?: number } recent runs (default 10)
  */
-router.get('/sync/status', (req, res) => {
-  res.json({
-    isSyncing,
-    progress: syncProgress
-  });
+router.get('/sync/status', async (req, res) => {
+  try {
+    const runs = await syncRunService.recent(Number(req.query.limit) || 10);
+    const latest = runs[0] || null;
+    res.json({
+      isSyncing: Boolean(latest && !latest.finished_at),
+      progress: syncRunService.toProgress(latest),
+      lastRun: latest,
+      runs
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 /**
@@ -320,14 +286,15 @@ router.get('/sync/status', (req, res) => {
  * Body: { season?: string, fromDate?: string }
  */
 router.post('/sync/nba-api', async (req, res) => {
-  if (isSyncing) {
-    return res.status(409).json({
-      error: 'Sync already in progress',
-      progress: syncProgress
-    });
-  }
-
   const { season = getCurrentSeason(), fromDate } = req.body;
+
+  let runId;
+  try {
+    if (await rejectIfSyncing(res)) return;
+    runId = await syncRunService.start({ source: 'nba-api', season });
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
 
   // Resume from the latest stored game, but only if it belongs to the requested
   // season; otherwise (e.g. backfilling an older season) do a full season sync
@@ -342,18 +309,10 @@ router.post('/sync/nba-api', async (req, res) => {
   const latestInSeason = latestGame && seasonForDate(latestGame) === season ? latestGame : null;
   const startDate = fromDate || latestInSeason;
 
-  isSyncing = true;
-  syncProgress = {
-    status: 'starting',
-    mode: 'nba-api',
-    season,
-    fromDate: startDate,
-    message: 'Fetching player list from NBA.com...'
-  };
-
   res.json({
     success: true,
     mode: 'nba-api',
+    runId,
     message: `Starting incremental sync from NBA Stats API. Season: ${season}, From: ${startDate || 'season start'}`,
     startDate
   });
@@ -365,14 +324,9 @@ router.post('/sync/nba-api', async (req, res) => {
 
       // Progress callback
       const progressCallback = (progress) => {
-        const current = progress.current || progress.processed || 0;
-        syncProgress = {
-          status: 'syncing',
-          mode: 'nba-api',
-          season,
-          ...progress,
-          percent: progress.total > 0 ? Math.round((current / progress.total) * 100) : 0
-        };
+        if (Number.isFinite(progress.games)) {
+          syncRunService.progress(runId, progress.games).catch(() => {});
+        }
       };
 
       console.log(`\n🏀 Starting NBA API sync: season=${season}, fromDate=${startDate}`);
@@ -387,28 +341,13 @@ router.post('/sync/nba-api', async (req, res) => {
       }
 
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+      await syncRunService.finish(runId, { gamesInserted: result.games || 0 });
 
-      syncProgress = {
-        status: 'complete',
-        mode: 'nba-api',
-        season,
-        games: result.games || 0,
-        players: result.players || 0,
-        elapsed,
-        message: `Synced ${result.games || 0} games from ${result.players || 0} players in ${elapsed}s`
-      };
-
-      console.log(`✅ NBA API sync complete: ${result.games || 0} games in ${elapsed}s`);
+      console.log(`✅ NBA API sync complete: ${result.games || 0} games from ${result.players || 0} players in ${elapsed}s`);
 
     } catch (error) {
       console.error('❌ NBA API sync error:', error);
-      syncProgress = {
-        status: 'error',
-        mode: 'nba-api',
-        error: error.message
-      };
-    } finally {
-      isSyncing = false;
+      await syncRunService.finish(runId, { gamesInserted: 0, error: error.message }).catch(() => {});
     }
   });
 });
