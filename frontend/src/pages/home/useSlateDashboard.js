@@ -57,7 +57,8 @@ export default function useSlateDashboard() {
       setState((s) => ({
         ...s,
         teamStats: teamStats.status === 'fulfilled' ? teamStats.value.data : null,
-        historyStatus: historyStatus.status === 'fulfilled' ? historyStatus.value.data : null,
+        // { error } when the status request fails, so Home can tell it from still-loading (null)
+        historyStatus: historyStatus.status === 'fulfilled' ? historyStatus.value.data : { error: errorMessage(historyStatus.reason) },
       }));
 
       if (!players?.length) return;

@@ -23,8 +23,7 @@ function App() {
             <Route path="/" element={<HomePage />} />
             <Route path="/players" element={<PlayerPoolPage />} />
             <Route path="/insights" element={<InsightsPage />} />
-            {/* Temporary home of the sync controls until the Data Status panel lands */}
-            <Route path="/data-status" element={<LegacyPage><DataStatusPage /></LegacyPage>} />
+            <Route path="/data-status" element={<DataStatusPage />} />
             <Route path="/lineup-builder" element={<Navigate to="/optimizer?mode=manual" replace />} />
             <Route path="/optimizer" element={<LineupStudioPage />} />
             <Route path="/lineups" element={<LegacyPage><LineupsPage /></LegacyPage>} />

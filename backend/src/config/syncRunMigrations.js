@@ -5,7 +5,8 @@ import { DATABASE_TYPE } from './database.js';
  *
  * One row per historical_games sync (services/syncRunService.js). A row with
  * no finished_at is the sync in progress; error is set when the run threw or
- * some games failed. source: 'espn', 'espn-scheduled', 'nba-api' or 'blob'.
+ * some games failed. source: 'espn' (manual), 'espn-scheduled' or 'nba-api'
+ * ('blob' in rows from the removed Azure Blob import).
  */
 export async function migrateSyncRuns(db) {
   if (DATABASE_TYPE === 'azuresql') {

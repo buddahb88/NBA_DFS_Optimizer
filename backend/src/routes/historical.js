@@ -9,6 +9,8 @@ import express from 'express';
 import nbaStatsService from '../services/nbaStatsService.js';
 import espnBoxScoreService from '../services/espnBoxScoreService.js';
 import syncRunService from '../services/syncRunService.js';
+import dataStatusService from '../services/dataStatusService.js';
+import { runIncrementalSync } from '../services/historicalSyncScheduler.js';
 import insightsService, { InsightsError } from '../services/insightsService.js';
 import { resolveSite } from '../utils/resolveSite.js';
 import { getCurrentSeason, getSeasonsInfo, seasonForDate } from '../utils/season.js';
@@ -60,6 +62,21 @@ router.get('/status', async (req, res) => {
 });
 
 /**
+ * GET /api/historical/data-status
+ * Data Status panel: historical_games coverage by season, sync_runs history
+ * (last run, last success, last error) and slate_player_snapshots coverage.
+ * Each section has its own `error` (null when it loaded).
+ */
+router.get('/data-status', async (req, res) => {
+  try {
+    const status = await dataStatusService.getDataStatus({ runLimit: Number(req.query.limit) || 10 });
+    res.json({ success: true, ...status });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
  * GET /api/historical/seasons
  * Season list (newest first) and the current season, so clients never hardcode seasons
  */
@@ -100,17 +117,18 @@ router.get('/summary', async (req, res) => {
  * POST /api/historical/sync
  * Sync historical box scores from ESPN (the default source).
  * Body: { seasons?: string[], season?: string, forceFullSync?: boolean,
- *         start?: 'YYYY-MM-DD', end?: 'YYYY-MM-DD', source?: 'blob' }
+ *         backfill?: boolean, start?: 'YYYY-MM-DD', end?: 'YYYY-MM-DD' }
  * - Seasons run oldest first; the current season resumes from its latest
  *   loaded date, older seasons are walked in full and skip loaded games.
+ * - backfill walks the current season in full too, filling gaps.
  * - forceFullSync refetches games that are already loaded.
  * - start/end sync an explicit date range instead of seasons.
- * - source: 'blob' runs the legacy Azure Blob Storage import below.
  */
-router.post('/sync', async (req, res, next) => {
-  if (req.body?.source === 'blob') return next();
-
-  const { season, seasons: requested, forceFullSync = false, start, end } = req.body || {};
+router.post('/sync', async (req, res) => {
+  const { season, seasons: requested, forceFullSync = false, backfill = false, start, end, source } = req.body || {};
+  if (source !== undefined && source !== 'espn') {
+    return res.status(400).json({ error: `Unsupported sync source: ${source} (ESPN is the only historical source)` });
+  }
   const current = getCurrentSeason();
   const seasons = [...new Set(requested?.length ? requested : [season || current])].sort();
   const skipLoaded = !forceFullSync;
@@ -150,7 +168,7 @@ router.post('/sync', async (req, res, next) => {
         for (const s of seasons) {
           add(await espnBoxScoreService.syncSeason(s, {
             skipLoaded,
-            resumeFromLatest: skipLoaded && s === current,
+            resumeFromLatest: skipLoaded && !backfill && s === current,
             onProgress
           }));
         }
@@ -171,93 +189,35 @@ router.post('/sync', async (req, res, next) => {
 });
 
 /**
- * POST /api/historical/sync with { source: 'blob' }
- * Legacy: sync historical game data from Azure Blob Storage
- * The blob is updated nightly by an Azure Function that scrapes Basketball Reference
+ * POST /api/historical/sync/incremental
+ * Data Status "Sync now": the scheduled ESPN catch-up (historicalSyncScheduler)
+ * from the latest stored game_date through yesterday, recorded as source 'espn'.
+ * Responds once the first run is recorded: { runId }, or { upToDate: true }.
  */
-router.post('/sync', async (req, res) => {
-  // Azure Blob Storage URL for box scores (with SAS token for read access).
-  // Read per request: this module loads before server.js calls dotenv.config().
-  const blobStorageUrl = process.env.BLOB_STORAGE_URL;
-  if (!blobStorageUrl) {
-    return res.status(500).json({
-      error: 'BLOB_STORAGE_URL environment variable is not set (see backend/.env.example)'
-    });
-  }
-
-  let runId;
+router.post('/sync/incremental', async (req, res) => {
   try {
     if (await rejectIfSyncing(res)) return;
-    runId = await syncRunService.start({ source: 'blob' });
-  } catch (error) {
-    return res.status(500).json({ error: error.message });
-  }
+    let started;
+    const firstRun = new Promise(resolve => { started = resolve; });
+    const sync = runIncrementalSync({ source: 'espn', onRunStart: id => started(id) });
+    const runId = await Promise.race([firstRun, sync.then(ids => (ids === null ? 'busy' : null))]);
+    sync.catch(error => console.error('❌ Incremental sync error:', error));
 
-  // Check current data status (only used for lastGameDate; sync can run without it)
-  let status = {};
-  try {
-    status = await nbaStatsService.getDataStatus();
-  } catch (error) {
-    console.warn('⚠️ Could not read historical data status:', error.message);
-  }
-
-  // Send response IMMEDIATELY before starting background work
-  res.json({
-    success: true,
-    mode: 'blob',
-    runId,
-    message: 'Started syncing from Azure Blob Storage. Check /api/historical/sync/status for progress.',
-    lastGameDate: status.latestGame || null
-  });
-
-  // Run sync in background
-  setImmediate(async () => {
-    let imported = 0;
-    try {
-      const startTime = Date.now();
-
-      // Fetch box scores from blob storage
-      const response = await fetch(blobStorageUrl);
-      if (!response.ok) {
-        throw new Error(`Failed to fetch blob: ${response.status} ${response.statusText}`);
-      }
-
-      const boxScores = await response.json();
-      console.log(`Downloaded ${boxScores.length} games from blob storage`);
-
-      // Import games to database
-      let skipped = 0;
-
-      for (let i = 0; i < boxScores.length; i++) {
-        const game = boxScores[i];
-        try {
-          const wasInserted = await nbaStatsService.insertGameFromBoxScore(game);
-          if (wasInserted) {
-            imported++;
-          } else {
-            skipped++;
-          }
-        } catch (e) {
-          // Skip duplicates or errors
-          skipped++;
-        }
-
-        // Update progress every 100 games
-        if (i % 100 === 0) {
-          await syncRunService.progress(runId, imported).catch(() => {});
-        }
-      }
-
-      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-      await syncRunService.finish(runId, { gamesInserted: imported });
-
-      console.log(`Sync complete: ${imported} imported, ${skipped} skipped in ${elapsed}s`);
-
-    } catch (error) {
-      console.error('Sync error:', error);
-      await syncRunService.finish(runId, { gamesInserted: imported, error: error.message }).catch(() => {});
+    if (runId === 'busy') {
+      return res.status(409).json({ error: 'Sync already in progress', progress: syncRunService.toProgress(await syncRunService.active()) });
     }
-  });
+    res.json({
+      success: true,
+      mode: 'espn',
+      runId,
+      upToDate: runId === null,
+      message: runId === null
+        ? 'historical_games is up to date'
+        : 'Started ESPN incremental sync. Check /api/historical/sync/status for progress.'
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 /**
@@ -282,7 +242,7 @@ router.get('/sync/status', async (req, res) => {
 
 /**
  * POST /api/historical/sync/nba-api
- * Sync historical data directly from NBA Stats API (bypasses blob storage).
+ * Sync historical data directly from NBA Stats API.
  * Not the default source: nba.com is blocked from some networks; ESPN
  * (POST /sync) is canonical.
  * Body: { season?: string, fromDate?: string }
@@ -398,92 +358,6 @@ router.post('/import', async (req, res) => {
 });
 
 /**
- * GET /api/historical/player/:name
- * Get historical game log for a player
- */
-router.get('/player/:name', async (req, res) => {
-  try {
-    const { name } = req.params;
-    const { limit = 20 } = req.query;
-
-    const games = await nbaStatsService.getPlayerHistory(name, parseInt(limit));
-    const trends = await nbaStatsService.getPerformanceTrends(name);
-
-    res.json({
-      success: true,
-      player: name,
-      trends,
-      games
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-/**
- * GET /api/historical/matchup/:player/:opponent
- * Get player's history vs specific opponent
- */
-router.get('/matchup/:player/:opponent', async (req, res) => {
-  try {
-    const { player, opponent } = req.params;
-
-    const games = await nbaStatsService.getMatchupHistory(player, opponent.toUpperCase());
-
-    if (games.length === 0) {
-      return res.json({
-        success: true,
-        message: `No games found for ${player} vs ${opponent}`,
-        games: []
-      });
-    }
-
-    // Calculate averages
-    const avgDkPts = games.reduce((sum, g) => sum + g.dk_fantasy_points, 0) / games.length;
-    const avgMinutes = games.reduce((sum, g) => sum + g.minutes, 0) / games.length;
-
-    res.json({
-      success: true,
-      player,
-      opponent: opponent.toUpperCase(),
-      gamesPlayed: games.length,
-      averages: {
-        dkPoints: Math.round(avgDkPts * 10) / 10,
-        minutes: Math.round(avgMinutes * 10) / 10
-      },
-      games
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-/**
- * GET /api/historical/top-performers
- * Get top performers by average DK fantasy points
- */
-router.get('/top-performers', async (req, res) => {
-  try {
-    const { limit = 20, minGames = 10, startDate, endDate } = req.query;
-
-    const performers = await nbaStatsService.getTopPerformers(
-      parseInt(limit),
-      parseInt(minGames),
-      startDate,
-      endDate
-    );
-
-    res.json({
-      success: true,
-      count: performers.length,
-      performers
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-/**
  * GET /api/historical/b2b-analysis
  * Analyze back-to-back impact on performance
  */
@@ -542,39 +416,6 @@ router.get('/ai-context', async (req, res) => {
         topPerformers: topPerformers.slice(0, 5),
         playerContexts
       }
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-/**
- * GET /api/historical/teammate-impact/:player/:teammate
- * Analyze player performance when a teammate is OUT
- */
-router.get('/teammate-impact/:player/:teammate', async (req, res) => {
-  try {
-    const { player, teammate } = req.params;
-    const { team } = req.query;
-
-    const result = await nbaStatsService.getUsageWithoutTeammate(player, teammate, team);
-
-    if (!result.success) {
-      return res.json(result);
-    }
-
-    res.json({
-      success: true,
-      player: result.player,
-      teammate: result.teammate,
-      team: result.team,
-      withTeammate: result.withTeammate,
-      withoutTeammate: result.withoutTeammate,
-      usageBump: result.usageBump,
-      insight: result.usageBump
-        ? `${result.player} averages ${result.usageBump.dkPointsDiff > 0 ? '+' : ''}${result.usageBump.dkPointsDiff} DK points (${result.usageBump.percentBoost > 0 ? '+' : ''}${result.usageBump.percentBoost}%) when ${result.teammate} is OUT`
-        : 'Insufficient data to calculate usage bump',
-      recentGamesWithout: result.recentGamesWithout
     });
   } catch (error) {
     res.status(500).json({ error: error.message });

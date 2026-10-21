@@ -45,11 +45,19 @@ async function lastLoadedGameDate() {
 }
 
 /**
+/**
  * Load all completed games since the last loaded game_date, then refresh
  * team_archetype_defense for those seasons. Returns the sync_runs ids
  * written ([] when already current), or null when another sync is running.
+ * source: the sync_runs source (the Data Status panel's "Sync now" passes
+ * 'espn'); onRunStart(id) is called as each season's run is recorded.
  */
-export async function runIncrementalSync({ now = new Date(), refreshDefense = refreshSeasonDefense } = {}) {
+export async function runIncrementalSync({
+  now = new Date(),
+  refreshDefense = refreshSeasonDefense,
+  source = SCHEDULED_SOURCE,
+  onRunStart,
+} = {}) {
   const running = await syncRunService.active();
   if (running) {
     console.log(`⏭️ Scheduled historical sync skipped: ${running.source} sync #${running.id} is running`);
@@ -64,8 +72,9 @@ export async function runIncrementalSync({ now = new Date(), refreshDefense = re
 
   const runIds = [];
   for (const { season, start, end } of ranges) {
-    const id = await syncRunService.start({ source: SCHEDULED_SOURCE, season });
+    const id = await syncRunService.start({ source, season });
     runIds.push(id);
+    onRunStart?.(id);
     try {
       const result = await espnBoxScoreService.syncDates(start, end, {
         skipLoaded: true,
@@ -76,7 +85,7 @@ export async function runIncrementalSync({ now = new Date(), refreshDefense = re
         error: syncRunService.failureSummary(result.failed),
       });
     } catch (error) {
-      console.error(`❌ Scheduled historical sync ${season} failed:`, error.message);
+      console.error(`❌ ${source} historical sync ${season} failed:`, error.message);
       await syncRunService.finish(id, { gamesInserted: 0, error: error.message });
     }
     try {

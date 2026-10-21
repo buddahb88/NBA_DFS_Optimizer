@@ -7,9 +7,7 @@ import LeagueTrendsTab from './LeagueTrendsTab';
 import SlateInsightsTab from './SlateInsightsTab';
 import useInsights from './useInsights';
 import { DEFAULT_WINDOW, hasHistory } from './insights';
-
-// Sync controls live here until the Data Status panel replaces this route
-export const DATA_STATUS_PATH = '/data-status';
+import { DATA_STATUS_PATH } from '../dataStatus/dataStatus';
 
 const TABS = [
   { value: 'slate', label: 'Tonight’s slate' },

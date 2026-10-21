@@ -243,39 +243,6 @@ router.post('/:slateId/reset-projections', async (req, res) => {
   }
 });
 
-/**
- * Get projection breakdown for a single player
- * GET /api/players/:slateId/projection/:playerId
- */
-router.get('/:slateId/projection/:playerId', async (req, res) => {
-  try {
-    const { slateId, playerId } = req.params;
-
-    const players = await playerModel.getAllForProjections(slateId);
-    const player = players.find(p => p.player_id === playerId);
-
-    if (!player) {
-      return res.status(404).json({ error: 'Player not found' });
-    }
-
-    const result = await projectionService.calculateAdjustedProjection(player);
-
-    res.json({
-      player: {
-        name: player.name,
-        team: player.team,
-        opponent: player.opponent,
-        position: player.position,
-        salary: player.salary
-      },
-      projection: result,
-      explanation: projectionService.getAdjustmentExplanation(result.adjustments)
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
 // ═══════════════════════════════════════════════════════════════
 // ENHANCED PROJECTION ENDPOINT (Historical Data Blending)
 // ═══════════════════════════════════════════════════════════════

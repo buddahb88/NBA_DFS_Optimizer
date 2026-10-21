@@ -111,50 +111,11 @@ router.post('/', async (req, res) => {
   }
 });
 
-// Update a lineup
-router.put('/:id', async (req, res) => {
-  try {
-    const { name, totalSalary, projectedPoints } = req.body;
-
-    await lineupModel.update(req.params.id, {
-      name,
-      totalSalary,
-      projectedPoints
-    });
-
-    const lineup = await lineupModel.getById(req.params.id);
-    res.json(lineup);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
 // Delete a lineup
 router.delete('/:id', async (req, res) => {
   try {
     await lineupModel.delete(req.params.id);
     res.json({ message: 'Lineup deleted successfully' });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Validate lineup endpoint
-router.post('/validate', async (req, res) => {
-  try {
-    const { players, slateId } = req.body;
-
-    if (!players || !Array.isArray(players)) {
-      return res.status(400).json({ error: 'players array is required' });
-    }
-
-    const { site, error: siteError } = await resolveSite(req.body.site, slateId);
-    if (siteError) {
-      return res.status(400).json({ error: siteError });
-    }
-
-    const validation = validateLineup(players, site);
-    res.json(validation);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

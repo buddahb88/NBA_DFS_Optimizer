@@ -59,7 +59,7 @@ describe('sync_runs persistence', () => {
   });
 
   test('errors are stored and recent() lists newest first', async () => {
-    const first = await syncRuns.start({ source: 'blob' });
+    const first = await syncRuns.start({ source: 'nba-api' });
     await syncRuns.finish(first, { gamesInserted: 0, error: 'HTTP 403' });
     const second = await syncRuns.start({ source: 'espn', season: '2026-27' });
 

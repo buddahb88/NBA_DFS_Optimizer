@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Button, Card, CardBody, EmptyState, IconChart, Spinner, Stat } from '../components/ui';
 import GameCard from './home/GameCard';
 import SlateLoader from './home/SlateLoader';
 import { ChalkPanel, InjuryFeedPanel, LeveragePanel, TopValuesPanel } from './home/DashboardPanels';
 import useSlateDashboard from './home/useSlateDashboard';
 import { useSlate } from '../context/SlateContext';
+import { DATA_STATUS_PATH, historyHealth } from '../features/dataStatus/dataStatus';
 import {
   buildGames,
   buildInjuryFeed,
@@ -30,6 +31,23 @@ function ImportUnavailable({ siteName }) {
   );
 }
 
+const HEALTH_LINKS = { unknown: 'Check data status', missing: 'Sync game logs', stale: 'Update' };
+
+/** Game-log freshness; links to the Data Status panel when logs are missing, stale or unreadable. */
+function GameLogHealth({ historyStatus }) {
+  const { state, label } = historyHealth(historyStatus);
+  return (
+    <div className="flex min-w-0 items-center gap-1.5 text-2xs">
+      <span className={`truncate ${state === 'current' || state === 'loading' ? 'text-fg-subtle' : 'text-caution'}`}>{label}</span>
+      {HEALTH_LINKS[state] && (
+        <Link to={DATA_STATUS_PATH} className="shrink-0 font-medium text-accent hover:underline">
+          {HEALTH_LINKS[state]}
+        </Link>
+      )}
+    </div>
+  );
+}
+
 /** Re-render periodically so "updated 5m ago" stays honest. */
 function useNow(intervalMs = 60000) {
   const [now, setNow] = useState(() => new Date());
@@ -48,9 +66,7 @@ function RefreshTile({ updatedAt, historyStatus, syncing, onRefresh, now, canRef
         <div className="num text-xl font-semibold leading-tight text-fg" title={updatedAt?.toLocaleString()}>
           {formatRelative(updatedAt, now)}
         </div>
-        <div className="truncate text-2xs text-fg-subtle">
-          {historyStatus?.latestGame ? `Game logs through ${historyStatus.latestGame}` : 'Game logs: not synced'}
-        </div>
+        <GameLogHealth historyStatus={historyStatus} />
       </div>
       <Button
         variant="secondary"
@@ -81,6 +97,13 @@ function NoSlate({ syncSlate, syncing, syncError, canImport, siteName }) {
           ) : (
             <ImportUnavailable siteName={siteName} />
           )}
+          <p className="text-2xs text-fg-subtle">
+            Game logs and sync health live on the{' '}
+            <Link to={DATA_STATUS_PATH} className="font-medium text-accent hover:underline">
+              Data Status
+            </Link>{' '}
+            page.
+          </p>
         </CardBody>
       </Card>
     </div>

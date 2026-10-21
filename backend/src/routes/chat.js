@@ -1,5 +1,4 @@
 import express from 'express';
-import aiChatService from '../services/aiChatService.js';
 import agenticChatService from '../services/agenticChatService.js';
 import { StreamHandler, createStreamCallbacks } from '../services/streamHandler.js';
 
@@ -95,82 +94,6 @@ router.get('/agents', (req, res) => {
 });
 
 /**
- * POST /api/chat
- * Send a message to the AI assistant (legacy non-streaming)
- * Body: { message: string, sessionId?: number, slateId?: string }
- */
-router.post('/', async (req, res) => {
-  try {
-    const { message, sessionId, slateId, useAgentic = false } = req.body;
-
-    if (!message || message.trim().length === 0) {
-      return res.status(400).json({
-        success: false,
-        error: 'Message is required',
-      });
-    }
-
-    console.log(`\n📨 Received chat message for session ${sessionId || 'new'}`);
-
-    // Choose service based on flag
-    const service = useAgentic ? agenticChatService : aiChatService;
-
-    // Create new session if not provided
-    let activeSessionId = sessionId;
-    if (!activeSessionId) {
-      const sessionResult = await service.createSession(slateId);
-      if (!sessionResult.success) {
-        return res.status(500).json(sessionResult);
-      }
-      activeSessionId = sessionResult.sessionId;
-    }
-
-    // Get chat history for context
-    const historyResult = await service.getChatHistory(activeSessionId);
-    const chatHistory = historyResult.success ? historyResult.messages : [];
-
-    // Save user message
-    await service.saveMessage(activeSessionId, 'user', message);
-
-    // Get AI response
-    let response;
-    if (useAgentic) {
-      response = await service.chat(message, activeSessionId, {
-        slateId,
-        chatHistory
-      });
-    } else {
-      response = await service.chat(message, activeSessionId, chatHistory);
-    }
-
-    if (!response.success) {
-      return res.status(500).json(response);
-    }
-
-    // Save assistant message
-    await service.saveMessage(activeSessionId, 'assistant', response.message, {
-      toolsUsed: response.toolsUsed,
-      agentsUsed: response.agentsUsed,
-    });
-
-    res.json({
-      success: true,
-      sessionId: activeSessionId,
-      message: response.message,
-      toolsUsed: response.toolsUsed,
-      agentsUsed: response.agentsUsed,
-    });
-  } catch (error) {
-    console.error('❌ Chat endpoint error:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message,
-      message: 'An error occurred while processing your message',
-    });
-  }
-});
-
-/**
  * GET /api/chat/sessions
  * Get all chat sessions
  */
@@ -201,25 +124,6 @@ router.get('/sessions/:sessionId', async (req, res) => {
     res.json(result);
   } catch (error) {
     console.error('❌ Get history error:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message,
-    });
-  }
-});
-
-/**
- * POST /api/chat/sessions
- * Create a new chat session
- * Body: { slateId?: string, title?: string }
- */
-router.post('/sessions', async (req, res) => {
-  try {
-    const { slateId, title } = req.body;
-    const result = await agenticChatService.createSession(slateId, title);
-    res.json(result);
-  } catch (error) {
-    console.error('❌ Create session error:', error);
     res.status(500).json({
       success: false,
       error: error.message,

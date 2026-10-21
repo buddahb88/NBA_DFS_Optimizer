@@ -19,10 +19,7 @@ export const sitesAPI = {
 export const slatesAPI = {
   getAll: (site = null) => api.get('/slates', { params: site ? { site } : {} }),
   getAvailableSlates: () => api.get('/slates/list'), // Get available slates from RotoWire
-  getActiveSlate: () => api.get('/slates/active'), // Get the current active slate
   getById: (slateId) => api.get(`/slates/${slateId}`),
-  create: (data) => api.post('/slates', data),
-  delete: (slateId) => api.delete(`/slates/${slateId}`),
   // Upload a site's official salary CSV; site/slateId are optional (site is auto-detected)
   importSalaries: (file, { site, slateId } = {}) => {
     const form = new FormData();
@@ -41,7 +38,6 @@ export const playersAPI = {
   getById: (playerId) => api.get(`/players/player/${playerId}`),
   recalculateProjections: (slateId) => api.post(`/players/${slateId}/recalculate-projections`),
   resetProjections: (slateId) => api.post(`/players/${slateId}/reset-projections`),
-  getProjectionBreakdown: (slateId, playerId) => api.get(`/players/${slateId}/projection/${playerId}`),
 };
 
 // Per-slate player controls (lock/exclude/exposure/projection override), keyed by players.player_id
@@ -56,9 +52,7 @@ export const lineupsAPI = {
   getAll: (slateId = null) => api.get('/lineups', { params: slateId ? { slateId } : {} }),
   getById: (lineupId) => api.get(`/lineups/${lineupId}`),
   create: (data) => api.post('/lineups', data),
-  update: (lineupId, data) => api.put(`/lineups/${lineupId}`, data),
   delete: (lineupId) => api.delete(`/lineups/${lineupId}`),
-  validate: (players) => api.post('/lineups/validate', { players }),
   // { site, mode: 'new'|'entries', lineupIds | lineups, entriesTemplate? } -> { csv, rowCount, warnings }
   exportCsv: (data) => api.post('/lineups/export', data),
 };
@@ -66,8 +60,6 @@ export const lineupsAPI = {
 // Optimizer API
 export const optimizerAPI = {
   generate: (settings) => api.post('/optimizer/generate', settings),
-  validate: (players, minSalary) => api.post('/optimizer/validate', { players, minSalary }),
-  autoTune: (slateId, mode) => api.post('/optimizer/auto-tune', { slateId, mode }),
   slateBreakdown: (slateId, mode) => api.post('/optimizer/slate-breakdown', { slateId, mode }),
   reviewLineup: (slateId, lineup, mode) => api.post('/optimizer/review-lineup', { slateId, lineup, mode }),
 };
@@ -90,14 +82,10 @@ export const portfolioAPI = {
 
 // Chat API
 export const chatAPI = {
-  sendMessage: (message, sessionId = null, slateId = null) =>
-    api.post('/chat', { message, sessionId, slateId }),
   getSessions: (limit = 20) =>
     api.get('/chat/sessions', { params: { limit } }),
   getSessionHistory: (sessionId, limit = 50) =>
     api.get(`/chat/sessions/${sessionId}`, { params: { limit } }),
-  createSession: (slateId = null, title = null) =>
-    api.post('/chat/sessions', { slateId, title }),
   deleteSession: (sessionId) =>
     api.delete(`/chat/sessions/${sessionId}`),
 };
@@ -106,15 +94,15 @@ export const chatAPI = {
 export const historicalAPI = {
   // Data status and sync
   getStatus: () => api.get('/historical/status'),
-  // Season list + current season; omitted season args default server-side
-  getSeasons: () => api.get('/historical/seasons'),
-  startSync: (forceFullSync = false, seasons) =>
-    api.post('/historical/sync', { forceFullSync, seasons }, { timeout: 60000 }),
-  startNbaApiSync: (season, fromDate = null) =>
-    api.post('/historical/sync/nba-api', { season, fromDate }, { timeout: 60000 }),
+  // Data Status panel: game log coverage by season, sync runs, snapshot coverage
+  getDataStatus: () => api.get('/historical/data-status'),
+  // ESPN catch-up from the latest stored game -> { runId } or { upToDate: true }
+  startIncrementalSync: () => api.post('/historical/sync/incremental', {}, { timeout: 60000 }),
+  // Walk a whole season from ESPN, filling missing games
+  backfillSeason: (season) =>
+    api.post('/historical/sync', { seasons: [season], backfill: true }, { timeout: 60000 }),
   getSyncStatus: () => api.get('/historical/sync/status'),
 
-  // Existing endpoints
   getSummary: (dateParams = {}) =>
     api.get('/historical/summary', { params: dateParams }),
   getSlateInsights: (players, dateParams = {}) =>
@@ -127,14 +115,6 @@ export const historicalAPI = {
     api.get('/historical/consistency-leaders', { params: { limit, minGames, ...dateParams } }),
   getBoomBustPlayers: (limit = 20, minGames = 8, dateParams = {}) =>
     api.get('/historical/boom-bust-players', { params: { limit, minGames, ...dateParams } }),
-  getTopPerformers: (limit = 20, minGames = 10, dateParams = {}) =>
-    api.get('/historical/top-performers', { params: { limit, minGames, ...dateParams } }),
-  getPlayerHistory: (name, limit = 20) =>
-    api.get(`/historical/player/${encodeURIComponent(name)}`, { params: { limit } }),
-  getMatchupHistory: (player, opponent) =>
-    api.get(`/historical/matchup/${encodeURIComponent(player)}/${opponent}`),
-  getTeammateImpact: (player, teammate, team = null) =>
-    api.get(`/historical/teammate-impact/${encodeURIComponent(player)}/${encodeURIComponent(teammate)}`, { params: { team } }),
   // params: { startDate, endDate } or { lastNDays }, site, slateId
   getUsageBumps: (players, minGames = 8, minAvgDk = 25, params = {}) =>
     api.post('/historical/usage-bumps', { players, minGames, minAvgDk, ...params }),
