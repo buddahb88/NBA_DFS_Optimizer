@@ -84,23 +84,13 @@ export async function loadHistory({ beforeDate = null, site = 'draftkings', look
   return toGameLogs(rows, site);
 }
 
-function parseRaw(raw) {
-  if (!raw) return null;
-  if (typeof raw === 'object') return raw;
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-}
-
 async function loadInjuryStatuses(slateId) {
   const rows = await db.all(`
-    SELECT player_id, injury_status, raw_data FROM players WHERE slate_id = ?
+    SELECT player_id, injury_status FROM players WHERE slate_id = ?
   `, String(slateId));
   const statuses = new Map();
   for (const r of rows) {
-    statuses.set(String(r.player_id), r.injury_status ?? parseRaw(r.raw_data)?.injuryStatus ?? null);
+    statuses.set(String(r.player_id), r.injury_status ?? null);
   }
   return statuses;
 }

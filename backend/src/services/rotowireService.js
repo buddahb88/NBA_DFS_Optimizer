@@ -7,114 +7,6 @@ class RotowireService {
   constructor() {
     this.baseUrl = 'https://www.rotowire.com/daily/nba/api';
     this.cookie = process.env.ROTOWIRE_COOKIE || '';
-    this.defenseRankings = null;
-    this.positionDefenseData = null;
-  }
-
-  loadDefenseRankings() {
-    if (!this.defenseRankings) {
-      const rankings = teamDefenseModel.getAll();
-      this.defenseRankings = {};
-      for (const team of rankings) {
-        this.defenseRankings[team.team] = team;
-      }
-    }
-    return this.defenseRankings;
-  }
-
-  loadPositionDefenseData() {
-    if (!this.positionDefenseData) {
-      const allData = teamDefenseVsPositionModel.getAll();
-      this.positionDefenseData = {};
-      for (const data of allData) {
-        const key = `${data.team}_${data.position}`;
-        this.positionDefenseData[key] = data;
-      }
-    }
-    return this.positionDefenseData;
-  }
-
-  getPrimaryPosition(positionString) {
-    // Handle multi-position eligibility (e.g., "PG,SG" → "PG")
-    // Use the FIRST position as primary (most likely their actual position)
-    if (!positionString) return null;
-
-    const positions = positionString.split(',').map(p => p.trim());
-    return positions[0]; // Return first position
-  }
-
-  getDefenseAdjustment(opponentTeam) {
-    // ADDITIVE MODEL: Returns fantasy point adjustment (not multiplier)
-    const rankings = this.loadDefenseRankings();
-    const normalizedTeam = normalizeForRankings(opponentTeam);
-    const oppDefense = rankings[normalizedTeam];
-
-    if (!oppDefense) {
-      return 0; // No data, no adjustment
-    }
-
-    // League average DEF EFF is around 113.0
-    // Lower DEF EFF = better defense = negative FP adjustment (harder)
-    // Higher DEF EFF = worse defense = positive FP adjustment (easier)
-    const leagueAvg = 113.0;
-    const defEff = oppDefense.def_eff;
-    const diff = defEff - leagueAvg;
-
-    // 0.30 FP per DEF EFF point from league average
-    // Example: WAS (123.4) = +10.4 DEF EFF × 0.30 = +3.1 FP
-    // Example: OKC (102.6) = -10.4 DEF EFF × 0.30 = -3.1 FP
-    return diff * 0.30;
-  }
-
-  getPaceAdjustment(opponentTeam) {
-    // ADDITIVE MODEL: Returns fantasy point adjustment (not multiplier)
-    const rankings = this.loadDefenseRankings();
-    const normalizedTeam = normalizeForRankings(opponentTeam);
-    const oppStats = rankings[normalizedTeam];
-
-    if (!oppStats || !oppStats.pace) {
-      return 0;
-    }
-
-    // League average pace is around 100.0 possessions per game
-    // Higher pace = more possessions = more fantasy opportunities
-    const leagueAvgPace = 100.0;
-    const pace = oppStats.pace;
-    const diff = pace - leagueAvgPace;
-
-    // 0.25 FP per pace point from league average
-    // Example: Fast pace (104) = +4 pace × 0.25 = +1.0 FP
-    // Example: Slow pace (96) = -4 pace × 0.25 = -1.0 FP
-    return diff * 0.25;
-  }
-
-  getPositionDefenseAdjustment(opponentTeam, playerPosition) {
-    // ADDITIVE MODEL: Returns fantasy point adjustment (not multiplier)
-    const primaryPosition = this.getPrimaryPosition(playerPosition);
-    if (!primaryPosition) {
-      return 0; // No position data
-    }
-
-    const normalizedTeam = normalizeForVsPosition(opponentTeam);
-    const positionData = this.loadPositionDefenseData();
-    const key = `${normalizedTeam}_${primaryPosition}`;
-    const defenseVsPos = positionData[key];
-
-    if (!defenseVsPos) {
-      return 0; // No data, no adjustment
-    }
-
-    // Rankings are 1-150 (30 teams × 5 positions)
-    // Lower rank = better defense (harder matchup) = negative FP
-    // Higher rank = worse defense (easier matchup) = positive FP
-    const rank = defenseVsPos.rank;
-    const avgRank = 75; // Middle of 1-150
-    const diff = rank - avgRank;
-
-    // 0.04 FP per rank from average
-    // Example: Rank 140 (weak) = +65 ranks × 0.04 = +2.6 FP
-    // Example: Rank 10 (elite) = -65 ranks × 0.04 = -2.6 FP
-    return diff * 0.04;
   }
 
   getVegasAdjustment(vegasImpliedTotal) {
@@ -393,129 +285,6 @@ class RotowireService {
     };
   }
 
-  getEnhancedPositionDefenseAdjustment(opponentTeam, playerPosition) {
-    // ENHANCED: Use all available defensive stats for position-specific adjustments
-    const primaryPosition = this.getPrimaryPosition(playerPosition);
-    if (!primaryPosition) {
-      return 0;
-    }
-
-    const normalizedTeam = normalizeForVsPosition(opponentTeam);
-    const positionData = this.loadPositionDefenseData();
-    const key = `${normalizedTeam}_${primaryPosition}`;
-    const defenseVsPos = positionData[key];
-
-    if (!defenseVsPos) {
-      return 0;
-    }
-
-    let totalAdjustment = 0;
-
-    // Base rank adjustment (existing logic)
-    const rank = defenseVsPos.rank;
-    const avgRank = 75;
-    const rankDiff = rank - avgRank;
-    totalAdjustment += rankDiff * 0.04;
-
-    // Category-specific adjustments based on position
-    const ptsAllowed = defenseVsPos.pts_allowed || 0;
-    const fgPctAllowed = defenseVsPos.fg_pct_allowed || 0;
-    const tpmAllowed = defenseVsPos.tpm_allowed || 0;
-    const rebAllowed = defenseVsPos.reb_allowed || 0;
-    const astAllowed = defenseVsPos.ast_allowed || 0;
-    const stlAllowed = defenseVsPos.stl_allowed || 0;
-    const blkAllowed = defenseVsPos.blk_allowed || 0;
-
-    // Position-specific stat emphasis
-    if (primaryPosition === 'PG' || primaryPosition === 'SG') {
-      // Guards: Emphasize assists, steals, 3PM
-      if (astAllowed > 5.0) totalAdjustment += 0.5;  // High assists allowed
-      if (stlAllowed > 1.0) totalAdjustment += 0.3;  // High steals allowed
-      if (tpmAllowed > 2.5) totalAdjustment += 0.4;  // High 3PM allowed
-    } else if (primaryPosition === 'SF') {
-      // Wings: Balanced - all categories matter
-      if (ptsAllowed > 20) totalAdjustment += 0.4;
-      if (rebAllowed > 6.0) totalAdjustment += 0.3;
-      if (tpmAllowed > 2.0) totalAdjustment += 0.3;
-    } else if (primaryPosition === 'PF' || primaryPosition === 'C') {
-      // Bigs: Emphasize rebounds, blocks, FG%
-      if (rebAllowed > 10.0) totalAdjustment += 0.6;  // High rebounds allowed
-      if (blkAllowed > 1.2) totalAdjustment += 0.4;   // High blocks allowed
-      if (fgPctAllowed > 0.50) totalAdjustment += 0.3; // High FG% allowed
-    }
-
-    return totalAdjustment;
-  }
-
-  getImprovedPaceAdjustment(opponentTeam, playerTeam) {
-    // IMPROVED: Use deviation method for pace projection
-    // Account for when fast/slow teams play each other
-
-    const leagueAvgPace = 100.0;
-    const rankings = this.loadDefenseRankings();
-
-    const normalizedOpp = normalizeForRankings(opponentTeam);
-    const normalizedPlayer = normalizeForRankings(playerTeam);
-
-    const oppStats = rankings[normalizedOpp];
-    const playerStats = rankings[normalizedPlayer];
-
-    if (!oppStats || !oppStats.pace || !playerStats || !playerStats.pace) {
-      return 0;
-    }
-
-    // Calculate each team's deviation from league average
-    const oppDeviation = oppStats.pace - leagueAvgPace;
-    const playerDeviation = playerStats.pace - leagueAvgPace;
-
-    // Projected pace = league average + both deviations
-    const projectedPace = leagueAvgPace + oppDeviation + playerDeviation;
-    const paceDiff = projectedPace - leagueAvgPace;
-
-    // 0.25 FP per pace point from league average
-    return paceDiff * 0.25;
-  }
-
-  getTeamTendencyAdjustment(playerTeam) {
-    // NEW: Use team tendency stats (ast_ratio, to_ratio, rebr, etc.)
-    const rankings = this.loadDefenseRankings();
-    const normalizedTeam = normalizeForRankings(playerTeam);
-    const teamStats = rankings[normalizedTeam];
-
-    if (!teamStats) {
-      return 0;
-    }
-
-    let tendencyAdj = 0;
-
-    // Assist Ratio: Pass-heavy teams boost wing scorers
-    if (teamStats.ast_ratio && teamStats.ast_ratio > 17.0) {
-      tendencyAdj += 0.3; // High ball movement = more opportunities
-    }
-
-    // Turnover Ratio: Turnover-prone teams create more possessions
-    if (teamStats.to_ratio && teamStats.to_ratio > 15.0) {
-      tendencyAdj -= 0.2; // But negative for efficiency
-    }
-
-    // Rebound Rate: Offensive rebounding creates extra shots
-    if (teamStats.rebr && teamStats.rebr > 52.0) {
-      tendencyAdj += 0.4; // More possessions from offensive boards
-    }
-
-    // Offensive Efficiency: High-powered offenses
-    if (teamStats.off_eff && teamStats.off_eff > 115.0) {
-      tendencyAdj += 0.5; // Elite offense
-    }
-
-    // True Shooting %: Efficient scoring teams
-    if (teamStats.ts_pct && teamStats.ts_pct > 0.58) {
-      tendencyAdj += 0.3; // High efficiency
-    }
-
-    return tendencyAdj;
-  }
-
   calculateLeverageScore(boomProbability, ownership) {
     // GPP Leverage: High boom probability + low ownership = leverage
     if (!ownership || ownership === 0) {
@@ -560,14 +329,28 @@ class RotowireService {
       }
 
       const data = await response.json();
-      return this.transformPlayerData(data);
+      const lookups = await this.loadDefenseLookups();
+      return this.transformPlayerData(data, lookups);
     } catch (error) {
       console.error('Error fetching RotoWire data:', error);
       throw error;
     }
   }
 
-  transformPlayerData(data) {
+  // Load both defense tables once per sync so transformPlayerData can stay synchronous.
+  // Keys are the tables' own abbreviations (see utils/teamMapping.js).
+  async loadDefenseLookups() {
+    const [rankings, vsPosition] = await Promise.all([
+      teamDefenseModel.getAll(),
+      teamDefenseVsPositionModel.getAll()
+    ]);
+    return {
+      defenseByTeam: new Map(rankings.map(r => [r.team, r])),
+      dvpByTeamPosition: new Map(vsPosition.map(r => [`${r.team}_${r.position}`, r]))
+    };
+  }
+
+  transformPlayerData(data, { defenseByTeam = new Map(), dvpByTeamPosition = new Map() } = {}) {
     // Transform RotoWire response to our format
     // This will need to be adjusted based on the actual API response structure
     if (!data || !Array.isArray(data)) {
@@ -829,11 +612,16 @@ class RotowireService {
         gameInfo = stringifyField(player.game_info);
       }
 
-      const injuryRaw = player.injury_status ?? player.injury ?? null;
+      // RotoWire sends injuryStatus (e.g. "QUES", "OUT") or null
+      const injuryRaw = player.injuryStatus ?? player.injury_status ?? player.injury ?? null;
       let injuryStatus = null;
       if (injuryRaw != null) {
         injuryStatus = typeof injuryRaw === 'object' ? JSON.stringify(injuryRaw) : String(injuryRaw);
       }
+
+      // Starter confirmation: 1/0 for the DB, null when RotoWire has no lineup info
+      const isConfirmed = player.lineup?.isConfirmed;
+      const lineupConfirmed = typeof isConfirmed === 'boolean' ? (isConfirmed ? 1 : 0) : null;
 
       // Extract headshot URL from RotoWire data
       const headshot = player.imageURL ??
@@ -851,16 +639,16 @@ class RotowireService {
       if (opponent) {
         // Get DVP points allowed for this player's position vs opponent
         // Use primary position (first one) since defense table stores single positions
-        const primaryPosition = position.split(',')[0].trim();
+        const primaryPosition = position ? position.split(',')[0].trim() : null;
         const normalizedVsPos = normalizeForVsPosition(opponent);
-        const defenseVsPos = teamDefenseVsPositionModel.getByTeamAndPosition(normalizedVsPos, primaryPosition);
+        const defenseVsPos = dvpByTeamPosition.get(`${normalizedVsPos}_${primaryPosition}`);
         if (defenseVsPos) {
           dvpPtsAllowed = defenseVsPos.pts_allowed;
         }
 
         // Get opponent's overall defensive efficiency
         const normalizedRankings = normalizeForRankings(opponent);
-        const oppDefense = teamDefenseModel.getByTeam(normalizedRankings);
+        const oppDefense = defenseByTeam.get(normalizedRankings);
         if (oppDefense) {
           oppDefEff = oppDefense.def_eff;
         }
@@ -879,6 +667,7 @@ class RotowireService {
         valueGpp,
         gameInfo,
         injuryStatus,
+        lineupConfirmed,
         per,
         usage,
         restDays,

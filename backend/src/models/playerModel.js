@@ -140,6 +140,7 @@ class PlayerModel {
             UPDATE SET name = @name, team = @team, opponent = @opponent, position = @position,
               salary = @salary, projected_points = @projectedPoints, projected_minutes = @projectedMinutes,
               value = @value, value_gpp = @valueGpp, game_info = @gameInfo, injury_status = @injuryStatus,
+              lineup_confirmed = @lineupConfirmed,
               per = @per, [usage] = @usage, rest_days = @restDays, fpts_last3 = @fptsLast3,
               fpts_last5 = @fptsLast5, fpts_last7 = @fptsLast7, fpts_last14 = @fptsLast14,
               vegas_implied_total = @vegasImpliedTotal, vegas_spread = @vegasSpread,
@@ -151,13 +152,13 @@ class PlayerModel {
               raw_data = @rawData, updated_at = GETDATE()
           WHEN NOT MATCHED THEN
             INSERT (slate_id, player_id, name, team, opponent, position, salary, projected_points,
-              projected_minutes, value, value_gpp, game_info, injury_status, per, [usage], rest_days,
+              projected_minutes, value, value_gpp, game_info, injury_status, lineup_confirmed, per, [usage], rest_days,
               fpts_last3, fpts_last5, fpts_last7, fpts_last14, vegas_implied_total, vegas_spread,
               vegas_over_under, vegas_win_prob, rostership, headshot, dvp_pts_allowed, opp_def_eff,
               floor, ceiling, volatility, boom_probability, bust_probability, fppm, leverage_score,
               blowout_risk, std_dev, raw_data)
             VALUES (@slateId, @playerId, @name, @team, @opponent, @position, @salary, @projectedPoints,
-              @projectedMinutes, @value, @valueGpp, @gameInfo, @injuryStatus, @per, @usage, @restDays,
+              @projectedMinutes, @value, @valueGpp, @gameInfo, @injuryStatus, @lineupConfirmed, @per, @usage, @restDays,
               @fptsLast3, @fptsLast5, @fptsLast7, @fptsLast14, @vegasImpliedTotal, @vegasSpread,
               @vegasOverUnder, @vegasWinProb, @rostership, @headshot, @dvpPtsAllowed, @oppDefEff,
               @floor, @ceiling, @volatility, @boomProbability, @bustProbability, @fppm, @leverageScore,
@@ -176,6 +177,7 @@ class PlayerModel {
           valueGpp: player.valueGpp,
           gameInfo: player.gameInfo,
           injuryStatus: player.injuryStatus,
+          lineupConfirmed: player.lineupConfirmed ?? null,
           per: player.per || 0,
           usage: player.usage || 0,
           restDays: player.restDays || 1,
@@ -213,14 +215,14 @@ class PlayerModel {
           db.run(`
             INSERT INTO players (
               slate_id, player_id, name, team, opponent, position,
-              salary, projected_points, projected_minutes, value, value_gpp, game_info, injury_status,
+              salary, projected_points, projected_minutes, value, value_gpp, game_info, injury_status, lineup_confirmed,
               per, usage, rest_days, fpts_last3, fpts_last5, fpts_last7, fpts_last14,
               vegas_implied_total, vegas_spread, vegas_over_under, vegas_win_prob, rostership, headshot,
               dvp_pts_allowed, opp_def_eff,
               floor, ceiling, volatility, boom_probability, bust_probability, fppm, leverage_score, blowout_risk, std_dev,
               raw_data
             )
-            VALUES (@slateId, @playerId, @name, @team, @opponent, @position, @salary, @projectedPoints, @projectedMinutes, @value, @valueGpp, @gameInfo, @injuryStatus, @per, @usage, @restDays, @fptsLast3, @fptsLast5, @fptsLast7, @fptsLast14, @vegasImpliedTotal, @vegasSpread, @vegasOverUnder, @vegasWinProb, @rostership, @headshot, @dvpPtsAllowed, @oppDefEff, @floor, @ceiling, @volatility, @boomProbability, @bustProbability, @fppm, @leverageScore, @blowoutRisk, @stdDev, @rawData)
+            VALUES (@slateId, @playerId, @name, @team, @opponent, @position, @salary, @projectedPoints, @projectedMinutes, @value, @valueGpp, @gameInfo, @injuryStatus, @lineupConfirmed, @per, @usage, @restDays, @fptsLast3, @fptsLast5, @fptsLast7, @fptsLast14, @vegasImpliedTotal, @vegasSpread, @vegasOverUnder, @vegasWinProb, @rostership, @headshot, @dvpPtsAllowed, @oppDefEff, @floor, @ceiling, @volatility, @boomProbability, @bustProbability, @fppm, @leverageScore, @blowoutRisk, @stdDev, @rawData)
             ON CONFLICT(slate_id, player_id) DO UPDATE SET
               name = excluded.name,
               team = excluded.team,
@@ -233,6 +235,7 @@ class PlayerModel {
               value_gpp = excluded.value_gpp,
               game_info = excluded.game_info,
               injury_status = excluded.injury_status,
+              lineup_confirmed = excluded.lineup_confirmed,
               per = excluded.per,
               usage = excluded.usage,
               rest_days = excluded.rest_days,
@@ -273,6 +276,7 @@ class PlayerModel {
             valueGpp: player.valueGpp,
             gameInfo: player.gameInfo,
             injuryStatus: player.injuryStatus,
+            lineupConfirmed: player.lineupConfirmed ?? null,
             per: player.per || 0,
             usage: player.usage || 0,
             restDays: player.restDays || 1,

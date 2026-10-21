@@ -102,6 +102,7 @@ async function createAzureSqlTables(db) {
       blowout_risk FLOAT,
       std_dev FLOAT,
       rotowire_projection FLOAT,
+      lineup_confirmed BIT,
       created_at DATETIME2 DEFAULT GETDATE(),
       updated_at DATETIME2 DEFAULT GETDATE(),
       CONSTRAINT UQ_players_slate_player UNIQUE(slate_id, player_id)
@@ -112,6 +113,10 @@ async function createAzureSqlTables(db) {
   await db.exec(`
     IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('players') AND name = 'rest_days')
       ALTER TABLE players ADD rest_days INT;
+  `);
+  await db.exec(`
+    IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('players') AND name = 'lineup_confirmed')
+      ALTER TABLE players ADD lineup_confirmed BIT;
   `);
 
   // Lineups table
@@ -397,7 +402,8 @@ async function createSqliteTables(db) {
     { name: 'leverage_score', type: 'REAL' },
     { name: 'blowout_risk', type: 'REAL' },
     { name: 'std_dev', type: 'REAL' },
-    { name: 'rotowire_projection', type: 'REAL' }
+    { name: 'rotowire_projection', type: 'REAL' },
+    { name: 'lineup_confirmed', type: 'INTEGER' }
   ];
 
   // Get existing columns to check which need to be added
