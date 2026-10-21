@@ -33,7 +33,7 @@ after(() => {
 
 const columnsOf = async (table) => (await db.all(`PRAGMA table_info(${table})`)).map(c => c.name);
 const compiles = (sql) => db.all(`EXPLAIN ${sql}`);
-const sqlBlocks = (markdown) => [...markdown.matchAll(/```sql\n([\s\S]*?)```/g)].map(m => m[1].trim());
+const sqlBlocks = (markdown) => [...markdown.matchAll(/```sql\r?\n([\s\S]*?)```/g)].map(m => m[1].trim());
 
 describe('database-schema.yaml', () => {
   test('documents the new tables with columns that exist', async () => {
