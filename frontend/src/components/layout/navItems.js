@@ -3,6 +3,7 @@ import {
   IconChat,
   IconCpu,
   IconDashboard,
+  IconGrid,
   IconList,
   IconPalette,
   IconUsers,
@@ -16,6 +17,7 @@ export const NAV_ITEMS = [
   { to: '/optimizer', label: 'Lineup Studio', icon: IconCpu },
   { to: '/lineups', label: 'Lineups', icon: IconList },
   { to: '/insights', label: 'Insights', icon: IconChart },
+  { to: '/archetypes', label: 'Archetypes', icon: IconGrid },
   { to: '/chat', label: 'AI Chat', icon: IconChat },
   { to: '/data-status', label: 'Data Status', icon: IconWrench },
 ];

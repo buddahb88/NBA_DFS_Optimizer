@@ -102,6 +102,8 @@ export const historicalAPI = {
   backfillSeason: (season) =>
     api.post('/historical/sync', { seasons: [season], backfill: true }, { timeout: 60000 }),
   getSyncStatus: () => api.get('/historical/sync/status'),
+  // Season list + current season
+  getSeasons: () => api.get('/historical/seasons'),
 
   getSummary: (dateParams = {}) =>
     api.get('/historical/summary', { params: dateParams }),
@@ -120,6 +122,17 @@ export const historicalAPI = {
     api.post('/historical/usage-bumps', { players, minGames, minAvgDk, ...params }),
   getMissingPlayers: (players, minGames = 5, minAvgDk = 20, params = {}) =>
     api.post('/historical/missing-players', { players, minGames, minAvgDk, ...params }),
+};
+
+// Player archetypes and team defense vs archetype (or G/F/C)
+export const archetypesAPI = {
+  getDefinitions: () => api.get('/archetypes/definitions'),
+  // params: season, site, grouping (archetype | position), lastNGames, startDate, endDate
+  getDefense: (params = {}) => api.get('/archetypes/defense', { params }),
+  getCellGames: (team, group, params = {}) =>
+    api.get(`/archetypes/defense/${encodeURIComponent(team)}/${encodeURIComponent(group)}/games`, { params }),
+  // params: slateId (required), stat, plus the /defense params
+  getTonight: (params = {}) => api.get('/archetypes/tonight', { params }),
 };
 
 // Minutes x FPPM projections and manual overrides

@@ -34,6 +34,8 @@ import { DEFENSE_COLUMNS } from '../config/archetypeDefenseMigrations.js';
 import { ALL_ARCHETYPES } from '../config/archetypes.js';
 import { SITE_KEYS, isValidSite } from '../config/sites.js';
 import { getCurrentSeason } from '../utils/season.js';
+import { canonicalTeam, playerKey } from '../utils/playerKey.js';
+import { resolveSite } from '../utils/resolveSite.js';
 
 export const DEFAULT_DEFENSE_CONFIG = {
   baselinePriorMinutes: 100,
@@ -43,6 +45,10 @@ export const DEFAULT_DEFENSE_CONFIG = {
 
 export const GROUPINGS = ['archetype', 'position'];
 const POSITION_BUCKETS = ['G', 'F', 'C'];
+// Tonight view: stat -> team_archetype_defense column it ranks by
+export const STAT_COLUMNS = { fp: 'fp_over_expectation', pts: 'pts_delta', reb: 'reb_delta', ast: 'ast_delta', fg3m: 'fg3m_delta' };
+// Weak tier = the top third of defenses (most allowed over expectation) per group
+const WEAK_TIER_FRACTION = 1 / 3;
 const SITE_ALIASES = { dk: 'draftkings', fd: 'fanduel' };
 const SITE_METRICS = { draftkings: 'dk', fanduel: 'fd', yahoo: 'yahoo' };
 const STATS = ['pts', 'reb', 'ast', 'fg3m', 'stocks'];
@@ -364,7 +370,7 @@ export function normalizeFilters(query = {}) {
 }
 
 const LABELS = Object.fromEntries(ALL_ARCHETYPES.map(a => [a.key, a.label]));
-const POSITION_LABELS = { G: 'Guards', F: 'Forwards', C: 'Centers' };
+export const POSITION_LABELS = { G: 'Guards', F: 'Forwards', C: 'Centers' };
 const labelFor = (grouping, key) => (grouping === 'position' ? POSITION_LABELS[key] : LABELS[key]) ?? key;
 const withLabel = (grouping) => (row) => ({ ...row, label: labelFor(grouping, row.group_key) });
 
@@ -433,5 +439,108 @@ export async function getDefenseGames(team, group, query = {}) {
     lastNGames: f.lastNGames, startDate: f.startDate, endDate: f.endDate,
     summary: summary && withLabel(f.grouping)(summary),
     games,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Tonight: slate players vs weak-tier defenses
+// ---------------------------------------------------------------------------
+
+/**
+ * Weak tier per group: defenses ranked by the stat's delta (most allowed
+ * first), the top third (rounded up) that also allow MORE than expected. Pure.
+ * Returns Map(group_key -> Map(team -> { rank, teams, row })), best first.
+ */
+export function weakTiers(rows, stat = 'fp') {
+  const column = STAT_COLUMNS[stat];
+  const byGroup = new Map();
+  for (const r of rows) {
+    if (!byGroup.has(r.group_key)) byGroup.set(r.group_key, []);
+    byGroup.get(r.group_key).push(r);
+  }
+  const tiers = new Map();
+  for (const [group, list] of byGroup) {
+    const ranked = [...list].sort((a, b) => n(b[column]) - n(a[column]) || (a.team < b.team ? -1 : 1));
+    const size = Math.ceil(ranked.length * WEAK_TIER_FRACTION);
+    const tier = new Map();
+    ranked.slice(0, size).forEach((row, i) => {
+      if (n(row[column]) > 0) tier.set(row.team, { rank: i + 1, teams: ranked.length, row });
+    });
+    tiers.set(group, tier);
+  }
+  return tiers;
+}
+
+const SLATE_SQL = 'SELECT slate_id FROM slates WHERE slate_id = ?';
+const SLATE_PLAYERS_SQL = `SELECT player_id, name, team, opponent, position, salary, projected_points, injury_status
+  FROM players WHERE slate_id = ?`;
+
+/**
+ * Slate players whose opponent is in the weak tier vs their archetype (or
+ * G/F/C), with salary, projection and the matchup delta for `stat`, best
+ * matchup first. Archetype falls back to the prior season like the defense
+ * aggregation. Site defaults to the slate's.
+ */
+export async function getTonight(query = {}) {
+  if (!query.slateId) throw new DefenseError('slateId is required');
+  const stat = query.stat || 'fp';
+  if (!STAT_COLUMNS[stat]) throw new DefenseError(`stat must be one of: ${Object.keys(STAT_COLUMNS).join(', ')}`);
+  if (!(await db.get(SLATE_SQL, query.slateId))) throw new DefenseError(`Slate ${query.slateId} not found`, 404);
+
+  const { site, error } = await resolveSite(query.site ? (SITE_ALIASES[String(query.site).toLowerCase()] || query.site) : null, query.slateId);
+  if (error) throw new DefenseError(error);
+  const defense = await getDefense({ ...query, site, team: null, group: null });
+  const { season, grouping } = defense;
+
+  const [players, current, previous] = await Promise.all([
+    db.all(SLATE_PLAYERS_SQL, query.slateId),
+    db.all(ARCHETYPES_SQL, season),
+    db.all(ARCHETYPES_SQL, previousSeason(season)),
+  ]);
+  const archetypes = new Map(current.map(r => [r.player_key, r.archetype]));
+  const priorArchetypes = new Map(previous.map(r => [r.player_key, r.archetype]));
+  const archetypeOf = (key) => {
+    const a = archetypes.get(key);
+    return (!a || a === 'unclassified') ? (priorArchetypes.get(key) ?? a ?? null) : a;
+  };
+
+  const tiers = weakTiers(defense.rows, stat);
+  const column = STAT_COLUMNS[stat];
+  let matchedPlayers = 0;
+  const out = [];
+  for (const p of players) {
+    const archetype = archetypeOf(playerKey(p.name));
+    const group = grouping === 'position' ? dvpPosition(p.position) : archetype;
+    if (!group || group === 'unclassified') continue;
+    matchedPlayers += 1;
+    const opponent = canonicalTeam(p.opponent);
+    const hit = tiers.get(group)?.get(opponent);
+    if (!hit) continue;
+    out.push({
+      player_id: p.player_id,
+      name: p.name,
+      team: canonicalTeam(p.team),
+      opponent,
+      position: p.position,
+      salary: p.salary,
+      projected_points: p.projected_points,
+      injury_status: p.injury_status,
+      archetype,
+      group_key: group,
+      label: labelFor(grouping, group),
+      matchup_delta: hit.row[column],
+      fp_over_expectation: hit.row.fp_over_expectation,
+      rank: hit.rank,
+      teams: hit.teams,
+      games: hit.row.games,
+    });
+  }
+  out.sort((a, b) => b.matchup_delta - a.matchup_delta || n(b.projected_points) - n(a.projected_points));
+
+  return {
+    slateId: query.slateId, season, site, grouping, stat,
+    lastNGames: defense.lastNGames, source: defense.source,
+    slatePlayers: players.length, matchedPlayers, defenseRows: defense.rows.length,
+    players: out,
   };
 }
