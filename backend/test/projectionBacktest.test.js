@@ -93,13 +93,22 @@ test('runProjectionBacktest end to end against SQLite', async () => {
     ['DNP Guy', 'MEM', 'SF,F,UTIL', 3000, 8, 4, 12, null, '8', null]
   ];
   for (const [i, [name, team, pos, salary, proj, floor, ceil, rw, pts]] of players.entries()) {
+    // Live row (still present for the current slate) carries the RotoWire fields
     await db.run(
       `INSERT INTO players (slate_id, player_id, name, team, opponent, position, salary, projected_points, floor, ceiling, rostership, rotowire_projection, raw_data)
        VALUES ('s1', ?, ?, ?, 'BOS', ?, ?, ?, ?, ?, 10, ?, ?)`,
       `p${i}`, name, team, pos, salary, proj, floor, ceil, rw,
       JSON.stringify({ pts, game: { dateTime: '2025-11-02 19:30:00' } })
     );
+    await insertSnapshot('s1', 'draftkings', '2025-11-02', name, team, pos, salary, proj, floor, ceil);
   }
+  // A live players row with no snapshot is not scored
+  await db.run(`INSERT INTO slates (slate_id, name) VALUES ('nosnap', 'Turbo')`);
+  await db.run(
+    `INSERT INTO players (slate_id, player_id, name, team, opponent, position, salary, projected_points, raw_data)
+     VALUES ('nosnap', 'x1', 'Live Only', 'DEN', 'BOS', 'C', 5000, 10, '{"game":{"dateTime":"2025-11-02 19:30:00"}}')`
+  );
+  await db.run(`INSERT INTO historical_games (player_name, team, opponent, game_date, dk_fantasy_points, minutes) VALUES ('Live Only', 'DEN', 'BOS', '2025-11-02', 30, 30)`);
   for (const [name, team, , , , , , , , actual] of players) {
     if (actual === null) continue;
     await db.run(
@@ -131,3 +140,36 @@ test('runProjectionBacktest end to end against SQLite', async () => {
   assert.equal(filtered.sample.playerGames, 0);
   assert.ok(filtered.insights[0].startsWith('No projections'));
 });
+
+test('runProjectionBacktest scores snapshots after the live slate is gone, by player_key and site', async () => {
+  // Past slates: only snapshots remain (players / slates were wiped by a resync)
+  await insertSnapshot('old', 'draftkings', '2025-10-30', 'Shai Gilgeous-Alexander', 'OKC', 'PG', 10000, 50, 40, 60);
+  await insertSnapshot('oldfd', 'fanduel', '2025-10-30', 'Shai Gilgeous-Alexander', 'OKC', 'PG', 10500, 55, 45, 65);
+  // historical source spells the name without the hyphen; player_key still matches
+  await db.run(
+    `INSERT INTO historical_games (player_name, player_key, team, opponent, game_date, dk_fantasy_points, fd_fantasy_points, minutes)
+     VALUES ('Shai Gilgeous Alexander', 'shai gilgeous alexander', 'OKC', 'DEN', '2025-10-30', 44, 47, 35)`
+  );
+
+  const dk = await svc.runProjectionBacktest({ to: '2025-10-31', includeFactors: false, includeSamples: true });
+  assert.equal(dk.sample.playerGames, 1);
+  assert.equal(dk.samples[0].slateId, 'old');
+  assert.equal(dk.samples[0].actual, 44);
+  assert.equal(dk.overall.mae, 6);
+  assert.equal(dk.overall.rotowire, null); // no live row, no raw RotoWire projection
+
+  const fd = await svc.runProjectionBacktest({ to: '2025-10-31', site: 'fanduel', includeFactors: false });
+  assert.equal(fd.sample.playerGames, 1);
+  assert.equal(fd.overall.mae, 8); // 55 - 47 FanDuel points
+  assert.equal(fd.filters.site, 'fanduel');
+});
+
+async function insertSnapshot(slateId, site, gameDate, name, team, position, salary, proj, floor, ceiling) {
+  const { playerKey } = await import('../src/utils/playerKey.js');
+  await db.run(
+    `INSERT INTO slate_player_snapshots (snapshot_date, game_date, slate_id, site, player_key, player_name, team, opponent,
+       position, salary, projected_points, floor, ceiling, rostership)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'BOS', ?, ?, ?, ?, ?, 10)`,
+    gameDate, gameDate, slateId, site, playerKey(name), name, team, position, salary, proj, floor, ceiling
+  );
+}

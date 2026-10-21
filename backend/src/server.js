@@ -20,6 +20,7 @@ import exportRouter from './routes/export.js';
 import playerSettingsRouter from './routes/playerSettings.js';
 import lateSwapRouter from './routes/lateswap.js';
 import dashboardRouter from './routes/dashboard.js';
+import resultsRouter from './routes/results.js';
 
 // Get directory paths for ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -58,6 +59,7 @@ app.use('/api/export', exportRouter);
 app.use('/api/player-settings', playerSettingsRouter);
 app.use('/api/lateswap', lateSwapRouter);
 app.use('/api/dashboard', dashboardRouter);
+app.use('/api/results', resultsRouter);
 
 // Health check
 app.get('/api/health', (req, res) => {

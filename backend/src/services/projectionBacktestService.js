@@ -2,9 +2,13 @@
  * PROJECTION BACKTEST SERVICE
  *
  * Measures how good our projections are. Read-only: it never changes
- * projections, it only joins what we projected (players table) against what
- * actually happened (historical_games.dk_fantasy_points) for the same
- * player + date and scores it.
+ * projections, it only joins what we projected (slate_player_snapshots, which
+ * survive slate resyncs) against what actually happened (the site's
+ * historical_games fantasy points column) on (player_key, game_date) and
+ * scores it. RotoWire-only fields (rotowire_projection, raw_data, rest/DvP
+ * inputs) are not snapshotted; they come from the live players row while the
+ * slate is still loaded, so the RotoWire comparison and factor attribution
+ * only cover those rows.
  *
  * Metrics:
  *   - MAE, RMSE, bias (mean projected - actual), R^2, Pearson correlation
@@ -20,7 +24,10 @@
  */
 
 import db from '../config/database.js';
+import { DEFAULT_SITE, getSiteConfig } from '../config/sites.js';
 import projectionService from './projectionService.js';
+import { fantasyPointsColumn } from './scoring.js';
+import { playerKey } from '../utils/playerKey.js';
 
 export const SALARY_TIERS = [
   { label: '<4K', min: 0, max: 3999 },
@@ -75,6 +82,9 @@ function parseRawData(raw) {
 }
 
 const DATE_RE = /(\d{4}-\d{2}-\d{2})/;
+
+// Azure SQL returns DATE columns as Date objects (UTC midnight)
+const toDateStr = (v) => (v instanceof Date ? v.toISOString().slice(0, 10) : v ? String(v).slice(0, 10) : null);
 
 /**
  * Determine the game date (YYYY-MM-DD) a players row was projected for.
@@ -286,16 +296,18 @@ export function analyzeFactors(samples, factorNames) {
 }
 
 /**
- * Join projection rows to actual results.
- * @param {Array} playerRows - rows from players (+ slate_start_time)
+ * Join projection rows to actual results on (player_key, game_date). Rows
+ * without player_key / game_date (e.g. plain players rows) fall back to
+ * playerKey(name) and the date resolved from raw_data / game_info.
+ * @param {Array} playerRows - snapshot rows (optionally merged with live players fields)
  * @param {Array} gameRows - rows from historical_games
+ * @param {Object} [options] - { factorFn, pointsColumn = 'dk_fantasy_points' }
  * @returns {{ samples: Array, unmatched: number, skipped: number }}
  */
-export function joinProjectionsToActuals(playerRows, gameRows, { factorFn = null } = {}) {
+export function joinProjectionsToActuals(playerRows, gameRows, { factorFn = null, pointsColumn = 'dk_fantasy_points' } = {}) {
   const actualIndex = new Map();
   for (const g of gameRows) {
-    const date = resolveGameDate({ game_info: g.game_date instanceof Date ? g.game_date.toISOString() : g.game_date });
-    const key = `${normalizePlayerName(g.player_name)}|${date}`;
+    const key = `${g.player_key || playerKey(g.player_name)}|${toDateStr(g.game_date)}`;
     if (!actualIndex.has(key)) actualIndex.set(key, []);
     actualIndex.get(key).push(g);
   }
@@ -306,7 +318,7 @@ export function joinProjectionsToActuals(playerRows, gameRows, { factorFn = null
 
   for (const row of playerRows) {
     const raw = parseRawData(row.raw_data);
-    const date = resolveGameDate(row, raw);
+    const date = toDateStr(row.game_date) || resolveGameDate(row, raw);
     const projected = toNum(row.projected_points);
     if (!date || projected === null || projected <= 0) {
       skipped++;
@@ -314,8 +326,7 @@ export function joinProjectionsToActuals(playerRows, gameRows, { factorFn = null
     }
 
     // Same player can appear on multiple slates for the same date; score once.
-    const nameKey = normalizePlayerName(row.name);
-    const dedupeKey = `${nameKey}|${date}`;
+    const dedupeKey = `${row.player_key || playerKey(row.name)}|${date}`;
     if (seen.has(dedupeKey)) continue;
     seen.add(dedupeKey);
 
@@ -325,7 +336,7 @@ export function joinProjectionsToActuals(playerRows, gameRows, { factorFn = null
       if (sameTeam.length) candidates = sameTeam;
     }
     const game = candidates[0];
-    const actual = toNum(game?.dk_fantasy_points);
+    const actual = toNum(game?.[pointsColumn]);
     if (!game || actual === null) {
       unmatched++;
       continue;
@@ -388,7 +399,7 @@ export function buildReport(samples, { unmatched = 0, skipped = 0, factorNames =
 function buildInsights({ overall, adjustedRows, factors, sampleSize }) {
   const out = [];
   if (sampleSize === 0) {
-    out.push('No projections could be matched to actual results. Projections are only kept for the most recently imported slate, so import a slate, then sync box scores for that date after games finish.');
+    out.push('No projections could be matched to actual results. Projections come from slate snapshots (taken on every slate sync / salary import), so import a slate, then sync box scores for that date after games finish.');
     return out;
   }
   if (sampleSize < 100) out.push(`Small sample (${sampleSize} player-games); treat results as directional.`);
@@ -444,45 +455,50 @@ function computeFactors(row) {
  * @param {string} [options.from] - YYYY-MM-DD inclusive
  * @param {string} [options.to] - YYYY-MM-DD inclusive
  * @param {string} [options.slateId]
+ * @param {string} [options.site=draftkings] - scored against that site's points
  * @param {boolean} [options.includeFactors=true]
  * @param {boolean} [options.includeSamples=false]
  */
 export async function runProjectionBacktest(options = {}) {
   const { from = null, to = null, slateId = null, includeFactors = true, includeSamples = false } = options;
+  const site = getSiteConfig(options.site || DEFAULT_SITE).key;
 
-  const params = [];
-  let where = 'p.projected_points IS NOT NULL';
-  if (slateId) {
-    where += ' AND p.slate_id = ?';
-    params.push(String(slateId));
-  }
+  const params = [site];
+  let where = 's.site = ? AND s.projected_points IS NOT NULL';
+  if (from) { where += ' AND s.game_date >= ?'; params.push(from); }
+  if (to) { where += ' AND s.game_date <= ?'; params.push(to); }
+  if (slateId) { where += ' AND s.slate_id = ?'; params.push(String(slateId)); }
 
-  const playerRows = await db.all(`
-    SELECT p.slate_id, p.name, p.team, p.opponent, p.position, p.salary,
-           p.projected_points, p.floor, p.ceiling, p.rostership, p.rotowire_projection,
-           p.rest_days, p.vegas_implied_total, p.vegas_spread, p.vegas_over_under,
-           p.dvp_pts_allowed, p.opp_def_eff, p.game_info, p.raw_data,
-           s.start_time AS slate_start_time
-    FROM players p
-    LEFT JOIN slates s ON s.slate_id = p.slate_id
+  // Latest capture first: a player on several slates of one date scores once
+  const snapshotRows = await db.all(`
+    SELECT s.slate_id, s.site, s.game_date, s.player_key, s.player_name AS name, s.team, s.opponent,
+           s.position, s.salary, s.projected_points, s.floor, s.ceiling, s.rostership,
+           s.vegas_implied_total, s.vegas_spread, s.over_under AS vegas_over_under
+    FROM slate_player_snapshots s
     WHERE ${where}
-  `, params);
+    ORDER BY s.captured_at DESC
+  `, ...params);
 
-  // Narrow to requested dates in JS (dates live in raw_data / game_info).
-  const inRange = playerRows.filter(r => {
-    const d = resolveGameDate(r);
-    if (!d) return true; // counted as skipped later
-    return (!from || d >= from) && (!to || d <= to);
+  // Fields snapshots don't keep, from the live row while the slate is loaded
+  const liveRows = await db.all(`
+    SELECT slate_id, name, rotowire_projection, rest_days, dvp_pts_allowed, opp_def_eff, game_info, raw_data
+    FROM players${slateId ? ' WHERE slate_id = ?' : ''}
+  `, ...(slateId ? [String(slateId)] : []));
+  const live = new Map(liveRows.map(r => [`${r.slate_id}|${playerKey(r.name)}`, r]));
+  const inRange = snapshotRows.map(s => {
+    const { slate_id, name, ...extra } = live.get(`${s.slate_id}|${s.player_key}`) || {};
+    return { ...extra, ...s };
   });
 
-  const dates = [...new Set(inRange.map(r => resolveGameDate(r)).filter(Boolean))].sort();
+  const dates = [...new Set(inRange.map(r => toDateStr(r.game_date)))].sort();
+  const pointsColumn = fantasyPointsColumn(site);
   let gameRows = [];
   if (dates.length) {
     // Range query keeps the parameter count small on both engines.
     gameRows = await db.all(`
-      SELECT player_name, team, game_date, dk_fantasy_points, minutes
+      SELECT player_name, player_key, team, game_date, ${pointsColumn}, minutes
       FROM historical_games
-      WHERE game_date >= ? AND game_date <= ? AND dk_fantasy_points IS NOT NULL
+      WHERE game_date >= ? AND game_date <= ? AND ${pointsColumn} IS NOT NULL
     `, dates[0], dates[dates.length - 1]);
   }
 
@@ -497,10 +513,10 @@ export async function runProjectionBacktest(options = {}) {
     factorFn = computeFactors;
   }
 
-  const { samples, unmatched, skipped } = joinProjectionsToActuals(inRange, gameRows, { factorFn });
+  const { samples, unmatched, skipped } = joinProjectionsToActuals(inRange, gameRows, { factorFn, pointsColumn });
   const report = buildReport(samples, { unmatched, skipped, factorNames: includeFactors ? FACTOR_NAMES : [] });
   report.generatedAt = new Date().toISOString();
-  report.filters = { from, to, slateId };
+  report.filters = { from, to, slateId, site };
   if (includeSamples) {
     report.samples = samples.map(({ factors, ...s }) => s);
   }
