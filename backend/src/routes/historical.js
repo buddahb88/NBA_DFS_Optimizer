@@ -681,7 +681,8 @@ router.get('/teammates/:player', async (req, res) => {
 // ─── Insights cards (services/insightsService.js) ───────────────────
 // Every card takes the same options, from the query string (GET) or body (POST):
 // startDate / endDate (YYYY-MM-DD) or lastNDays, site (dk | fd | yahoo, else the
-// slateId's site, else DraftKings), plus limit / minGames / minAvgDk.
+// slateId's site, else DraftKings), plus limit / minGames / minAvgDk, and minAvg
+// (minimum season average) for hot/cold streaks.
 
 function readInt(value, name, fallback, { min = 1 } = {}) {
   if (value === undefined || value === null || value === '') return fallback;
@@ -702,7 +703,7 @@ async function insightsOptions(params, defaults) {
     lastNDays: params.lastNDays,
   };
   for (const [name, fallback] of Object.entries(defaults)) {
-    opts[name] = readInt(params[name], name, fallback, { min: name === 'minAvgDk' ? 0 : 1 });
+    opts[name] = readInt(params[name], name, fallback, { min: name.startsWith('minAvg') ? 0 : 1 });
   }
   return opts;
 }
@@ -723,7 +724,7 @@ function sendInsightsError(res, error, label) {
  */
 router.post('/slate-insights', async (req, res) => {
   try {
-    const opts = await insightsOptions(req.body || {}, {});
+    const opts = await insightsOptions(req.body || {}, { minAvg: insightsService.STREAK_MIN_AVG });
     const insights = await insightsService.getSlateInsights(req.body.players, opts);
     res.json({ success: true, site: opts.site, insights });
   } catch (error) {
@@ -734,16 +735,17 @@ router.post('/slate-insights', async (req, res) => {
 /**
  * League-wide cards. Response keys are unchanged from the original routes.
  */
+const streakDefaults = { minGames: 5, minAvg: insightsService.STREAK_MIN_AVG };
 const leagueCards = [
-  ['/hot-streaks', 'getHotStreaks', 'hotStreaks', 5],
-  ['/cold-streaks', 'getColdStreaks', 'coldStreaks', 5],
-  ['/consistency-leaders', 'getConsistencyLeaders', 'leaders', 8],
-  ['/boom-bust-players', 'getBoomBustPlayers', 'players', 8],
+  ['/hot-streaks', 'getHotStreaks', 'hotStreaks', streakDefaults],
+  ['/cold-streaks', 'getColdStreaks', 'coldStreaks', streakDefaults],
+  ['/consistency-leaders', 'getConsistencyLeaders', 'leaders', { minGames: 8 }],
+  ['/boom-bust-players', 'getBoomBustPlayers', 'players', { minGames: 8 }],
 ];
-for (const [route, method, key, minGames] of leagueCards) {
+for (const [route, method, key, defaults] of leagueCards) {
   router.get(route, async (req, res) => {
     try {
-      const opts = await insightsOptions(req.query, { limit: 20, minGames });
+      const opts = await insightsOptions(req.query, { limit: 20, ...defaults });
       const rows = await insightsService[method](opts);
       res.json({ success: true, site: opts.site, count: rows.length, [key]: rows });
     } catch (error) {

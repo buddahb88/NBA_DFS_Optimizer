@@ -14,7 +14,8 @@
  *   backtest database looks at its own period rather than the wall clock.
  * - season_avg (and the last-3 / floor / ceiling it is compared with) is
  *   scoped to the season containing the window's end.
- * - Streak: last-3 average at least STREAK_THRESHOLD_PCT above / below season_avg.
+ * - Streak: last-3 average at least STREAK_THRESHOLD_PCT above / below season_avg,
+ *   for players whose season_avg is at least minAvg (default STREAK_MIN_AVG).
  * - consistency_score = 100 * (1 - coefficient of variation), floored at 0;
  *   sd = 0 scores 100.
  * - A player "without" a teammate: games where the teammate was listed for the
@@ -28,6 +29,8 @@ import { playerKey, canonicalTeam } from '../utils/playerKey.js';
 import { seasonForDate, seasonStartDate } from '../utils/season.js';
 
 const STREAK_THRESHOLD_PCT = 15;
+// Below this season average a big % swing is a few points of noise
+const STREAK_MIN_AVG = 15;
 const BOOM_POINTS = 50;
 const BUST_POINTS = 15;
 
@@ -123,6 +126,7 @@ function normalizeSlatePlayers(players) {
 class InsightsService {
   constructor() {
     this.STREAK_THRESHOLD_PCT = STREAK_THRESHOLD_PCT;
+    this.STREAK_MIN_AVG = STREAK_MIN_AVG;
   }
 
   /**
@@ -187,7 +191,7 @@ class InsightsService {
    * Hot ('hot') or cold ('cold') streaks: last-3 average vs current-season
    * average, league-wide. One query.
    */
-  async getStreaks(direction, { limit = 20, minGames = 5, site, ...windowOpts } = {}) {
+  async getStreaks(direction, { limit = 20, minGames = 5, minAvg = STREAK_MIN_AVG, site, ...windowOpts } = {}) {
     const window = await this.resolveWindow(windowOpts);
     const col = this.pointsColumn(site);
     const range = this.dateFilter('game_date', this.seasonWindow(window));
@@ -213,10 +217,10 @@ class InsightsService {
         GROUP BY player_key
       )
       SELECT * FROM s
-      WHERE total_games >= ? AND season_avg > 0 AND ${pct} ${hot ? '>= ?' : '<= ?'}
+      WHERE total_games >= ? AND season_avg >= ? AND season_avg > 0 AND ${pct} ${hot ? '>= ?' : '<= ?'}
       ORDER BY ${pct} ${hot ? 'DESC' : 'ASC'}, player_key
       ${limitSql()}
-    `, [...range.params, minGames, hot ? STREAK_THRESHOLD_PCT : -STREAK_THRESHOLD_PCT, limit]);
+    `, [...range.params, minGames, minAvg, hot ? STREAK_THRESHOLD_PCT : -STREAK_THRESHOLD_PCT, limit]);
 
     const prefix = hot ? 'hot_streak' : 'cold_streak';
     return rows.map(r => ({
@@ -315,10 +319,11 @@ class InsightsService {
   }
 
   /**
-   * Slate cards for the given players: one stats query (current season within
+   * Slate cards for the given players (minAvg applies to the hot/cold cards):
+   * one stats query (current season within
    * the window) and one matchup query (vs tonight's opponent, whole window).
    */
-  async getSlateInsights(players, { site, ...windowOpts } = {}) {
+  async getSlateInsights(players, { minAvg = STREAK_MIN_AVG, site, ...windowOpts } = {}) {
     const slate = normalizeSlatePlayers(players);
     const window = await this.resolveWindow(windowOpts);
     const col = this.pointsColumn(site);
@@ -404,10 +409,11 @@ class InsightsService {
         matchupBest: m ? round1(m.best_vs) : null,
       };
 
-      if (streakPct >= STREAK_THRESHOLD_PCT) {
+      const streaky = s.season_avg >= minAvg;
+      if (streaky && streakPct >= STREAK_THRESHOLD_PCT) {
         insights.hotStreaks.push({ ...row, reason: `+${Math.round(streakPct)}% above season avg` });
       }
-      if (streakPct <= -STREAK_THRESHOLD_PCT) {
+      if (streaky && streakPct <= -STREAK_THRESHOLD_PCT) {
         insights.coldStreaks.push({ ...row, reason: `${Math.round(streakPct)}% below season avg` });
       }
       if (m && m.games_vs >= 1 && m.avg_vs > s.season_avg * MATCHUP_EDGE) {

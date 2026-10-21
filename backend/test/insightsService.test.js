@@ -81,6 +81,9 @@ async function seed() {
     await game('Hot Guy', 'BOS', 'DET', date, 30, i < 5 ? 20 : 40, { fd: 30 });
     await game('Cold Guy', 'BOS', 'DET', date, 30, i < 5 ? 40 : 20);
     await game('Mild Guy', 'BOS', 'DET', date, 30, i < 5 ? 25 : 30);
+    // Deep bench: +88% on a 4.25-point average is noise, not a streak
+    await game('Bench Guy', 'BOS', 'DET', date, 8, i < 5 ? 2 : 8);
+    await game('Bench Cold', 'BOS', 'DET', date, 8, i < 5 ? 8 : 2);
     // Traded mid-season: 4 games for DET then 4 for BOS, one player
     if (i < 4) await game('Traded Hot', 'DET', 'BOS', date, 30, 20);
     else await game('Traded Hot', 'BOS', 'DET', date, 30, i === 4 ? 20 : 40);
@@ -184,6 +187,25 @@ describe('streaks', () => {
     assert.ok(cold.every(r => r.cold_streak_pct <= -15));
     assert.ok(hot.every(r => r.hot_streak_pct >= 15));
     assert.equal(insights.STREAK_THRESHOLD_PCT, 15);
+  });
+
+  test('minAvg (default 15) drops low-average players from both cards', async () => {
+    assert.equal(insights.STREAK_MIN_AVG, 15);
+    const hot = await insights.getHotStreaks({ endDate: END, minGames: 5 });
+    const cold = await insights.getColdStreaks({ endDate: END, minGames: 5 });
+    assert.ok(!names(hot).includes('Bench Guy'));
+    assert.ok(!names(cold).includes('Bench Cold'));
+    assert.ok(hot.every(r => r.season_avg >= 15));
+    assert.ok(cold.every(r => r.season_avg >= 15));
+
+    const allHot = await insights.getHotStreaks({ endDate: END, minGames: 5, minAvg: 0 });
+    assert.equal(allHot.find(r => r.player_name === 'Bench Guy').hot_streak_pct, 88.2);
+    const allCold = await insights.getColdStreaks({ endDate: END, minGames: 5, minAvg: 0 });
+    assert.ok(names(allCold).includes('Bench Cold'));
+
+    // Cold Guy averages 32.5
+    const strict = await insights.getColdStreaks({ endDate: END, minGames: 5, minAvg: 33 });
+    assert.ok(!names(strict).includes('Cold Guy'));
   });
 
   test('groups a traded player by player_key, not (name, team)', async () => {
@@ -295,6 +317,16 @@ describe('slate insights', () => {
     assert.equal(bob.boomRate, 50);
     assert.ok(result.recentPerformers.some(p => p.name === 'Luka Doncic'));
     assert.ok(!result.recentPerformers.some(p => p.name === 'Cold Guy'));
+  });
+
+  test('hot/cold cards use the same minimum average', async () => {
+    const bench = [{ name: 'Bench Guy', team: 'BOS' }, { name: 'Bench Cold', team: 'BOS' }];
+    const result = await insights.getSlateInsights(bench, { endDate: END });
+    assert.deepEqual(result.hotStreaks, []);
+    assert.deepEqual(result.coldStreaks, []);
+    const loose = await insights.getSlateInsights(bench, { endDate: END, minAvg: 0 });
+    assert.deepEqual(loose.hotStreaks.map(p => p.name), ['Bench Guy']);
+    assert.deepEqual(loose.coldStreaks.map(p => p.name), ['Bench Cold']);
   });
 
   test('accepts a trimmed payload (names and teams only)', async () => {
@@ -413,6 +445,15 @@ describe('routes', () => {
     assert.ok(!body.hotStreaks.some(r => r.player_name === 'Hot Guy'));
     const dk = await (await fetch(`${baseUrl}/hot-streaks?endDate=${END}&minGames=5`)).json();
     assert.ok(dk.hotStreaks.some(r => r.player_name === 'Hot Guy'));
+  });
+
+  test('GET hot/cold streaks take minAvg', async () => {
+    const strict = await (await fetch(`${baseUrl}/hot-streaks?endDate=${END}&minGames=5`)).json();
+    assert.ok(!strict.hotStreaks.some(r => r.player_name === 'Bench Guy'));
+    const loose = await (await fetch(`${baseUrl}/hot-streaks?endDate=${END}&minGames=5&minAvg=0`)).json();
+    assert.ok(loose.hotStreaks.some(r => r.player_name === 'Bench Guy'));
+    assert.equal((await fetch(`${baseUrl}/cold-streaks?minAvg=-1`)).status, 400);
+    assert.equal((await fetch(`${baseUrl}/cold-streaks?minAvg=abc`)).status, 400);
   });
 
   test('GET league cards keep their response keys', async () => {
