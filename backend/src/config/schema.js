@@ -7,6 +7,7 @@ import { migratePlayerKey } from './playerKeyMigrations.js';
 import { migrateLineupPersistence } from './lineupMigrations.js';
 import { migrateSlatePlayerSnapshots } from './snapshotMigrations.js';
 import { migrateEspnBoxScores } from './espnMigrations.js';
+import { migratePlayerSeasonProfiles } from './playerProfileMigrations.js';
 
 /**
  * Create all database tables
@@ -35,6 +36,9 @@ export const createTables = async (db) => {
   // ESPN box scores: historical_games.espn_player_id/is_starter/season_type,
   // team_game_stats and game_player_status
   await migrateEspnBoxScores(db);
+
+  // player_season_profiles (per-season role profiles from box scores)
+  await migratePlayerSeasonProfiles(db);
 
   // Saved lineups survive slate resyncs (no slate/player cascades, denormalized players)
   await migrateLineupPersistence(db);
