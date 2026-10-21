@@ -47,7 +47,10 @@ class ProjectionService {
     this.LEAGUE_AVG_DEF_EFF = 113.0;
     this.LEAGUE_AVG_PACE = 100.0;
     this.LEAGUE_AVG_IMPLIED_TOTAL = 113.0;
-    this.LEAGUE_AVG_DVP_RANK = 75; // Middle of 1-150 scale
+    this.LEAGUE_AVG_DVP_RANK = 75.5; // Middle of overall 1-150 scale (30 teams x 5 positions)
+    this.LEAGUE_AVG_DVP_PTS = 23; // Real points allowed per position (Hashtag per-position avgs ~21.8-24.0, Oct 2026)
+    this.DVP_PTS_MIN = 10;
+    this.DVP_PTS_MAX = 35;
 
     // Historical blending weights
     this.BLEND_WEIGHTS = {
@@ -934,14 +937,14 @@ class ProjectionService {
     const primaryPosition = this.getPrimaryPosition(position);
     if (!primaryPosition) return 0;
 
-    // Use pre-joined data if available
-    if (preJoinedDvp && preJoinedDvp > 0) {
-      // DVP pts allowed: league average is ~40-45 for most positions
+    // Use pre-joined data if available. It is real points allowed to the position
+    // (Hashtag Basketball, ~19-27). Values outside that band are stale rows from the
+    // old mis-aligned parser (FG% landed in pts_allowed), so fall through to rank.
+    if (preJoinedDvp >= this.DVP_PTS_MIN && preJoinedDvp <= this.DVP_PTS_MAX) {
       // Higher = worse defense at position = positive adjustment
-      const leagueAvgDvp = 42;
-      const diff = preJoinedDvp - leagueAvgDvp;
-      // 0.15 FP per DVP point above average
-      return diff * 0.15;
+      const diff = preJoinedDvp - this.LEAGUE_AVG_DVP_PTS;
+      // 0.5 FP per real point allowed above average
+      return diff * 0.5;
     }
 
     // Fallback: lookup from position defense data
@@ -952,7 +955,7 @@ class ProjectionService {
 
     if (!defenseVsPos) return 0;
 
-    // Use rank-based adjustment
+    // Use rank-based adjustment (overall rank 1-150, 1 = best defense)
     const rankDiff = defenseVsPos.rank - this.LEAGUE_AVG_DVP_RANK;
     // 0.03 FP per rank (higher rank = worse defense = positive)
     return rankDiff * 0.03;

@@ -31,7 +31,7 @@ class HashtagBasketballService {
       }
 
       // Store in database
-      teamDefenseVsPositionModel.bulkUpsert(defenseData);
+      await teamDefenseVsPositionModel.bulkUpsert(defenseData);
 
       console.log(`✅ Stored position defense rankings for ${defenseData.length} team-position combinations`);
 
@@ -54,23 +54,27 @@ class HashtagBasketballService {
       .trim();
   }
 
-  extractTeamAbbr(rawText) {
-    // Clean up HTML entities and extra whitespace
+  parseTeamCell(rawText) {
+    // Team cell holds the abbreviation plus the overall DvP rank badge
+    // Examples: "NY 3" -> { team: "NY", rank: 3 }, "UTA 150" -> { team: "UTA", rank: 150 }
     const cleaned = this.decodeHtmlEntities(rawText);
+    const match = cleaned.match(/^([A-Z]{2,3})\s+(\d+)/);
+    return match ? { team: match[1], rank: parseInt(match[2], 10) } : null;
+  }
 
-    // Extract just the team abbreviation (2-3 uppercase letters at the start)
-    // Examples: "NY 3" -> "NY", "CLE 4" -> "CLE", "OKC 9" -> "OKC"
-    const match = cleaned.match(/^([A-Z]{2,3})/);
-    return match ? match[1] : cleaned;
+  parseStat(cellText) {
+    // Stat cells hold the value followed by its own rank badge: "21.6 28" -> 21.6
+    const value = cellText ? parseFloat(cellText) : NaN;
+    return isNaN(value) ? null : value;
   }
 
   parsePositionDefense(html) {
     const defenseData = [];
+    const seen = new Set();
     const positions = ['PG', 'SG', 'SF', 'PF', 'C'];
 
     try {
-      // Find table rows - Hashtag Basketball uses a table structure
-      // Pattern: <tr>...</tr> with position and team data
+      // The page has a full table plus "Best/Worst Defense" summary tables that repeat rows
       const tableRowRegex = /<tr[^>]*>[\s\S]*?<\/tr>/g;
       const rows = html.match(tableRowRegex) || [];
 
@@ -84,36 +88,37 @@ class HashtagBasketballService {
         let match;
         while ((match = cellRegex.exec(row)) !== null) {
           // Remove HTML tags, decode entities, and get text content
-          const cellText = this.decodeHtmlEntities(match[1].replace(/<[^>]*>/g, ''));
+          const cellText = this.decodeHtmlEntities(match[1].replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ');
           cells.push(cellText);
         }
 
-        // Expected format: [Position, Team, Rank, PTS, FG%, 3PM, REB, AST, STL, BLK, TO]
-        if (cells.length >= 3) {
-          const position = cells[0];
-          const rawTeam = cells[1];
-          const rank = parseInt(cells[2]);
+        // Format: [Position, "Team Rank", PTS, FG%, FT%, 3PM, REB, AST, STL, BLK, TO]
+        // Rank is the overall rank across all 150 team-position combos (1 = best defense).
+        // PTS is real points allowed, not fantasy points. FT% has no column and is skipped.
+        if (cells.length < 11) continue;
 
-          // Extract clean team abbreviation
-          const team = this.extractTeamAbbr(rawTeam);
+        const position = cells[0];
+        const teamCell = this.parseTeamCell(cells[1]);
+        if (!positions.includes(position) || !teamCell) continue;
 
-          // Only process if valid position and rank
-          if (positions.includes(position) && !isNaN(rank) && team) {
-            defenseData.push({
-              team: this.normalizeTeamAbbr(team),
-              position: position,
-              rank: rank,
-              ptsAllowed: cells[3] ? parseFloat(cells[3]) : null,
-              fgPctAllowed: cells[4] ? parseFloat(cells[4]) : null,
-              tpmAllowed: cells[5] ? parseFloat(cells[5]) : null,
-              rebAllowed: cells[6] ? parseFloat(cells[6]) : null,
-              astAllowed: cells[7] ? parseFloat(cells[7]) : null,
-              stlAllowed: cells[8] ? parseFloat(cells[8]) : null,
-              blkAllowed: cells[9] ? parseFloat(cells[9]) : null,
-              toAllowed: cells[10] ? parseFloat(cells[10]) : null,
-            });
-          }
-        }
+        const team = this.normalizeTeamAbbr(teamCell.team);
+        const key = `${team}_${position}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+
+        defenseData.push({
+          team,
+          position,
+          rank: teamCell.rank,
+          ptsAllowed: this.parseStat(cells[2]),
+          fgPctAllowed: this.parseStat(cells[3]),
+          tpmAllowed: this.parseStat(cells[5]),
+          rebAllowed: this.parseStat(cells[6]),
+          astAllowed: this.parseStat(cells[7]),
+          stlAllowed: this.parseStat(cells[8]),
+          blkAllowed: this.parseStat(cells[9]),
+          toAllowed: this.parseStat(cells[10]),
+        });
       }
 
       return defenseData;
