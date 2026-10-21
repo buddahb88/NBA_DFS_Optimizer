@@ -10,6 +10,7 @@ import LineupsPage from './pages/LineupsPage';
 import LineupStudioPage from './pages/LineupStudioPage';
 import ChatPage from './pages/ChatPage';
 import InsightsPage from './pages/InsightsPage';
+import DataStatusPage from './pages/DataStatusPage';
 
 const UIKitPage = lazy(() => import('./pages/UIKitPage'));
 
@@ -21,7 +22,9 @@ function App() {
           <Routes>
             <Route path="/" element={<HomePage />} />
             <Route path="/players" element={<PlayerPoolPage />} />
-            <Route path="/insights" element={<LegacyPage><InsightsPage /></LegacyPage>} />
+            <Route path="/insights" element={<InsightsPage />} />
+            {/* Temporary home of the sync controls until the Data Status panel lands */}
+            <Route path="/data-status" element={<LegacyPage><DataStatusPage /></LegacyPage>} />
             <Route path="/lineup-builder" element={<Navigate to="/optimizer?mode=manual" replace />} />
             <Route path="/optimizer" element={<LineupStudioPage />} />
             <Route path="/lineups" element={<LegacyPage><LineupsPage /></LegacyPage>} />
