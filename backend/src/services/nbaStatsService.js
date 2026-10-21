@@ -15,6 +15,22 @@ import { playerKey, canonicalTeam } from '../utils/playerKey.js';
 
 const DATABASE_TYPE = process.env.DATABASE_TYPE || 'sqlite';
 
+const MONTHS = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
+
+/**
+ * Turn a stats.nba.com resultSet ({ headers, rowSet }) into row objects
+ */
+function resultSetRows(resultSet) {
+  if (!resultSet?.headers || !resultSet?.rowSet) return [];
+  return resultSet.rowSet.map(row => {
+    const obj = {};
+    resultSet.headers.forEach((header, i) => {
+      obj[header] = row[i];
+    });
+    return obj;
+  });
+}
+
 class NBAStatsService {
   constructor() {
     // NBA.com stats API endpoints
@@ -105,10 +121,16 @@ class NBAStatsService {
   }
 
   /**
-   * Parse game date from "Apr 11, 2025" to "2025-04-11"
+   * Parse game date from "Apr 11, 2025" (or "APR 11, 2025") to "2025-04-11"
+   * without going through UTC, which shifts the day outside US timezones
    */
   parseGameDate(dateStr) {
     if (!dateStr) return null;
+    const match = /^([A-Za-z]{3})[A-Za-z]*\.? (\d{1,2}), (\d{4})$/.exec(String(dateStr).trim());
+    const month = match && MONTHS[match[1].toLowerCase()];
+    if (month) {
+      return `${match[3]}-${String(month).padStart(2, '0')}-${match[2].padStart(2, '0')}`;
+    }
     try {
       const date = new Date(dateStr);
       if (isNaN(date.getTime())) return dateStr; // Return original if parsing fails
@@ -133,44 +155,71 @@ class NBAStatsService {
   }
 
   /**
-   * Fetch all active NBA players
+   * Fetch every player who appeared in `season`, one league-wide call per
+   * season: leaguedashplayerstats gives who played (and games played, used for
+   * resume), playerindex adds positions. The team is the player's last team
+   * that season; each game's team comes from its own MATCHUP.
    */
   async fetchAllPlayers(season = getCurrentSeason()) {
-    console.log('📋 Fetching NBA player list...');
+    console.log(`📋 Fetching NBA player list for ${season}...`);
 
     try {
-      const response = await axios.get(`${this.baseUrl}/commonallplayers`, {
+      const response = await axios.get(`${this.baseUrl}/leaguedashplayerstats`, {
         headers: this.headers,
         params: {
           LeagueID: '00',
           Season: season,
-          IsOnlyCurrentSeason: 1
+          SeasonType: 'Regular Season',
+          PerMode: 'Totals',
+          MeasureType: 'Base',
+          LastNGames: 0,
+          Month: 0,
+          OpponentTeamID: 0,
+          PaceAdjust: 'N',
+          Period: 0,
+          PlusMinus: 'N',
+          Rank: 'N'
         },
         timeout: 30000
       });
 
-      const data = response.data;
-      const headers = data.resultSets[0].headers;
-      const rows = data.resultSets[0].rowSet;
+      const positions = await this.fetchPlayerPositions(season);
 
-      const players = rows.map(row => {
-        const player = {};
-        headers.forEach((header, i) => {
-          player[header] = row[i];
-        });
-        return {
-          id: player.PERSON_ID,
-          name: player.DISPLAY_FIRST_LAST,
-          team: player.TEAM_ABBREVIATION,
-          teamId: player.TEAM_ID
-        };
-      }).filter(p => p.team); // Only players on a team
+      const players = resultSetRows(response.data.resultSets?.[0]).map(p => ({
+        id: p.PLAYER_ID,
+        name: p.PLAYER_NAME,
+        team: canonicalTeam(p.TEAM_ABBREVIATION),
+        position: positions.get(p.PLAYER_ID) || null,
+        gamesPlayed: p.GP || 0
+      })).filter(p => p.gamesPlayed > 0);
 
-      console.log(`✅ Found ${players.length} active players`);
+      console.log(`✅ Found ${players.length} players with games in ${season}`);
       return players;
     } catch (error) {
       console.error('❌ Error fetching players:', error.message);
       throw error;
+    }
+  }
+
+  /**
+   * Map of PERSON_ID -> position ("G", "F-C", ...) for a season. Positions are
+   * nice-to-have, so a failed call returns an empty map instead of throwing.
+   */
+  async fetchPlayerPositions(season) {
+    try {
+      const response = await axios.get(`${this.baseUrl}/playerindex`, {
+        headers: this.headers,
+        params: { LeagueID: '00', Season: season, Historical: 1 },
+        timeout: 30000
+      });
+      const positions = new Map();
+      for (const p of resultSetRows(response.data.resultSets?.[0])) {
+        if (p.POSITION) positions.set(p.PERSON_ID, p.POSITION);
+      }
+      return positions;
+    } catch (error) {
+      console.warn(`⚠️ Could not fetch player positions for ${season}: ${error.message}`);
+      return new Map();
     }
   }
 
@@ -194,15 +243,7 @@ class NBAStatsService {
         return [];
       }
 
-      const headers = data.resultSets[0].headers;
-      const rows = data.resultSets[0].rowSet;
-
-      return rows.map(row => {
-        const game = {};
-        headers.forEach((header, i) => {
-          game[header] = row[i];
-        });
-
+      return resultSetRows(data.resultSets[0]).map(game => {
         // Parse matchup to get team and opponent (format: "LAL vs. HOU" or "LAL @ HOU")
         const matchup = game.MATCHUP || '';
         const isHome = matchup.includes('vs.');
@@ -229,12 +270,16 @@ class NBAStatsService {
           steals: game.STL || 0,
           blocks: game.BLK || 0,
           turnovers: game.TOV || 0,
+          fouls: game.PF || 0,
           fg_made: game.FGM || 0,
           fg_attempted: game.FGA || 0,
+          fg_pct: game.FG_PCT ?? null,
           fg3_made: game.FG3M || 0,
           fg3_attempted: game.FG3A || 0,
+          fg3_pct: game.FG3_PCT ?? null,
           ft_made: game.FTM || 0,
           ft_attempted: game.FTA || 0,
+          ft_pct: game.FT_PCT ?? null,
           oreb: game.OREB || 0,
           dreb: game.DREB || 0,
           plus_minus: game.PLUS_MINUS || 0
@@ -267,6 +312,50 @@ class NBAStatsService {
   }
 
   /**
+   * Named parameters for one historical_games row (shared by both backends)
+   */
+  toInsertParams(game) {
+    return {
+      player_id: game.player_id,
+      player_name: game.player_name,
+      player_key: playerKey(game.player_name),
+      team: canonicalTeam(game.team),
+      opponent: canonicalTeam(game.opponent),
+      position: game.position || null,
+      game_id: game.game_id,
+      game_date: game.game_date,
+      season: game.season,
+      is_home: game.is_home,
+      minutes: game.minutes,
+      points: game.points,
+      rebounds: game.rebounds,
+      assists: game.assists,
+      steals: game.steals,
+      blocks: game.blocks,
+      turnovers: game.turnovers,
+      fouls: game.fouls ?? null,
+      fg_made: game.fg_made,
+      fg_attempted: game.fg_attempted,
+      fg_pct: game.fg_pct ?? null,
+      fg3_made: game.fg3_made,
+      fg3_attempted: game.fg3_attempted,
+      fg3_pct: game.fg3_pct ?? null,
+      ft_made: game.ft_made,
+      ft_attempted: game.ft_attempted,
+      ft_pct: game.ft_pct ?? null,
+      oreb: game.oreb,
+      dreb: game.dreb,
+      plus_minus: game.plus_minus,
+      dk_fantasy_points: game.dk_fantasy_points,
+      fd_fantasy_points: game.fd_fantasy_points ?? computeFantasyPoints(game, 'fanduel'),
+      yahoo_fantasy_points: game.yahoo_fantasy_points ?? computeFantasyPoints(game, 'yahoo'),
+      // ?? not ||: 0 rest days (back-to-back) is a real value
+      rest_days: game.rest_days ?? null,
+      is_back_to_back: game.is_back_to_back || 0
+    };
+  }
+
+  /**
    * Bulk insert games into database
    */
   async bulkInsertGames(games) {
@@ -287,54 +376,22 @@ class NBAStatsService {
                 player_name = @player_name, player_key = @player_key, team = @team, opponent = @opponent, position = @position,
                 game_date = @game_date, season = @season, is_home = @is_home,
                 minutes = @minutes, points = @points, rebounds = @rebounds, assists = @assists,
-                steals = @steals, blocks = @blocks, turnovers = @turnovers,
-                fg_made = @fg_made, fg_attempted = @fg_attempted, fg3_made = @fg3_made,
-                fg3_attempted = @fg3_attempted, ft_made = @ft_made, ft_attempted = @ft_attempted,
+                steals = @steals, blocks = @blocks, turnovers = @turnovers, fouls = @fouls,
+                fg_made = @fg_made, fg_attempted = @fg_attempted, fg_pct = @fg_pct, fg3_made = @fg3_made,
+                fg3_attempted = @fg3_attempted, fg3_pct = @fg3_pct, ft_made = @ft_made, ft_attempted = @ft_attempted, ft_pct = @ft_pct,
                 oreb = @oreb, dreb = @dreb, plus_minus = @plus_minus,
                 dk_fantasy_points = @dk_fantasy_points, fd_fantasy_points = @fd_fantasy_points,
                 yahoo_fantasy_points = @yahoo_fantasy_points, rest_days = @rest_days, is_back_to_back = @is_back_to_back
             WHEN NOT MATCHED THEN
               INSERT (player_id, player_name, player_key, team, opponent, position, game_id, game_date, season, is_home,
-                      minutes, points, rebounds, assists, steals, blocks, turnovers,
-                      fg_made, fg_attempted, fg3_made, fg3_attempted, ft_made, ft_attempted,
+                      minutes, points, rebounds, assists, steals, blocks, turnovers, fouls,
+                      fg_made, fg_attempted, fg_pct, fg3_made, fg3_attempted, fg3_pct, ft_made, ft_attempted, ft_pct,
                       oreb, dreb, plus_minus, dk_fantasy_points, fd_fantasy_points, yahoo_fantasy_points, rest_days, is_back_to_back)
               VALUES (@player_id, @player_name, @player_key, @team, @opponent, @position, @game_id, @game_date, @season, @is_home,
-                      @minutes, @points, @rebounds, @assists, @steals, @blocks, @turnovers,
-                      @fg_made, @fg_attempted, @fg3_made, @fg3_attempted, @ft_made, @ft_attempted,
+                      @minutes, @points, @rebounds, @assists, @steals, @blocks, @turnovers, @fouls,
+                      @fg_made, @fg_attempted, @fg_pct, @fg3_made, @fg3_attempted, @fg3_pct, @ft_made, @ft_attempted, @ft_pct,
                       @oreb, @dreb, @plus_minus, @dk_fantasy_points, @fd_fantasy_points, @yahoo_fantasy_points, @rest_days, @is_back_to_back);
-          `, {
-            player_id: game.player_id,
-            player_name: game.player_name,
-            player_key: playerKey(game.player_name),
-            team: canonicalTeam(game.team),
-            opponent: canonicalTeam(game.opponent),
-            position: game.position || null,
-            game_id: game.game_id,
-            game_date: game.game_date,
-            season: game.season,
-            is_home: game.is_home,
-            minutes: game.minutes,
-            points: game.points,
-            rebounds: game.rebounds,
-            assists: game.assists,
-            steals: game.steals,
-            blocks: game.blocks,
-            turnovers: game.turnovers,
-            fg_made: game.fg_made,
-            fg_attempted: game.fg_attempted,
-            fg3_made: game.fg3_made,
-            fg3_attempted: game.fg3_attempted,
-            ft_made: game.ft_made,
-            ft_attempted: game.ft_attempted,
-            oreb: game.oreb,
-            dreb: game.dreb,
-            plus_minus: game.plus_minus,
-            dk_fantasy_points: game.dk_fantasy_points,
-            fd_fantasy_points: game.fd_fantasy_points ?? computeFantasyPoints(game, 'fanduel'),
-            yahoo_fantasy_points: game.yahoo_fantasy_points ?? computeFantasyPoints(game, 'yahoo'),
-            rest_days: game.rest_days || null,
-            is_back_to_back: game.is_back_to_back || 0
-          });
+          `, this.toInsertParams(game));
           inserted++;
         } catch (e) {
           if (inserted === 0) {
@@ -347,13 +404,13 @@ class NBAStatsService {
       const stmt = db.prepare(`
         INSERT OR REPLACE INTO historical_games (
           player_id, player_name, player_key, team, opponent, position, game_id, game_date, season, is_home,
-          minutes, points, rebounds, assists, steals, blocks, turnovers,
-          fg_made, fg_attempted, fg3_made, fg3_attempted, ft_made, ft_attempted,
+          minutes, points, rebounds, assists, steals, blocks, turnovers, fouls,
+          fg_made, fg_attempted, fg_pct, fg3_made, fg3_attempted, fg3_pct, ft_made, ft_attempted, ft_pct,
           oreb, dreb, plus_minus, dk_fantasy_points, fd_fantasy_points, yahoo_fantasy_points, rest_days, is_back_to_back
         ) VALUES (
           @player_id, @player_name, @player_key, @team, @opponent, @position, @game_id, @game_date, @season, @is_home,
-          @minutes, @points, @rebounds, @assists, @steals, @blocks, @turnovers,
-          @fg_made, @fg_attempted, @fg3_made, @fg3_attempted, @ft_made, @ft_attempted,
+          @minutes, @points, @rebounds, @assists, @steals, @blocks, @turnovers, @fouls,
+          @fg_made, @fg_attempted, @fg_pct, @fg3_made, @fg3_attempted, @fg3_pct, @ft_made, @ft_attempted, @ft_pct,
           @oreb, @dreb, @plus_minus, @dk_fantasy_points, @fd_fantasy_points, @yahoo_fantasy_points, @rest_days, @is_back_to_back
         )
       `);
@@ -362,39 +419,7 @@ class NBAStatsService {
         let count = 0;
         for (const game of gameList) {
           try {
-            stmt.run({
-              player_id: game.player_id,
-              player_name: game.player_name,
-              player_key: playerKey(game.player_name),
-              team: canonicalTeam(game.team),
-              opponent: canonicalTeam(game.opponent),
-              position: game.position || null,
-              game_id: game.game_id,
-              game_date: game.game_date,
-              season: game.season,
-              is_home: game.is_home,
-              minutes: game.minutes,
-              points: game.points,
-              rebounds: game.rebounds,
-              assists: game.assists,
-              steals: game.steals,
-              blocks: game.blocks,
-              turnovers: game.turnovers,
-              fg_made: game.fg_made,
-              fg_attempted: game.fg_attempted,
-              fg3_made: game.fg3_made,
-              fg3_attempted: game.fg3_attempted,
-              ft_made: game.ft_made,
-              ft_attempted: game.ft_attempted,
-              oreb: game.oreb,
-              dreb: game.dreb,
-              plus_minus: game.plus_minus,
-              dk_fantasy_points: game.dk_fantasy_points,
-              fd_fantasy_points: game.fd_fantasy_points ?? computeFantasyPoints(game, 'fanduel'),
-              yahoo_fantasy_points: game.yahoo_fantasy_points ?? computeFantasyPoints(game, 'yahoo'),
-              rest_days: game.rest_days || null,
-              is_back_to_back: game.is_back_to_back || 0
-            });
+            stmt.run(this.toInsertParams(game));
             count++;
           } catch (e) {
             if (count === 0) {
@@ -413,20 +438,66 @@ class NBAStatsService {
   }
 
   /**
-   * Calculate rest days for each game
+   * Date of the player's latest stored game before `beforeDate`, matched by
+   * player_key so rows from any source (blob, NBA API) count. Null if none.
    */
-  calculateRestDays(games) {
+  async getPreviousGameDate(playerName, beforeDate) {
+    const key = playerKey(playerName);
+    const row = DATABASE_TYPE === 'azuresql'
+      ? await db.get(
+          `SELECT CONVERT(VARCHAR(10), MAX(game_date), 23) AS prev FROM historical_games WHERE player_key = @key AND game_date < @beforeDate`,
+          { key, beforeDate })
+      : await db.get(
+          `SELECT MAX(game_date) AS prev FROM historical_games WHERE player_key = ? AND game_date < ?`,
+          key, beforeDate);
+    return row?.prev || null;
+  }
+
+  /**
+   * Number of NBA API rows stored for a player's season (resume check)
+   */
+  async countStoredGames(playerId, season) {
+    const row = DATABASE_TYPE === 'azuresql'
+      ? await db.get(
+          `SELECT COUNT(*) AS n FROM historical_games WHERE player_id = @playerId AND season = @season`,
+          { playerId: String(playerId), season })
+      : await db.get(
+          `SELECT COUNT(*) AS n FROM historical_games WHERE player_id = ? AND season = ?`,
+          String(playerId), season);
+    return row?.n || 0;
+  }
+
+  /**
+   * Compute rest days against the previous stored game, then insert.
+   * Returns the number of rows written.
+   */
+  async insertPlayerGames(games, position) {
+    if (games.length === 0) return 0;
+    const firstDate = games.reduce((min, g) => (g.game_date < min ? g.game_date : min), games[0].game_date);
+    const previousGameDate = await this.getPreviousGameDate(games[0].player_name, firstDate);
+    const withRest = this.calculateRestDays(games, previousGameDate)
+      .map(g => ({ ...g, position: g.position || position || null }));
+    return this.bulkInsertGames(withRest);
+  }
+
+  /**
+   * Calculate rest days for each game. `previousGameDate` is the player's last
+   * game already stored before this batch, so the first fetched game is
+   * measured against it instead of guessed.
+   */
+  calculateRestDays(games, previousGameDate = null) {
     // Sort by date ascending
     const sorted = [...games].sort((a, b) =>
       new Date(a.game_date) - new Date(b.game_date)
     );
 
     for (let i = 0; i < sorted.length; i++) {
-      if (i === 0) {
-        sorted[i].rest_days = 3; // Assume 3 days rest for first game
+      const prev = i === 0 ? previousGameDate : sorted[i - 1].game_date;
+      if (!prev) {
+        sorted[i].rest_days = 3; // Assume 3 days rest when no previous game is known
         sorted[i].is_back_to_back = 0;
       } else {
-        const prevDate = new Date(sorted[i - 1].game_date);
+        const prevDate = new Date(prev);
         const currDate = new Date(sorted[i].game_date);
         const diffDays = Math.floor((currDate - prevDate) / (1000 * 60 * 60 * 24)) - 1;
         sorted[i].rest_days = Math.max(0, diffDays);
@@ -438,31 +509,39 @@ class NBAStatsService {
   }
 
   /**
-   * Fetch all game logs for the current season with concurrency
+   * Fetch all game logs for a season, one player at a time.
+   * options.skipComplete: skip players whose stored game count for the season
+   * already matches games played (resume after an interrupted backfill).
+   * Returns { players, games, skipped, elapsed }.
    */
-  async fetchSeasonGameLogs(season = getCurrentSeason(), progressCallback = null) {
+  async fetchSeasonGameLogs(season = getCurrentSeason(), progressCallback = null, { skipComplete = false } = {}) {
     console.log(`\n🏀 ═══════════════════════════════════════════════════`);
     console.log(`   FETCHING ${season} SEASON GAME LOGS`);
     console.log(`═══════════════════════════════════════════════════════\n`);
 
     const startTime = Date.now();
 
-    // Get all active players
+    // Everyone who played this season
     const players = await this.fetchAllPlayers(season);
 
     let totalGames = 0;
     let processedPlayers = 0;
+    let skipped = 0;
 
     // Process players one at a time with delay (NBA.com is strict about rate limiting)
     for (const player of players) {
+      let fetched = false;
       try {
-        const games = await this.fetchPlayerGameLog(player.id, player.name, season);
-
-        if (games.length > 0) {
-          const gamesWithRest = this.calculateRestDays(games);
-          const inserted = await this.bulkInsertGames(gamesWithRest);
+        if (skipComplete && await this.countStoredGames(player.id, season) >= player.gamesPlayed) {
+          skipped++;
+        } else {
+          fetched = true;
+          const games = await this.fetchPlayerGameLog(player.id, player.name, season);
+          const inserted = await this.insertPlayerGames(games, player.position);
           totalGames += inserted;
-          console.log(`✅ ${player.name}: ${games.length} fetched, ${inserted} inserted`);
+          if (games.length > 0) {
+            console.log(`✅ ${player.name}: ${games.length} fetched, ${inserted} inserted`);
+          }
         }
       } catch (error) {
         console.error(`❌ Failed for ${player.name}:`, error.message);
@@ -475,12 +554,13 @@ class NBAStatsService {
         progressCallback({
           processed: processedPlayers,
           total: players.length,
-          games: totalGames
+          games: totalGames,
+          skipped
         });
       }
 
-      // Delay between each player request
-      if (processedPlayers < players.length) {
+      // Delay between each player request (skipped players made no request)
+      if (fetched && processedPlayers < players.length) {
         await this.sleep(this.requestDelay);
       }
     }
@@ -488,12 +568,12 @@ class NBAStatsService {
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
 
     console.log(`\n═══════════════════════════════════════════════════════`);
-    console.log(`✅ Complete! Processed ${processedPlayers} players`);
+    console.log(`✅ Complete! Processed ${processedPlayers} players (${skipped} already complete)`);
     console.log(`📊 Total games inserted: ${totalGames}`);
     console.log(`⏱️  Elapsed time: ${elapsed}s`);
     console.log(`═══════════════════════════════════════════════════════\n`);
 
-    return { players: processedPlayers, games: totalGames, elapsed };
+    return { players: processedPlayers, games: totalGames, skipped, elapsed };
   }
 
   /**
@@ -1099,7 +1179,7 @@ class NBAStatsService {
 
     const startTime = Date.now();
 
-    // Get all active players
+    // Everyone who played this season
     const players = await this.fetchAllPlayers(season);
 
     let totalGames = 0;
@@ -1118,8 +1198,8 @@ class NBAStatsService {
             : games;
 
           if (newGames.length > 0) {
-            const gamesWithRest = this.calculateRestDays(newGames);
-            const inserted = await this.bulkInsertGames(gamesWithRest);
+            // Rest days for the first new game come from the last stored game
+            const inserted = await this.insertPlayerGames(newGames, player.position);
             totalGames += inserted;
             newGamesFound += newGames.length;
             console.log(`✅ ${player.name}: ${newGames.length} new games inserted`);

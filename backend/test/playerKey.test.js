@@ -90,8 +90,9 @@ describe('historical_games player_key migration and inserts', () => {
         id INTEGER PRIMARY KEY AUTOINCREMENT, player_id TEXT, player_name TEXT NOT NULL,
         team TEXT NOT NULL, opponent TEXT NOT NULL, position TEXT, game_id TEXT, game_date DATE NOT NULL,
         season TEXT, is_home INTEGER DEFAULT 0, minutes REAL, points INTEGER, rebounds INTEGER,
-        assists INTEGER, steals INTEGER, blocks INTEGER, turnovers INTEGER, fg_made INTEGER,
-        fg_attempted INTEGER, fg3_made INTEGER, fg3_attempted INTEGER, ft_made INTEGER, ft_attempted INTEGER,
+        assists INTEGER, steals INTEGER, blocks INTEGER, turnovers INTEGER, fouls INTEGER, fg_made INTEGER,
+        fg_attempted INTEGER, fg_pct REAL, fg3_made INTEGER, fg3_attempted INTEGER, fg3_pct REAL,
+        ft_made INTEGER, ft_attempted INTEGER, ft_pct REAL,
         oreb INTEGER, dreb INTEGER, plus_minus INTEGER, usg_pct REAL, dk_fantasy_points REAL, rest_days INTEGER,
         is_back_to_back INTEGER DEFAULT 0, UNIQUE(player_name, team, game_date));
       INSERT INTO historical_games (player_name, team, opponent, game_date) VALUES

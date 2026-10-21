@@ -7,7 +7,7 @@
 
 import express from 'express';
 import nbaStatsService from '../services/nbaStatsService.js';
-import { getCurrentSeason, getSeasonsInfo } from '../utils/season.js';
+import { getCurrentSeason, getSeasonsInfo, seasonForDate } from '../utils/season.js';
 
 const router = express.Router();
 
@@ -96,8 +96,13 @@ router.post('/sync', async (req, res) => {
     });
   }
 
-  // Check current data status
-  const status = await nbaStatsService.getDataStatus();
+  // Check current data status (only used for lastGameDate; sync can run without it)
+  let status = {};
+  try {
+    status = await nbaStatsService.getDataStatus();
+  } catch (error) {
+    console.warn('⚠️ Could not read historical data status:', error.message);
+  }
 
   // Start sync in background
   isSyncing = true;
@@ -225,9 +230,18 @@ router.post('/sync/nba-api', async (req, res) => {
 
   const { season = getCurrentSeason(), fromDate } = req.body;
 
-  // Get current data status to determine start date
-  const status = await nbaStatsService.getDataStatus();
-  const startDate = fromDate || status.latestGame || null;
+  // Resume from the latest stored game, but only if it belongs to the requested
+  // season; otherwise (e.g. backfilling an older season) do a full season sync
+  let latestGame = null;
+  try {
+    latestGame = (await nbaStatsService.getDataStatus()).latestGame || null;
+  } catch (error) {
+    console.warn('⚠️ Could not read historical data status:', error.message);
+  }
+  // Azure SQL returns DATE columns as Date objects; game logs compare as 'YYYY-MM-DD'
+  if (latestGame instanceof Date) latestGame = latestGame.toISOString().slice(0, 10);
+  const latestInSeason = latestGame && seasonForDate(latestGame) === season ? latestGame : null;
+  const startDate = fromDate || latestInSeason;
 
   isSyncing = true;
   syncProgress = {
@@ -279,13 +293,13 @@ router.post('/sync/nba-api', async (req, res) => {
         status: 'complete',
         mode: 'nba-api',
         season,
-        games: result.totalInserted || 0,
-        players: result.playersProcessed || 0,
+        games: result.games || 0,
+        players: result.players || 0,
         elapsed,
-        message: `Synced ${result.totalInserted || 0} games from ${result.playersProcessed || 0} players in ${elapsed}s`
+        message: `Synced ${result.games || 0} games from ${result.players || 0} players in ${elapsed}s`
       };
 
-      console.log(`✅ NBA API sync complete: ${result.totalInserted || 0} games in ${elapsed}s`);
+      console.log(`✅ NBA API sync complete: ${result.games || 0} games in ${elapsed}s`);
 
     } catch (error) {
       console.error('❌ NBA API sync error:', error);
