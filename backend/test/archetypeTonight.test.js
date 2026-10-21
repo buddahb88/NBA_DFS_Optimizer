@@ -110,6 +110,7 @@ describe('GET /tonight', () => {
     assert.equal(body.stat, 'fp');
     assert.equal(body.slatePlayers, 4);
     assert.equal(body.matchedPlayers, 3);
+    assert.equal(body.fallback, null);
     // Big Two's 2025-26 row is unclassified -> prior season's rim_running_big; NYK is strong there
     assert.deepEqual(body.players.map(p => p.name), ['Guard One', 'Wing Three Jr.']);
     const [guard, wing] = body.players;
@@ -135,6 +136,52 @@ describe('GET /tonight', () => {
     assert.equal((await fetch(`${baseUrl}/tonight?season=${SEASON}`)).status, 400);
     assert.equal((await fetch(`${baseUrl}/tonight?slateId=s1&stat=blk`)).status, 400);
     assert.equal((await fetch(`${baseUrl}/tonight?slateId=missing`)).status, 404);
+  });
+});
+
+describe('GET /tonight thin-season fallback', () => {
+  // Relative to the real clock so the default (current) season is the thin one
+  let CURRENT;
+  let PRIOR;
+  const TEAMS = Array.from({ length: 24 }, (_, i) => `T${String(i).padStart(2, '0')}`);
+
+  before(async () => {
+    const { getCurrentSeason } = await import('../src/utils/season.js');
+    CURRENT = getCurrentSeason();
+    PRIOR = defense.previousSeason(CURRENT);
+    await db.run(`INSERT INTO slates (slate_id, name, site) VALUES ('s2', 'Thin', 'yahoo')`);
+    await db.run(`INSERT INTO players (slate_id, player_id, name, team, opponent, position, salary, projected_points)
+      VALUES ('s2', '1', 'Fallback Guard', 'MIA', 'T00', 'PG', 20, 30)`);
+    // Classified only in the prior season, as early in a season
+    await db.run(`INSERT INTO player_archetypes (season, player_key, archetype) VALUES (?, 'fallback guard', 'scoring_guard')`, PRIOR);
+
+    const insert = (season, team, games, fp) => db.run(
+      `INSERT INTO team_archetype_defense (season, site, group_by, team, group_key, games, player_games,
+        avg_minutes, avg_fp, avg_expected_fp, fp_over_expectation_raw, shrink, fp_over_expectation,
+        pts_delta, reb_delta, ast_delta, fg3m_delta, stocks_delta)
+       VALUES (?, 'yahoo', 'archetype', ?, 'scoring_guard', ?, ?, 30, 40, 38, ?, 0.5, ?, 0, 0, 0, 0, 0)`,
+      season, team, games, games, fp, fp);
+    // Current: one night in -> T00 is soft on 1 game; T01 tops the tier
+    for (const [i, team] of TEAMS.slice(0, 6).entries()) await insert(CURRENT, team, 1, i === 1 ? 9 : 5 - i);
+    // Prior: a full season, T00 the softest of 24
+    for (const [i, team] of TEAMS.entries()) await insert(PRIOR, team, 41, 4 - i * 0.25);
+  });
+
+  test('without a season, a thin current season falls back to last season', async () => {
+    const body = await (await fetch(`${baseUrl}/tonight?slateId=s2`)).json();
+    assert.equal(body.season, PRIOR);
+    assert.deepEqual(body.fallback, { from: CURRENT, qualifiedDefenses: 0, minDefenses: 20, minGames: 10 });
+    assert.deepEqual(body.players.map(p => [p.name, p.rank, p.teams]), [['Fallback Guard', 1, 24]]);
+    // Archetypes still come from the requested season (falling back per player)
+    assert.equal(body.players[0].archetype, 'scoring_guard');
+  });
+
+  test('an explicit season is never replaced', async () => {
+    const body = await (await fetch(`${baseUrl}/tonight?slateId=s2&season=${CURRENT}`)).json();
+    assert.equal(body.season, CURRENT);
+    assert.equal(body.fallback, null);
+    assert.equal(body.players[0].rank, 2);
+    assert.equal(body.players[0].teams, 6);
   });
 });
 

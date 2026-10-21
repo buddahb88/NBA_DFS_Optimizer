@@ -7,9 +7,12 @@ import { GROUPINGS, LAST_N_OPTIONS, STATS } from './archetypes';
  */
 export default function ArchetypeFilters({ value, onChange, seasons, siteName }) {
   const set = (patch) => onChange({ ...value, ...patch });
-  const seasonOptions = (seasons?.seasons ?? []).map((s) => ({ value: s.value, label: s.current ? `${s.value} (current)` : s.value }));
-  // '' = server default (current season); show it as the current season
-  const season = value.season || seasons?.current || '';
+  // '' = Auto: the current season, except Tonight falls back to last season
+  // while the current one is thin. Picking a season explicitly pins it.
+  const seasonOptions = [
+    { value: '', label: seasons?.current ? `Auto (${seasons.current})` : 'Auto' },
+    ...(seasons?.seasons ?? []).map((s) => ({ value: s.value, label: s.value })),
+  ];
 
   return (
     <div className="flex flex-wrap items-end gap-x-3 gap-y-2 rounded-md border border-line bg-surface px-3 py-2">
@@ -20,9 +23,9 @@ export default function ArchetypeFilters({ value, onChange, seasons, siteName })
       <Select
         size="sm"
         label="Season"
-        value={season}
+        value={value.season}
         onChange={(e) => set({ season: e.target.value })}
-        options={seasonOptions.length ? seasonOptions : [{ value: season, label: season || 'Current' }]}
+        options={seasonOptions}
         className="w-36"
       />
       <Select

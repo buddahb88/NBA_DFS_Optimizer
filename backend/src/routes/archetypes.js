@@ -104,6 +104,10 @@ router.get('/defense/:team/:archetype/games', async (req, res) => {
  *   stat      fp (default) | pts | reb | ast | fg3m - what the tier ranks by
  *   site      default: the slate's site
  *   season, grouping, lastNGames, startDate, endDate  as /defense
+ *
+ * Without `season`, a current season with too few defenses at 10+ games is
+ * tiered on last season; `fallback` ({ from, qualifiedDefenses, minDefenses,
+ * minGames }) is set when that happens, null otherwise.
  */
 router.get('/tonight', async (req, res) => {
   try {

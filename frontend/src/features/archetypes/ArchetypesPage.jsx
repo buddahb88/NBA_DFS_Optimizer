@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Button, Card, CardBody, CardHeader, EmptyState, IconGrid, Spinner, Tabs } from '../../components/ui';
+import { Button, Card, CardBody, CardHeader, EmptyState, IconGrid, IconInfo, Spinner, Tabs } from '../../components/ui';
 import { useSlate } from '../../context/SlateContext';
 import { DATA_STATUS_PATH } from '../dataStatus/dataStatus';
 import ArchetypeFilters from './ArchetypeFilters';
@@ -41,6 +41,19 @@ function NoDefenseData({ season }) {
       description="The heatmap is built from synced box scores and player archetypes. Sync game logs (the archetype tables rebuild after the nightly sync), or pick an earlier season."
       action={<DataStatusLink />}
     />
+  );
+}
+
+// Tonight was tiered on last season because the current one is too thin
+function FallbackNote({ season, fallback }) {
+  return (
+    <div role="note" className="flex items-start gap-2 rounded-md border border-info/30 bg-info-soft px-3 py-2 text-xs text-fg">
+      <IconInfo size={14} className="mt-px shrink-0 text-info" />
+      <span>
+        Tiers use {season}: only {fallback.qualifiedDefenses} defenses have {fallback.minGames}+ games in {fallback.from} ({fallback.minDefenses} needed).
+        Pick {fallback.from} under Season to tier on it anyway.
+      </span>
+    </div>
   );
 }
 
@@ -130,7 +143,10 @@ export default function ArchetypesPage() {
       ) : tonight.status === 'error' ? (
         <Card><SectionError error={tonight.error} onRetry={reload} /></Card>
       ) : (
-        <TonightTable data={tonight.data} stat={filters.stat} loading={tonight.status === 'loading'} emptyState={tonightEmpty} />
+        <div className="flex flex-col gap-2">
+          {tonight.data?.fallback && <FallbackNote season={tonight.data.season} fallback={tonight.data.fallback} />}
+          <TonightTable data={tonight.data} stat={filters.stat} loading={tonight.status === 'loading'} emptyState={tonightEmpty} />
+        </div>
       )}
 
       <ArchetypeLegend definitions={definitions} />

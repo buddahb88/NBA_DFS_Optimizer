@@ -96,6 +96,34 @@ describe('ArchetypesPage', () => {
     expect(await names()).toEqual(['Guard One', 'Wing Two'])
   })
 
+  it('says when tonight is tiered on last season because the current one is thin', async () => {
+    archetypesAPI.getTonight.mockResolvedValue({
+      data: { ...TONIGHT, fallback: { from: '2026-27', qualifiedDefenses: 4, minDefenses: 20, minGames: 10 } },
+    })
+    renderPage()
+    fireEvent.click(screen.getByRole('tab', { name: 'Tonight' }))
+    const note = await screen.findByRole('note')
+    expect(note).toHaveTextContent('Tiers use 2025-26')
+    expect(note).toHaveTextContent('only 4 defenses have 10+ games in 2026-27 (20 needed)')
+    expect(screen.getByText('Guard One')).toBeInTheDocument()
+  })
+
+  it('the season picker separates auto from an explicit current season', async () => {
+    renderPage()
+    const select = await screen.findByLabelText('Season')
+    await screen.findByRole('option', { name: 'Auto (2026-27)' })
+    expect(select).toHaveValue('')
+    fireEvent.change(select, { target: { value: '2026-27' } })
+    expect(archetypesAPI.getTonight).toHaveBeenLastCalledWith(expect.objectContaining({ season: '2026-27' }))
+  })
+
+  it('shows no fallback note when tonight uses the requested season', async () => {
+    renderPage()
+    fireEvent.click(screen.getByRole('tab', { name: 'Tonight' }))
+    await screen.findByText('Guard One')
+    expect(screen.queryByRole('note')).toBeNull()
+  })
+
   it('tonight empty states: no slate, and no defense data', async () => {
     useSlate.mockReturnValue(slateContext(null))
     const { unmount } = renderPage()

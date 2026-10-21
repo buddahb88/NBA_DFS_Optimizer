@@ -49,6 +49,9 @@ const POSITION_BUCKETS = ['G', 'F', 'C'];
 export const STAT_COLUMNS = { fp: 'fp_over_expectation', pts: 'pts_delta', reb: 'reb_delta', ast: 'ast_delta', fg3m: 'fg3m_delta' };
 // Weak tier = the top third of defenses (most allowed over expectation) per group
 const WEAK_TIER_FRACTION = 1 / 3;
+// Tonight without an explicit season: the current season is too thin to tier
+// until this many defenses have played minGames (where shrink reaches 0.5)
+export const TONIGHT_MIN_SEASON = { minDefenses: 20, minGames: DEFAULT_DEFENSE_CONFIG.priorGames };
 const SITE_ALIASES = { dk: 'draftkings', fd: 'fanduel' };
 const SITE_METRICS = { draftkings: 'dk', fanduel: 'fd', yahoo: 'yahoo' };
 const STATS = ['pts', 'reb', 'ast', 'fg3m', 'stocks'];
@@ -475,11 +478,23 @@ const SLATE_SQL = 'SELECT slate_id FROM slates WHERE slate_id = ?';
 const SLATE_PLAYERS_SQL = `SELECT player_id, name, team, opponent, position, salary, projected_points, injury_status
   FROM players WHERE slate_id = ?`;
 
+/** Defenses with at least minGames distinct games in any group of `rows`. */
+export function qualifiedDefenses(rows, minGames = TONIGHT_MIN_SEASON.minGames) {
+  const games = new Map();
+  for (const r of rows) games.set(r.team, Math.max(games.get(r.team) ?? 0, n(r.games)));
+  return [...games.values()].filter(g => g >= minGames).length;
+}
+
 /**
  * Slate players whose opponent is in the weak tier vs their archetype (or
  * G/F/C), with salary, projection and the matchup delta for `stat`, best
  * matchup first. Archetype falls back to the prior season like the defense
  * aggregation. Site defaults to the slate's.
+ *
+ * Without an explicit season, a current season with fewer than
+ * TONIGHT_MIN_SEASON.minDefenses qualified defenses is tiered on the prior
+ * season instead (`fallback` says so); archetypes still come from the
+ * requested season.
  */
 export async function getTonight(query = {}) {
   if (!query.slateId) throw new DefenseError('slateId is required');
@@ -489,13 +504,26 @@ export async function getTonight(query = {}) {
 
   const { site, error } = await resolveSite(query.site ? (SITE_ALIASES[String(query.site).toLowerCase()] || query.site) : null, query.slateId);
   if (error) throw new DefenseError(error);
-  const defense = await getDefense({ ...query, site, team: null, group: null });
+  let defense = await getDefense({ ...query, site, team: null, group: null });
+  const archetypeSeason = defense.season;
+  let fallback = null;
+  if (!query.season) {
+    const { minDefenses, minGames } = TONIGHT_MIN_SEASON;
+    const qualified = qualifiedDefenses(defense.rows, minGames);
+    if (qualified < minDefenses) {
+      const prior = await getDefense({ ...query, season: previousSeason(defense.season), site, team: null, group: null });
+      if (qualifiedDefenses(prior.rows, minGames) > qualified) {
+        fallback = { from: defense.season, qualifiedDefenses: qualified, minDefenses, minGames };
+        defense = prior;
+      }
+    }
+  }
   const { season, grouping } = defense;
 
   const [players, current, previous] = await Promise.all([
     db.all(SLATE_PLAYERS_SQL, query.slateId),
-    db.all(ARCHETYPES_SQL, season),
-    db.all(ARCHETYPES_SQL, previousSeason(season)),
+    db.all(ARCHETYPES_SQL, archetypeSeason),
+    db.all(ARCHETYPES_SQL, previousSeason(archetypeSeason)),
   ]);
   const archetypes = new Map(current.map(r => [r.player_key, r.archetype]));
   const priorArchetypes = new Map(previous.map(r => [r.player_key, r.archetype]));
@@ -538,7 +566,7 @@ export async function getTonight(query = {}) {
   out.sort((a, b) => b.matchup_delta - a.matchup_delta || n(b.projected_points) - n(a.projected_points));
 
   return {
-    slateId: query.slateId, season, site, grouping, stat,
+    slateId: query.slateId, season, site, grouping, stat, fallback,
     lastNGames: defense.lastNGames, source: defense.source,
     slatePlayers: players.length, matchedPlayers, defenseRows: defense.rows.length,
     players: out,
