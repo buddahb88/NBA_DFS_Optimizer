@@ -3,10 +3,13 @@ import {
   DEFAULT_FILTERS,
   applyFilters,
   applyQuickView,
+  archetypeDrilldownPath,
+  archetypeOptions,
   bandTone,
   gameKey,
   injuryCode,
   isInjured,
+  matchupTone,
   ownershipTone,
   slateStats,
   toOptimizerPlayers,
@@ -137,5 +140,46 @@ describe('validateSettings', () => {
     expect(validateSettings({ maxExposure: 140 })).toMatch(/0-100/)
     expect(validateSettings({ lock: true, exclude: true })).toMatch(/lock and exclude/)
     expect(validateSettings({ minExposure: 20, maxExposure: 40 })).toBeNull()
+  })
+})
+
+describe('archetype matchups', () => {
+  const matchup = (over) => ({
+    season: '2025-26', site: 'draftkings', grouping: 'archetype', group_key: 'scoring_guard', label: 'Scoring Guard / Wing',
+    opponent: 'NYK', delta: 2.4, rank: 3, teams: 30, grade: 'A', games: 8, ...over,
+  })
+  const rows = [
+    player({ id: 1, archetype: 'scoring_guard', archetype_label: 'Scoring Guard / Wing', matchup: matchup() }),
+    player({ id: 2, archetype: 'rim_running_big', archetype_label: 'Rim-Running Big', matchup: matchup({ grade: 'D', delta: -1 }) }),
+    player({ id: 3, archetype: null, archetype_label: null, matchup: null }),
+  ]
+  const run = (f) => applyFilters(rows, { ...DEFAULT_FILTERS, ...f }).map((r) => r.id)
+
+  it('filters by archetype and minimum matchup grade', () => {
+    expect(run({ archetype: 'rim_running_big' })).toEqual([2])
+    expect(run({ minGrade: 'B' })).toEqual([1])
+    expect(run({ minGrade: 'D' })).toEqual([1, 2])
+    expect(run({})).toEqual([1, 2, 3])
+  })
+
+  it('lists the pool archetypes by label', () => {
+    expect(archetypeOptions(rows)).toEqual([
+      { value: 'rim_running_big', label: 'Rim-Running Big' },
+      { value: 'scoring_guard', label: 'Scoring Guard / Wing' },
+    ])
+  })
+
+  it('tones grades: A/B good, D/F bad', () => {
+    expect(matchupTone('A')).toBe('positive')
+    expect(matchupTone('B')).toBe('positive')
+    expect(matchupTone('C')).toBe('neutral')
+    expect(matchupTone('F')).toBe('negative')
+    expect(matchupTone(null)).toBe('neutral')
+  })
+
+  it('links to the Archetypes page drill-down for the cell', () => {
+    expect(archetypeDrilldownPath(matchup())).toBe('/archetypes?season=2025-26&grouping=archetype&team=NYK&group=scoring_guard')
+    expect(archetypeDrilldownPath(matchup({ grouping: 'position', group_key: 'G' }))).toBe('/archetypes?season=2025-26&grouping=position&team=NYK&group=G')
+    expect(archetypeDrilldownPath(null)).toBeNull()
   })
 })

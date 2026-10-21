@@ -474,26 +474,35 @@ export async function getDefenseGames(team, group, query = {}) {
 // ---------------------------------------------------------------------------
 
 /**
- * Weak tier per group: defenses ranked by the stat's delta (most allowed
- * first), the top third (rounded up) that also allow MORE than expected. Pure.
+ * Every defense ranked per group by the stat's delta, most allowed first. Pure.
  * Returns Map(group_key -> Map(team -> { rank, teams, row })), best first.
  */
-export function weakTiers(rows, stat = 'fp') {
+export function rankDefenses(rows, stat = 'fp') {
   const column = STAT_COLUMNS[stat];
   const byGroup = new Map();
   for (const r of rows) {
     if (!byGroup.has(r.group_key)) byGroup.set(r.group_key, []);
     byGroup.get(r.group_key).push(r);
   }
-  const tiers = new Map();
+  const ranks = new Map();
   for (const [group, list] of byGroup) {
     const ranked = [...list].sort((a, b) => n(b[column]) - n(a[column]) || (a.team < b.team ? -1 : 1));
-    const size = Math.ceil(ranked.length * WEAK_TIER_FRACTION);
-    const tier = new Map();
-    ranked.slice(0, size).forEach((row, i) => {
-      if (n(row[column]) > 0) tier.set(row.team, { rank: i + 1, teams: ranked.length, row });
-    });
-    tiers.set(group, tier);
+    ranks.set(group, new Map(ranked.map((row, i) => [row.team, { rank: i + 1, teams: ranked.length, row }])));
+  }
+  return ranks;
+}
+
+/**
+ * Weak tier per group: defenses ranked by the stat's delta (most allowed
+ * first), the top third (rounded up) that also allow MORE than expected. Pure.
+ * Returns Map(group_key -> Map(team -> { rank, teams, row })), best first.
+ */
+export function weakTiers(rows, stat = 'fp') {
+  const column = STAT_COLUMNS[stat];
+  const tiers = new Map();
+  for (const [group, ranked] of rankDefenses(rows, stat)) {
+    const size = Math.ceil(ranked.size * WEAK_TIER_FRACTION);
+    tiers.set(group, new Map([...ranked].filter(([, hit]) => hit.rank <= size && n(hit.row[column]) > 0)));
   }
   return tiers;
 }
@@ -501,6 +510,23 @@ export function weakTiers(rows, stat = 'fp') {
 const SLATE_SQL = 'SELECT slate_id FROM slates WHERE slate_id = ?';
 const SLATE_PLAYERS_SQL = `SELECT player_id, name, team, opponent, position, salary, projected_points, injury_status
   FROM players WHERE slate_id = ?`;
+
+/**
+ * player_key -> archetype for `season`, falling back to the prior season's
+ * when the row is missing or unclassified (as the defense aggregation does).
+ */
+async function loadArchetypeLookup(season) {
+  const [current, previous] = await Promise.all([
+    db.all(ARCHETYPES_SQL, season),
+    db.all(ARCHETYPES_SQL, previousSeason(season)),
+  ]);
+  const archetypes = new Map(current.map(r => [r.player_key, r.archetype]));
+  const priorArchetypes = new Map(previous.map(r => [r.player_key, r.archetype]));
+  return (key) => {
+    const a = archetypes.get(key);
+    return (!a || a === 'unclassified') ? (priorArchetypes.get(key) ?? a ?? null) : a;
+  };
+}
 
 /** Defenses with at least minGames distinct games in any group of `rows`. */
 export function qualifiedDefenses(rows, minGames = THIN_SEASON.minGames) {
@@ -533,17 +559,10 @@ export async function getTonight(query = {}) {
   const archetypeSeason = fallback?.from ?? defense.season;
   const { season, grouping } = defense;
 
-  const [players, current, previous] = await Promise.all([
+  const [players, archetypeOf] = await Promise.all([
     db.all(SLATE_PLAYERS_SQL, query.slateId),
-    db.all(ARCHETYPES_SQL, archetypeSeason),
-    db.all(ARCHETYPES_SQL, previousSeason(archetypeSeason)),
+    loadArchetypeLookup(archetypeSeason),
   ]);
-  const archetypes = new Map(current.map(r => [r.player_key, r.archetype]));
-  const priorArchetypes = new Map(previous.map(r => [r.player_key, r.archetype]));
-  const archetypeOf = (key) => {
-    const a = archetypes.get(key);
-    return (!a || a === 'unclassified') ? (priorArchetypes.get(key) ?? a ?? null) : a;
-  };
 
   const tiers = weakTiers(defense.rows, stat);
   const column = STAT_COLUMNS[stat];
@@ -584,4 +603,83 @@ export async function getTonight(query = {}) {
     slatePlayers: players.length, matchedPlayers, defenseRows: defense.rows.length,
     players: out,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Player Pool: every slate player's archetype and opponent matchup
+// ---------------------------------------------------------------------------
+
+const GRADES = ['A', 'B', 'C', 'D', 'F'];
+
+/**
+ * Letter grade for a defense's rank among `teams` (1 = allows the most):
+ * equal fifths of the rank range, A best. A lone defense grades C. Pure.
+ */
+export function matchupGrade(rank, teams) {
+  if (rank == null || !teams) return null;
+  if (teams === 1) return 'C';
+  const pct = (rank - 1) / (teams - 1);
+  return GRADES[Math.min(GRADES.length - 1, Math.floor(pct * GRADES.length))];
+}
+
+const matchupFrom = (hit, grouping, group, opponent, base) => ({
+  ...base,
+  grouping,
+  group_key: group,
+  label: labelFor(grouping, group),
+  opponent,
+  delta: hit.row.fp_over_expectation,
+  rank: hit.rank,
+  teams: hit.teams,
+  grade: matchupGrade(hit.rank, hit.teams),
+  games: hit.row.games,
+});
+
+/**
+ * Archetype + opponent matchup per player, keyed by player_id. The matchup is
+ * the opponent's FP-over-expectation cell for the player's archetype, else
+ * for his G/F/C position (as dvpAdjustment looks it up), else null.
+ *
+ * Season resolves like /tonight: without `season`, a thin current season
+ * falls back to last season's defense; archetypes still come from the
+ * requested season. Site defaults to the slate's.
+ */
+export async function getSlateMatchups(slateId, query = {}) {
+  const { site, error } = await resolveSite(query.site ? (SITE_ALIASES[String(query.site).toLowerCase()] || query.site) : null, slateId);
+  if (error) throw new DefenseError(error);
+  const base = { season: query.season, site };
+
+  const byArchetype = await getDefense({ ...base, grouping: 'archetype', seasonFallback: true });
+  const { season } = byArchetype;
+  const [players, archetypeOf] = await Promise.all([
+    db.all(SLATE_PLAYERS_SQL, slateId),
+    loadArchetypeLookup(byArchetype.fallback?.from ?? season),
+  ]);
+  const archetypeRanks = rankDefenses(byArchetype.rows);
+  let positionRanks = null; // loaded on first need
+
+  const out = new Map();
+  for (const p of players) {
+    const archetype = archetypeOf(playerKey(p.name));
+    const known = archetype && archetype !== 'unclassified' ? archetype : null;
+    const opponent = canonicalTeam(p.opponent);
+    const info = { archetype: known, archetype_label: known ? labelFor('archetype', known) : null, matchup: null };
+    out.set(String(p.player_id), info);
+    if (!opponent) continue;
+
+    const hit = known && archetypeRanks.get(known)?.get(opponent);
+    if (hit) {
+      info.matchup = matchupFrom(hit, 'archetype', known, opponent, { season, site });
+      continue;
+    }
+    const position = dvpPosition(p.position);
+    if (!position) continue;
+    if (!positionRanks) {
+      // Same season as the archetype grid, no separate fallback
+      positionRanks = rankDefenses((await getDefense({ ...base, season, grouping: 'position' })).rows);
+    }
+    const posHit = positionRanks.get(position)?.get(opponent);
+    if (posHit) info.matchup = matchupFrom(posHit, 'position', position, opponent, { season, site });
+  }
+  return out;
 }

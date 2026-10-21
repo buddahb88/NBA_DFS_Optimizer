@@ -6,11 +6,26 @@ import espnScraperService from '../services/espnScraperService.js';
 import hashtagBasketballService from '../services/hashtagBasketballService.js';
 import projectionService from '../services/projectionService.js';
 import { snapshotAllSlates, snapshotSlate } from '../services/slateSnapshotService.js';
+import { getSlateMatchups } from '../services/archetypeDefenseService.js';
 import { DEFAULT_SITE, isValidSite } from '../config/sites.js';
 
 const router = express.Router();
 
-// Get players for a slate
+/** Player rows + archetype / opponent matchup; matchup failures leave them null. */
+async function withMatchups(slateId, players, query) {
+  let matchups = new Map();
+  try {
+    matchups = await getSlateMatchups(slateId, { season: query.season, site: query.site });
+  } catch (error) {
+    console.error('Archetype matchups error:', error.message);
+  }
+  const none = { archetype: null, archetype_label: null, matchup: null };
+  return players.map(p => ({ ...p, ...(matchups.get(String(p.player_id)) ?? none) }));
+}
+
+// Get players for a slate, each with archetype, archetype_label and matchup
+// (opponent's archetype defense cell: grade, rank, delta; see getSlateMatchups).
+// Optional season / site pin the matchup data.
 router.get('/:slateId', async (req, res) => {
   try {
     const { slateId } = req.params;
@@ -23,7 +38,7 @@ router.get('/:slateId', async (req, res) => {
     if (team) filters.team = team;
 
     const players = await playerModel.getBySlateId(slateId, filters);
-    res.json(players);
+    res.json(await withMatchups(slateId, players, req.query));
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

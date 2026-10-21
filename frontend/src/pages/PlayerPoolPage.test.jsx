@@ -23,11 +23,21 @@ const slateContext = (slate) => ({
   loadingSlates: false,
 })
 
+const matchup = (over) => ({
+  season: '2025-26', site: 'draftkings', grouping: 'archetype', label: 'Scoring Guard / Wing', rank: 3, teams: 30, games: 8, ...over,
+})
+// Archetype + opponent matchup from GET /players/:slateId, per PLAYERS row
+const MATCHUPS = [
+  { archetype: 'playmaking_big', archetype_label: 'Playmaking Big', matchup: matchup({ group_key: 'playmaking_big', label: 'Playmaking Big', opponent: 'LAL', delta: -1.2, rank: 27, grade: 'F' }) },
+  { archetype: 'scoring_guard', archetype_label: 'Scoring Guard / Wing', matchup: matchup({ group_key: 'scoring_guard', opponent: 'DEN', delta: 0.3, rank: 14, grade: 'C' }) },
+  { archetype: null, archetype_label: null, matchup: matchup({ grouping: 'position', group_key: 'G', label: 'Guards', opponent: 'NYK', delta: 2.4, rank: 2, grade: 'A' }) },
+]
+
 const PLAYERS = [
   { id: 1, player_id: 'p1', name: 'Nikola Jokic', team: 'DEN', opponent: 'LAL', position: 'C', salary: 11800, projected_points: 60, projected_minutes: 36, floor: 48, ceiling: 75, rostership: 32, leverage_score: 1, boom_probability: 30, vegas_implied_total: 118.5, injury_status: null },
   { id: 2, player_id: 'p2', name: 'Luka Doncic', team: 'LAL', opponent: 'DEN', position: 'PG/SG', salary: 11200, projected_points: 57, projected_minutes: 37, floor: 44, ceiling: 74, rostership: 20, leverage_score: 3, boom_probability: 28, vegas_implied_total: 116, injury_status: 'Q' },
   { id: 3, player_id: 'p3', name: 'Derrick White', team: 'BOS', opponent: 'NYK', position: 'PG/SG', salary: 6200, projected_points: 31, projected_minutes: 33, floor: 22, ceiling: 44, rostership: 6, leverage_score: 4, boom_probability: 18, vegas_implied_total: 112, injury_status: null },
-]
+].map((p, i) => ({ ...p, ...MATCHUPS[i] }))
 
 const renderPage = () =>
   render(
@@ -100,6 +110,48 @@ describe('PlayerPoolPage', () => {
     fireEvent.blur(min)
     expect(min).toHaveAttribute('aria-invalid', 'true')
     expect(playerSettingsAPI.save).not.toHaveBeenCalled()
+  })
+
+  it('shows archetype and matchup grade, linking to the drill-down', async () => {
+    renderPage()
+    await screen.findByText('Nikola Jokic')
+
+    const jokic = rowFor('Nikola Jokic')
+    expect(within(jokic).getByText('Playmaking Big')).toBeInTheDocument()
+    const link = within(jokic).getByRole('link', { name: /Matchup F/ })
+    expect(link).toHaveAttribute('href', '/archetypes?season=2025-26&grouping=archetype&team=LAL&group=playmaking_big')
+    expect(link).toHaveTextContent('-1.2')
+
+    // No archetype: the matchup comes from the G/F/C cell
+    const white = within(rowFor('Derrick White')).getByRole('link', { name: /Matchup A/ })
+    expect(white).toHaveAttribute('href', '/archetypes?season=2025-26&grouping=position&team=NYK&group=G')
+    expect(white).toHaveTextContent('+2.4')
+  })
+
+  it('sorts by matchup delta and filters by archetype and grade', async () => {
+    renderPage()
+    await screen.findByText('Nikola Jokic')
+    const names = () => screen.getAllByRole('row').slice(1).map((r) => within(r).getByText(/Jokic|Doncic|White/).textContent)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Matchup' }))
+    expect(names()).toEqual(['Derrick White', 'Luka Doncic', 'Nikola Jokic'])
+
+    fireEvent.change(screen.getByLabelText('Archetype'), { target: { value: 'scoring_guard' } })
+    expect(names()).toEqual(['Luka Doncic'])
+    fireEvent.change(screen.getByLabelText('Archetype'), { target: { value: '' } })
+
+    fireEvent.change(screen.getByLabelText('Matchup grade'), { target: { value: 'B' } })
+    expect(names()).toEqual(['Derrick White'])
+  })
+
+  it('archetype and matchup columns can be hidden', async () => {
+    renderPage()
+    await screen.findByText('Nikola Jokic')
+    fireEvent.click(screen.getByRole('button', { name: 'Columns' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Opponent matchup' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Archetype' }))
+    expect(screen.queryByRole('link', { name: /Matchup/ })).not.toBeInTheDocument()
+    expect(within(rowFor('Nikola Jokic')).queryByText('Playmaking Big')).not.toBeInTheDocument()
   })
 
   it('shows an empty state without an active slate', async () => {

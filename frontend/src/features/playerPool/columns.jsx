@@ -1,6 +1,6 @@
 import { Badge, Tooltip, cn } from '../../components/ui';
 import { bandTone, injuryCode, injuryTone } from './playerPool';
-import { ControlButton, Dash, IconBan, IconLock, Num, NumberCell, OwnershipCell } from './cells';
+import { ControlButton, Dash, IconBan, IconLock, MatchupCell, Num, NumberCell, OwnershipCell } from './cells';
 
 // tanstack sorts `undefined` last with sortUndefined: 'last'
 const orUndef = (v) => (v == null || Number.isNaN(Number(v)) ? undefined : Number(v));
@@ -58,6 +58,22 @@ export function buildColumns({ stats, onUpdate }) {
       accessorFn: (p) => p.position,
       meta: { label: 'Positions' },
       cell: ({ row }) => <span className="text-fg-muted">{String(row.original.position || '').replace(/,/g, '/')}</span>,
+    },
+    {
+      id: 'archetype',
+      header: 'Archetype',
+      accessorFn: (p) => p.archetype_label ?? undefined,
+      sortUndefined: 'last',
+      meta: { label: 'Archetype' },
+      cell: ({ getValue }) => (getValue() ? <span className="whitespace-nowrap text-fg-muted">{getValue()}</span> : <Dash />),
+    },
+    {
+      id: 'matchup',
+      header: 'Matchup',
+      accessorFn: (p) => orUndef(p.matchup?.delta),
+      ...numericCol,
+      meta: { numeric: true, label: 'Opponent matchup' },
+      cell: ({ row }) => <MatchupCell matchup={row.original.matchup} />,
     },
     {
       id: 'salary',

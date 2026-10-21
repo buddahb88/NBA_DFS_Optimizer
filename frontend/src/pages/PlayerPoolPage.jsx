@@ -19,10 +19,12 @@ import {
 } from '../components/ui';
 import {
   DEFAULT_FILTERS,
+  MATCHUP_GRADES,
   POSITIONS,
   QUICK_VIEWS,
   applyFilters,
   applyQuickView,
+  archetypeOptions,
   gameKey,
   getQuickView,
   slateStats,
@@ -32,7 +34,7 @@ import {
 import { buildColumns } from '../features/playerPool/columns';
 import usePlayerSettings from '../features/playerPool/usePlayerSettings';
 
-function FilterBar({ filters, setFilters, games, teams, salaryBounds }) {
+function FilterBar({ filters, setFilters, games, teams, archetypes, salaryBounds }) {
   const set = (patch) => setFilters((f) => ({ ...f, ...patch }));
   const togglePos = (pos) =>
     set({ positions: filters.positions.includes(pos) ? filters.positions.filter((p) => p !== pos) : [...filters.positions, pos] });
@@ -117,6 +119,32 @@ function FilterBar({ filters, setFilters, games, teams, salaryBounds }) {
           className="w-24 [&_input]:h-7 [&_input]:text-xs"
         />
       </div>
+
+      <Select
+        size="sm"
+        aria-label="Archetype"
+        value={filters.archetype}
+        onChange={(e) => set({ archetype: e.target.value })}
+        className="w-44"
+      >
+        <option value="">All archetypes</option>
+        {archetypes.map((a) => (
+          <option key={a.value} value={a.value}>{a.label}</option>
+        ))}
+      </Select>
+
+      <Select
+        size="sm"
+        aria-label="Matchup grade"
+        value={filters.minGrade}
+        onChange={(e) => set({ minGrade: e.target.value })}
+        className="w-32"
+      >
+        <option value="">Any matchup</option>
+        {MATCHUP_GRADES.slice(0, -1).map((g) => (
+          <option key={g} value={g}>{g === 'A' ? 'A only' : `${g} or better`}</option>
+        ))}
+      </Select>
 
       <Toggle
         size="sm"
@@ -226,11 +254,12 @@ function PlayerPoolPage() {
   const optimizerPlayers = useMemo(() => toOptimizerPlayers(players, settings), [players, settings]);
   const columns = useMemo(() => buildColumns({ stats, onUpdate: update }), [stats, update]);
 
-  const { games, teams, salaryBounds } = useMemo(() => {
+  const { games, teams, archetypes, salaryBounds } = useMemo(() => {
     const salaries = players.map((p) => p.salary).filter(Boolean);
     return {
       games: [...new Set(players.map(gameKey).filter(Boolean))].sort(),
       teams: [...new Set(players.map((p) => p.team).filter(Boolean))].sort(),
+      archetypes: archetypeOptions(players),
       salaryBounds: { min: salaries.length ? Math.min(...salaries) : null, max: salaries.length ? Math.max(...salaries) : null },
     };
   }, [players]);
@@ -286,7 +315,7 @@ function PlayerPoolPage() {
       ) : (
         <>
           <ControlsSummary settings={settings} optimizerPlayers={optimizerPlayers} onReset={onReset} />
-          <FilterBar filters={filters} setFilters={setFilters} games={games} teams={teams} salaryBounds={salaryBounds} />
+          <FilterBar filters={filters} setFilters={setFilters} games={games} teams={teams} archetypes={archetypes} salaryBounds={salaryBounds} />
           {/* key: remount on view change so the view's default sort applies */}
           <DataTable
             key={view}

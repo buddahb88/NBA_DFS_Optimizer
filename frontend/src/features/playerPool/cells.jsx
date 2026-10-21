@@ -1,7 +1,9 @@
 // Cell components for the Player Pool table (see columns.jsx).
 import { useEffect, useState } from 'react';
-import { cn } from '../../components/ui';
-import { ownershipTone } from './playerPool';
+import { Link } from 'react-router-dom';
+import { Badge, Tooltip, cn } from '../../components/ui';
+import { formatDelta } from '../archetypes/archetypes';
+import { archetypeDrilldownPath, matchupTone, ownershipTone } from './playerPool';
 
 const TONE_TEXT = {
   positive: 'text-positive',
@@ -35,6 +37,31 @@ export function OwnershipCell({ value }) {
       </span>
       <span className={cn(TONE_TEXT[tone])}>{value.toFixed(1)}%</span>
     </span>
+  );
+}
+
+/** Opponent's defense vs the player's archetype (or G/F/C): grade + FP delta, links to the drill-down. */
+export function MatchupCell({ matchup: m }) {
+  if (!m) return <Dash />;
+  const tone = matchupTone(m.grade);
+  const tip = (
+    <span className="block max-w-xs">
+      {m.opponent} vs {m.label}: {formatDelta(m.delta)} FP per game over expectation, rank {m.rank} of {m.teams}
+      {' '}({m.games} games, {m.season}). Click for the games.
+    </span>
+  );
+  return (
+    <Tooltip content={tip}>
+      <Link
+        to={archetypeDrilldownPath(m)}
+        aria-label={`Matchup ${m.grade}: ${m.opponent} vs ${m.label}`}
+        onClick={(e) => e.stopPropagation()}
+        className="inline-flex items-center justify-end gap-1.5 rounded hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
+      >
+        <Badge size="sm" tone={tone}>{m.grade}</Badge>
+        <span className={cn(TONE_TEXT[tone])}>{formatDelta(m.delta)}</span>
+      </Link>
+    </Tooltip>
   );
 }
 

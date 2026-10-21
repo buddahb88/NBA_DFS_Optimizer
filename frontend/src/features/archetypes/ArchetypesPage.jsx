@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { Button, Card, CardBody, CardHeader, EmptyState, IconGrid, IconInfo, Spinner, Tabs } from '../../components/ui';
 import { useSlate } from '../../context/SlateContext';
 import { DATA_STATUS_PATH } from '../dataStatus/dataStatus';
@@ -9,7 +9,7 @@ import ArchetypeLegend from './ArchetypeLegend';
 import CellDrilldown from './CellDrilldown';
 import TonightTable from './TonightTable';
 import useArchetypes from './useArchetypes';
-import { DEFAULT_FILTERS, statFor } from './archetypes';
+import { parseDeepLink, statFor } from './archetypes';
 
 const TABS = [
   { value: 'heatmap', label: 'Defense heatmap' },
@@ -59,8 +59,12 @@ function FallbackNote({ lead, season, fallback }) {
 
 export default function ArchetypesPage() {
   const { slate, slateId, site, siteConfig, loadingSlates } = useSlate();
-  const [filters, setFilters] = useState(DEFAULT_FILTERS);
+  const [searchParams] = useSearchParams();
+  const [deepLink] = useState(() => parseDeepLink(searchParams));
+  const [filters, setFilters] = useState(deepLink.filters);
   const [tab, setTab] = useState('heatmap');
+  // Deep-linked cell, opened once the grid and labels have loaded
+  const pendingCell = useRef(deepLink.cell);
 
   const { definitions, seasons, defense, tonight, cell, openCell, closeCell, reload } = useArchetypes({
     site,
@@ -68,6 +72,14 @@ export default function ArchetypesPage() {
     slateId: loadingSlates ? null : slateId,
     filters,
   });
+
+  useEffect(() => {
+    const target = pendingCell.current;
+    if (!target || defense.status !== 'ready' || definitions.status === 'loading' || definitions.status === 'idle') return;
+    pendingCell.current = null;
+    const defs = (filters.grouping === 'position' ? definitions.data?.positions : definitions.data?.archetypes) ?? [];
+    openCell({ ...target, label: defs.find((d) => d.key === target.group)?.label });
+  }, [defense.status, definitions, filters.grouping, openCell]);
 
   const season = defense.data?.season || filters.season || seasons.data?.current;
   const { label: statLabel } = statFor(filters.stat);

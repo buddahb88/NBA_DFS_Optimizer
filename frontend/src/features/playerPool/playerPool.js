@@ -90,6 +90,8 @@ export const DEFAULT_FILTERS = {
   salaryMin: '',
   salaryMax: '',
   hideInjured: false,
+  archetype: '',
+  minGrade: '', // matchup grade this good or better
 };
 
 export function applyFilters(rows, f) {
@@ -106,8 +108,36 @@ export function applyFilters(rows, f) {
     if (lo != null && p.salary < lo) return false;
     if (hi != null && p.salary > hi) return false;
     if (f.hideInjured && isInjured(p)) return false;
+    if (f.archetype && p.archetype !== f.archetype) return false;
+    if (f.minGrade && !(gradeIndex(p.matchup?.grade) <= gradeIndex(f.minGrade))) return false;
     return true;
   });
+}
+
+// ── Archetype matchups ──────────────────────────────────────────────────────
+// GET /players/:slateId adds archetype, archetype_label and matchup: the
+// opponent's archetype (else G/F/C) defense cell from team_archetype_defense,
+// { season, grouping, group_key, label, opponent, delta, rank, teams, grade, games }.
+
+export const MATCHUP_GRADES = ['A', 'B', 'C', 'D', 'F'];
+const gradeIndex = (grade) => (MATCHUP_GRADES.includes(grade) ? MATCHUP_GRADES.indexOf(grade) : Infinity);
+
+export const matchupTone = (grade) =>
+  grade === 'A' || grade === 'B' ? 'positive' : grade === 'D' || grade === 'F' ? 'negative' : 'neutral';
+
+/** Archetypes present in the pool, by label, for the filter. */
+export function archetypeOptions(rows) {
+  const labels = new Map();
+  for (const p of rows) if (p.archetype) labels.set(p.archetype, p.archetype_label ?? p.archetype);
+  return [...labels].map(([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label));
+}
+
+/** Archetypes page URL that opens this matchup's defense cell drill-down. */
+export function archetypeDrilldownPath(m) {
+  if (!m?.opponent || !m.group_key) return null;
+  const params = new URLSearchParams({ season: m.season ?? '', grouping: m.grouping, team: m.opponent, group: m.group_key });
+  if (!m.season) params.delete('season');
+  return `/archetypes?${params}`;
 }
 
 // ── Slate-relative colour tones ─────────────────────────────────────────────

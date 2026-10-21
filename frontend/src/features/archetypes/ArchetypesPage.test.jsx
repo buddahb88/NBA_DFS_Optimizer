@@ -39,7 +39,7 @@ const GAMES = {
   games: [{ game_id: 'g1', player_key: 'a', game_date: '2026-01-05', player_name: 'Some Guard', team: 'MIA', minutes: 33, fp: 45, expected_fp: 38, fp_over_expectation: 7, pts_delta: 3, reb_delta: 1, ast_delta: 0, fg3m_delta: 1 }],
 }
 
-const renderPage = () => render(<MemoryRouter><ArchetypesPage /></MemoryRouter>)
+const renderPage = (url = '/archetypes') => render(<MemoryRouter initialEntries={[url]}><ArchetypesPage /></MemoryRouter>)
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -62,6 +62,15 @@ describe('ArchetypesPage', () => {
     expect(within(dialog).getByText('NYK vs Scoring Guard / Wing')).toBeInTheDocument()
     expect(await within(dialog).findByText('Some Guard')).toBeInTheDocument()
     expect(archetypesAPI.getCellGames).toHaveBeenCalledWith('NYK', 'scoring_guard', { season: '2025-26', grouping: 'archetype', site: 'fanduel' })
+  })
+
+  it('opens the drill-down from a deep link (Player Pool matchup)', async () => {
+    renderPage('/archetypes?season=2025-26&grouping=archetype&team=NYK&group=scoring_guard')
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText('NYK vs Scoring Guard / Wing')).toBeInTheDocument()
+    expect(archetypesAPI.getDefense).toHaveBeenCalledWith({ season: '2025-26', grouping: 'archetype', site: 'fanduel' })
+    expect(archetypesAPI.getCellGames).toHaveBeenCalledWith('NYK', 'scoring_guard', { season: '2025-26', grouping: 'archetype', site: 'fanduel' })
+    expect(await within(dialog).findByText('Some Guard')).toBeInTheDocument()
   })
 
   it('passes the position toggle and season filter to the grid', async () => {

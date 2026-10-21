@@ -26,6 +26,22 @@ export const LAST_N_OPTIONS = [
 export const DEFAULT_FILTERS = { season: '', grouping: 'archetype', lastNGames: '', stat: 'fp' }
 
 /**
+ * Deep link (?season=&grouping=&team=&group=, e.g. from a Player Pool matchup)
+ * -> { filters, cell }: the grid filters to load, and the cell to open once it
+ * has, or null.
+ */
+export function parseDeepLink(params) {
+  const filters = { ...DEFAULT_FILTERS }
+  const season = params.get('season')
+  if (season && /^\d{4}-\d{2}$/.test(season)) filters.season = season
+  const grouping = params.get('grouping')
+  if (GROUPINGS.some((g) => g.value === grouping)) filters.grouping = grouping
+  const team = params.get('team')
+  const group = params.get('group')
+  return { filters, cell: team && group ? { team: team.toUpperCase(), group } : null }
+}
+
+/**
  * Filters + site -> /defense query params, empty values left out. Auto season
  * (no season) asks the backend to use last season while the current one is thin.
  */
