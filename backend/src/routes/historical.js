@@ -7,6 +7,7 @@
 
 import express from 'express';
 import nbaStatsService from '../services/nbaStatsService.js';
+import espnBoxScoreService from '../services/espnBoxScoreService.js';
 import { getCurrentSeason, getSeasonsInfo, seasonForDate } from '../utils/season.js';
 
 const router = express.Router();
@@ -23,9 +24,17 @@ let isSyncing = false;
 router.get('/status', async (req, res) => {
   try {
     const status = await nbaStatsService.getDataStatus();
+    let espn = null;
+    try {
+      espn = await espnBoxScoreService.getStatus();
+    } catch (error) {
+      console.warn('⚠️ Could not read ESPN load status:', error.message);
+    }
     res.json({
       success: true,
       ...status,
+      source: 'espn',
+      espn,
       recommendation: status.needsFullSync
         ? 'FULL_SYNC'
         : status.needsUpdate
@@ -76,7 +85,96 @@ router.get('/summary', async (req, res) => {
 
 /**
  * POST /api/historical/sync
- * Sync historical game data from Azure Blob Storage
+ * Sync historical box scores from ESPN (the default source).
+ * Body: { seasons?: string[], season?: string, forceFullSync?: boolean,
+ *         start?: 'YYYY-MM-DD', end?: 'YYYY-MM-DD', source?: 'blob' }
+ * - Seasons run oldest first; the current season resumes from its latest
+ *   loaded date, older seasons are walked in full and skip loaded games.
+ * - forceFullSync refetches games that are already loaded.
+ * - start/end sync an explicit date range instead of seasons.
+ * - source: 'blob' runs the legacy Azure Blob Storage import below.
+ */
+router.post('/sync', async (req, res, next) => {
+  if (req.body?.source === 'blob') return next();
+
+  if (isSyncing) {
+    return res.status(409).json({
+      error: 'Sync already in progress',
+      progress: syncProgress
+    });
+  }
+
+  const { season, seasons: requested, forceFullSync = false, start, end } = req.body || {};
+  const current = getCurrentSeason();
+  const seasons = [...new Set(requested?.length ? requested : [season || current])].sort();
+  const skipLoaded = !forceFullSync;
+  const range = start && end ? `${start} → ${end}` : seasons.join(', ');
+
+  isSyncing = true;
+  syncProgress = { status: 'starting', mode: 'espn', seasons, message: `Starting ESPN sync: ${range}` };
+
+  res.json({
+    success: true,
+    mode: 'espn',
+    seasons,
+    message: `Started ESPN box score sync (${range}). Check /api/historical/sync/status for progress.`
+  });
+
+  setImmediate(async () => {
+    const startTime = Date.now();
+    const totals = { dates: 0, games: 0, rows: 0, skipped: 0, failed: [] };
+    const add = (r) => {
+      for (const key of ['dates', 'games', 'rows', 'skipped']) totals[key] += r[key] || 0;
+      totals.failed.push(...(r.failed || []));
+    };
+    const onProgress = (label) => (p) => {
+      syncProgress = {
+        status: 'syncing',
+        mode: 'espn',
+        season: label,
+        ...p,
+        games: totals.games + p.games,
+        rows: totals.rows + p.rows,
+        percent: p.totalDates > 0 ? Math.round((p.datesProcessed / p.totalDates) * 100) : 0,
+        message: `${label}: ${p.date} (${p.datesProcessed}/${p.totalDates} dates)`
+      };
+    };
+
+    try {
+      if (start && end) {
+        add(await espnBoxScoreService.syncDates(start, end, { skipLoaded, onProgress: onProgress(range) }));
+      } else {
+        for (const s of seasons) {
+          add(await espnBoxScoreService.syncSeason(s, {
+            skipLoaded,
+            resumeFromLatest: skipLoaded && s === current,
+            onProgress: onProgress(s)
+          }));
+        }
+      }
+
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+      syncProgress = {
+        status: 'complete',
+        mode: 'espn',
+        seasons,
+        ...totals,
+        elapsed,
+        message: `Synced ${totals.games} games (${totals.rows} player rows) from ESPN in ${elapsed}s` +
+          (totals.failed.length ? `, ${totals.failed.length} failed` : '')
+      };
+    } catch (error) {
+      console.error('❌ ESPN sync error:', error);
+      syncProgress = { status: 'error', mode: 'espn', error: error.message };
+    } finally {
+      isSyncing = false;
+    }
+  });
+});
+
+/**
+ * POST /api/historical/sync with { source: 'blob' }
+ * Legacy: sync historical game data from Azure Blob Storage
  * The blob is updated nightly by an Azure Function that scrapes Basketball Reference
  */
 router.post('/sync', async (req, res) => {
@@ -216,8 +314,9 @@ router.get('/sync/status', (req, res) => {
 
 /**
  * POST /api/historical/sync/nba-api
- * Sync historical data directly from NBA Stats API (bypasses blob storage)
- * Use this when Azure Function hasn't updated the blob, or for incremental updates
+ * Sync historical data directly from NBA Stats API (bypasses blob storage).
+ * Not the default source: nba.com is blocked from some networks; ESPN
+ * (POST /sync) is canonical.
  * Body: { season?: string, fromDate?: string }
  */
 router.post('/sync/nba-api', async (req, res) => {

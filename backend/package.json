@@ -18,6 +18,7 @@
     "enhanced-projections:verbose": "node scripts/backfill-enhanced-projections.js --verbose",
     "backfill:site-points": "node scripts/backfill-site-fantasy-points.js",
     "backfill:nba-api": "node scripts/backfill-nba-api.js",
+    "backfill:espn": "node scripts/backfill-espn.js",
     "backtest:accuracy": "node scripts/projectionBacktest.js",
     "test:accuracy": "vitest run test/projectionBacktest.test.js"
   },

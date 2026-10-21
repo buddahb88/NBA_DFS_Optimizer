@@ -97,7 +97,7 @@ test('blob sync still starts when getDataStatus fails', async () => {
   process.env.BLOB_STORAGE_URL = 'http://127.0.0.1:1/blob';
   nbaStatsService.getDataStatus.mockRejectedValue(new Error('db down'));
   try {
-    const res = await post('/sync', {});
+    const res = await post('/sync', { source: 'blob' });
     assert.equal(res.status, 200);
     assert.equal((await res.json()).lastGameDate, null);
     await waitForSync();
