@@ -76,6 +76,9 @@ describe('chat and agent prompts', () => {
     assert.match(prompt, /fp_over_expectation/);
     assert.doesNotMatch(prompt, STALE_DVP);
     assert.doesNotMatch(prompt, /7000\+/);
+    // Names resolve through the tools, not a LOWER(name) join
+    assert.doesNotMatch(prompt, /player_key = LOWER\(players\.name\)/);
+    assert.match(prompt, /resolve them with the history tools/);
   });
 
   test('Research and Analyst prompts point matchups at team_archetype_defense', async () => {
@@ -87,6 +90,12 @@ describe('chat and agent prompts', () => {
       assert.doesNotMatch(agent.systemPrompt, /7000\+/, agent.name);
     }
     assert.match(new ResearchAgent().systemPrompt, /dvp_pts_allowed[^\n]*real points/);
+    for (const agent of [new ResearchAgent(), new AnalystAgent()]) {
+      assert.doesNotMatch(agent.systemPrompt, /LOWER\(players\.name\)/, agent.name);
+    }
+    for (const file of [path.join(root, 'CLAUDE.md'), path.join(__dirname, '..', 'src', 'config', 'database-schema.yaml')]) {
+      assert.doesNotMatch(fs.readFileSync(file, 'utf8'), /player_key = LOWER\(players\.name\)/, file);
+    }
   });
 
   test('Analyst custom queries may read the archetype tables but stay read-only', async () => {

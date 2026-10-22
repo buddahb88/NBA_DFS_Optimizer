@@ -23,8 +23,9 @@
 # - team_defense_vs_position / players.dvp_pts_allowed: legacy HashtagBasketball real points allowed per position
 # - players.opp_def_eff: Pre-joined defensive efficiency for each player's opponent
 #
-# Players link to the history tables by player_key: player_key = LOWER(players.name) OR player_name = players.name
-# (player_key is the accent/punctuation/suffix-free name, e.g. 'luka doncic', 'jaren jackson').
+# History tables are keyed by player_key, the accent/punctuation/suffix-free name ('luka doncic', 'jaren jackson').
+# Resolve a player's name to player_key with the chat tools or the player_key utility (utils/playerKey.js), not SQL.
+# Example queries that join players to history on name are slate-wide approximations.
 
 tables:
   slates:
@@ -957,7 +958,7 @@ tables:
       - Always filter site, season and group_by; otherwise rows from every site/season/grouping mix together
       - Early in a season the current season is thin; use the prior season until 20+ defenses have 10+ games
       - Positions are ESPN's coarse G / F / C, not PG/SG/SF/PF/C
-      - Player -> archetype: players -> player_season_profiles (by name) -> player_archetypes (same season)
+      - Player -> archetype: players -> player_season_profiles (player_key from the tools; a name join is approximate) -> player_archetypes (same season)
 
 # DFS Constraints (DraftKings)
 dfs_rules:
@@ -1004,7 +1005,7 @@ query_tips:
   - "Early in a season use the prior season for team_archetype_defense until 20+ defenses have 10+ games in the current one"
   - "dvp_pts_allowed / team_defense_vs_position.pts_allowed are REAL points (about 18-28), NOT fantasy points"
   - "opp_def_eff: Higher is better for offense (weaker defense to face)"
-  - "Link players to history by name: player_key = LOWER(players.name) OR player_name = players.name"
+  - "Player names: resolve them to player_key with the tools (get_player_history, compare_players, get_usage_without_teammate, ...) or the player_key utility (utils/playerKey.js); they handle accents, punctuation and Jr./III and return closest matches. Then filter history tables by player_key, never player_name LIKE '%name%'. The slate-wide example joins on name are approximate and can miss players"
   - "historical_games has every game since 2024-25; filter season_type = 'regular' for season averages. usg_pct/off_rtg/def_rtg/bpm are empty there - use player_season_profiles"
   # Advanced metrics tips
   - "CASH GAMES: Filter by floor >= 30 AND volatility < 0.20 AND bust_probability < 25"

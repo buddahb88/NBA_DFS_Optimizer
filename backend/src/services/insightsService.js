@@ -515,27 +515,19 @@ class InsightsService {
   }
 
   /**
-   * Usage bumps: for each missing regular, how the slate teammates scored in
-   * the team's games he missed vs games he played, while he was on the team,
-   * season to date (through the window's end). Two queries total.
+   * CTEs missing / roster / team_games for "games without" (see the header):
+   * one team_games row per (missing_key, team, game) from the player's first
+   * appearance for the team in [startDate, endDate] through endDate, or
+   * through his last appearance for the team if he later shows up elsewhere
+   * (a trade ends the span). played = he has a minutes > 0 row; dnp = he was
+   * listed DNP or has a minutes = 0 row. Shared with the chat history tools.
    */
-  async detectUsageBumps(players, { minGames = 8, minAvgDk = 25, site, ...windowOpts } = {}) {
-    const slate = normalizeSlatePlayers(players);
-    const window = await this.resolveWindow(windowOpts, { defaultLastNDays: 30 });
-    const col = this.pointsColumn(site);
-    const missing = await this.findMissingRegulars(slate, window, col, minGames, minAvgDk);
-    if (missing.length === 0) return [];
-
-    const season = { startDate: window.seasonStartDate, endDate: window.endDate };
-    const range = this.dateFilter('game_date', season);
-    const missingRows = missing.map(m => [m.player_key, m.team]);
-    const slateRows = [...new Map(slate.map(p => [`${p.key}|${p.team}`, [p.key, p.team]])).values()];
-
-    const rows = await db.all(`
-      WITH missing(player_key, team) AS (${valuesSql(missingRows, 2)}),
-      slate(player_key, team) AS (${valuesSql(slateRows, 2)}),
-      roster AS (
-        SELECT m.player_key, m.team, MIN(a.game_date) AS first_date
+  absenceGamesSql(missingRows, { startDate, endDate }) {
+    const range = this.dateFilter('game_date', { startDate, endDate });
+    const sql = `
+      missing(player_key, team) AS (${valuesSql(missingRows, 2)}),
+      appearances AS (
+        SELECT m.player_key, m.team, MIN(a.game_date) AS first_date, MAX(a.game_date) AS last_date
         FROM missing m
         JOIN (
           SELECT player_key, team, game_date FROM historical_games WHERE 1 = 1${range.sql}
@@ -544,8 +536,17 @@ class InsightsService {
         ) a ON a.player_key = m.player_key AND a.team = m.team
         GROUP BY m.player_key, m.team
       ),
+      roster AS (
+        SELECT player_key, team, first_date,
+          CASE WHEN EXISTS (
+            SELECT 1 FROM historical_games o
+            WHERE o.player_key = ap.player_key AND o.team <> ap.team
+              AND o.game_date > ap.last_date AND o.game_date <= ?
+          ) THEN last_date ELSE ? END AS end_date
+        FROM appearances ap
+      ),
       team_games AS (
-        SELECT r.player_key AS missing_key, r.team, t.game_id,
+        SELECT r.player_key AS missing_key, r.team, t.game_id, t.game_date, t.season_type,
           CASE WHEN EXISTS (
             SELECT 1 FROM historical_games p
             WHERE p.game_id = t.game_id AND p.player_key = r.player_key AND p.minutes > 0
@@ -558,8 +559,32 @@ class InsightsService {
             WHERE z.game_id = t.game_id AND z.player_key = r.player_key AND COALESCE(z.minutes, 0) = 0
           ) THEN 1 ELSE 0 END AS dnp
         FROM roster r
-        JOIN team_game_stats t ON t.team = r.team AND t.game_date >= r.first_date AND t.game_date <= ?
-      )
+        JOIN team_game_stats t ON t.team = r.team AND t.game_date >= r.first_date AND t.game_date <= r.end_date
+      )`;
+    return { sql, params: [...missingRows.flat(), ...range.params, ...range.params, endDate, endDate] };
+  }
+
+  /**
+   * Usage bumps: for each missing regular, how the slate teammates scored in
+   * the team's games he missed vs games he played, while he was on the team,
+   * season to date (through the window's end). Two queries total.
+   */
+  async detectUsageBumps(players, { minGames = 8, minAvgDk = 25, site, ...windowOpts } = {}) {
+    const slate = normalizeSlatePlayers(players);
+    const window = await this.resolveWindow(windowOpts, { defaultLastNDays: 30 });
+    const col = this.pointsColumn(site);
+    const missing = await this.findMissingRegulars(slate, window, col, minGames, minAvgDk);
+    if (missing.length === 0) return [];
+
+    const season = { startDate: window.seasonStartDate, endDate: window.endDate };
+    const missingRows = missing.map(m => [m.player_key, m.team]);
+    const slateRows = [...new Map(slate.map(p => [`${p.key}|${p.team}`, [p.key, p.team]])).values()];
+
+    const absences = this.absenceGamesSql(missingRows, season);
+
+    const rows = await db.all(`
+      WITH ${absences.sql},
+      slate(player_key, team) AS (${valuesSql(slateRows, 2)})
       SELECT l.missing_key, l.team, h.player_key,
         SUM(CASE WHEN l.played = 0 THEN 1 ELSE 0 END) AS games_without,
         SUM(CASE WHEN l.played = 0 AND l.dnp = 1 THEN 1 ELSE 0 END) AS games_without_dnp,
@@ -573,7 +598,7 @@ class InsightsService {
       JOIN slate sl ON sl.player_key = h.player_key AND sl.team = h.team
       WHERE h.minutes > 0 AND h.${col} IS NOT NULL AND h.player_key <> l.missing_key
       GROUP BY l.missing_key, l.team, h.player_key
-    `, [...missingRows.flat(), ...slateRows.flat(), ...range.params, ...range.params, window.endDate]);
+    `, [...absences.params, ...slateRows.flat()]);
 
     const missingByKey = new Map(missing.map(m => [`${m.player_key}|${m.team}`, m]));
     const slateByKey = new Map(slate.map(p => [`${p.key}|${p.team}`, p]));

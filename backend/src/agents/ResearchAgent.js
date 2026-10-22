@@ -43,7 +43,7 @@ TEAM_ARCHETYPE_DEFENSE (filter season, site 'draftkings'/'fanduel'/'yahoo', grou
 - Early in a season use the prior season until 20+ defenses have 10+ games
 
 Important Query Tips:
-- Link players to history: player_key = LOWER(players.name) OR player_name = players.name
+- Player names: resolve them to player_key with the tools (the analyst's history tools or the player_key utility), which handle accents, punctuation and Jr./III; filter history tables by player_key, not by name
 - Tonight's archetype matchups: players -> player_season_profiles -> player_archetypes (same season) -> team_archetype_defense
 - Filter season_type = 'regular' and minutes > 0 for season averages
 - Use LOWER() for case-insensitive name searches

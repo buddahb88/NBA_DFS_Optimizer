@@ -76,7 +76,7 @@ Join to `historical_games` on player_key + game_date for actual results.
 #### `team_defense_vs_position` - Legacy DVP
 HashtagBasketball position DVP. `pts_allowed` is REAL points per game (not fantasy points); prefer `team_archetype_defense`.
 
-Link slate players to the history tables with `player_key = LOWER(players.name) OR player_name = players.name`.
+History tables are keyed by `player_key`. Resolve names with the tools (`player_history`, `player_profile`) or the player key utility (`backend/src/utils/playerKey.js`), which handle accents, punctuation and Jr./III; then filter by `player_key`. A SQL join on names is only an approximation.
 
 ### MCP Server Tools (nba-dfs-sqlite)
 

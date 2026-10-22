@@ -11,9 +11,8 @@
  *   - B2B: player's own B2B vs rested minutes split, else a role default
  *   - blowout risk from the spread: starters lose minutes, bench gains
  *   - injury redistribution: when a teammate is OUT his minutes are handed to
- *     active teammates using with/without splits (same definition as
- *     nbaStatsService.getUsageWithoutTeammate: "without" = games where the
- *     teammate logged no minutes)
+ *     active teammates using with/without splits ("without" = games where
+ *     the teammate logged no minutes)
  *
  * FPPM:
  *   - recent (last 10 games) and season FPPM, season regressed toward the
