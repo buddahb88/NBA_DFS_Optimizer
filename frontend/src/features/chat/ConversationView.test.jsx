@@ -1,6 +1,19 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import ConversationView from './ConversationView'
+
+// Count markdown renders by content to see which messages re-render
+const renders = vi.hoisted(() => [])
+vi.mock('react-markdown', () => ({
+  default: ({ children }) => {
+    renders.push(children)
+    return <div>{children}</div>
+  },
+}))
+
+beforeEach(() => {
+  renders.length = 0
+})
 
 const idle = { isStreaming: false, content: '', timeline: null }
 const MESSAGES = [
@@ -23,7 +36,7 @@ function fakeLayout(el, { clientHeight = 400 } = {}) {
   return box
 }
 
-const view = (props) => <ConversationView messages={MESSAGES} stream={idle} showReasoning headshots={{}} onPickPrompt={() => {}} {...props} />
+const view = (props) => <ConversationView messages={MESSAGES} stream={idle} showReasoning headshots={{}} welcome={<p>Welcome!</p>} {...props} />
 
 describe('ConversationView auto-scroll', () => {
   it('follows streaming text, pauses when the user scrolls up, and resumes via Jump to latest', () => {
@@ -71,6 +84,34 @@ describe('ConversationView auto-scroll', () => {
   it('shows a skeleton while history loads', () => {
     render(view({ messages: [], loading: true }))
     expect(screen.getByRole('status', { name: 'Loading conversation' })).toBeInTheDocument()
-    expect(screen.queryByText('What are we building tonight?')).not.toBeInTheDocument()
+    expect(screen.queryByText('Welcome!')).not.toBeInTheDocument()
+  })
+})
+
+describe('ConversationView states', () => {
+  it('shows the welcome screen for an empty chat', () => {
+    render(view({ messages: [] }))
+    expect(screen.getByText('Welcome!')).toBeInTheDocument()
+  })
+
+  it('shows an error with retry when a saved chat fails to load', () => {
+    const retry = vi.fn()
+    render(view({ messages: [], historyError: 'Server down', onRetryHistory: retry }))
+    expect(screen.getByText("Couldn't load this conversation")).toBeInTheDocument()
+    expect(screen.queryByText('Welcome!')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(retry).toHaveBeenCalled()
+  })
+
+  it('re-renders only the live message as tokens stream in', () => {
+    const live = (content) => ({ isStreaming: true, content, timeline: null })
+    const { rerender } = render(view({ stream: live('Str') }))
+    // User prompts are plain bubbles, so only the answer and the live message use markdown
+    expect(renders).toEqual(['Max Christie.', 'Str'])
+
+    renders.length = 0
+    rerender(view({ stream: live('Streaming') }))
+    rerender(view({ stream: live('Streaming more') }))
+    expect(renders).toEqual(['Streaming', 'Streaming more'])
   })
 })

@@ -12,3 +12,11 @@ export function formatTimestamp(timestamp, now = new Date()) {
   if (diffInHours < 24) return `${diffInHours}h ago`;
   return date.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
+
+export function greeting(now = new Date()) {
+  const h = now.getHours();
+  if (h < 5) return 'Late night grind';
+  if (h < 12) return 'Good morning';
+  if (h < 17) return 'Good afternoon';
+  return 'Good evening';
+}

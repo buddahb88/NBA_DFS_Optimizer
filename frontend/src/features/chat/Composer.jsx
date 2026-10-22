@@ -210,7 +210,7 @@ const Composer = forwardRef(function Composer(
   const activeId = menuOpen ? `${listId}-opt-${Math.min(activeIndex, items.length - 1)}` : undefined;
 
   return (
-    <div className="shrink-0 border-t border-line bg-surface px-3 py-3 sm:px-4">
+    <div className="shrink-0 border-t border-line bg-surface px-3 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4">
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -279,7 +279,8 @@ const Composer = forwardRef(function Composer(
               aria-autocomplete="list"
               aria-controls={menuOpen ? listId : undefined}
               aria-activedescendant={activeId}
-              className="min-w-0 flex-1 resize-none bg-transparent py-1.5 text-sm leading-6 text-fg placeholder:text-fg-subtle focus:outline-none"
+              enterKeyHint="send"
+              className="min-w-0 flex-1 resize-none bg-transparent py-1.5 text-base leading-6 text-fg placeholder:text-fg-subtle focus:outline-none sm:text-sm"
             />
             {isStreaming ? (
               <button

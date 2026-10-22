@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react';
+import { memo, useEffect, useId, useState } from 'react';
 import {
   IconAlert,
   IconBolt,
@@ -172,7 +172,7 @@ function Warnings({ warnings }) {
  * ("Used 4 tools across 2 agents · 3.2s") once done. With showReasoning off only the chip shows.
  * Step-limit hits, tool errors and interruptions always surface as a caution callout.
  */
-export default function AgentTimeline({ timeline, isStreaming = false, showReasoning = true }) {
+function AgentTimeline({ timeline, isStreaming = false, showReasoning = true }) {
   const [expanded, setExpanded] = useState(null); // null = follow the streaming default
   const listId = useId();
   const now = useNow(isStreaming);
@@ -225,7 +225,7 @@ export default function AgentTimeline({ timeline, isStreaming = false, showReaso
         <ol
           id={listId}
           aria-label="Agent activity"
-          className="mt-2 space-y-0.5 rounded-lg border border-line bg-surface p-2.5 animate-fade-in motion-reduce:animate-none"
+          className="scrollbar-thin mt-2 max-h-72 space-y-0.5 overflow-y-auto rounded-lg border border-line bg-surface p-2.5 animate-fade-in motion-reduce:animate-none"
         >
           {steps.map((step) => (
             <li key={step.id} className="animate-fade-in motion-reduce:animate-none">
@@ -242,3 +242,6 @@ export default function AgentTimeline({ timeline, isStreaming = false, showReaso
     </div>
   );
 }
+
+// Finished messages keep their timeline; memo keeps streamed tokens from re-rendering them
+export default memo(AgentTimeline);

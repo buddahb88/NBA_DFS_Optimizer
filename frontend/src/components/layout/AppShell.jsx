@@ -50,7 +50,7 @@ export default function AppShell({ children }) {
   );
 
   return (
-    <div className="flex h-screen overflow-hidden bg-canvas text-fg">
+    <div className="flex h-screen overflow-hidden bg-canvas text-fg supports-[height:100dvh]:h-dvh">
       {/* Sidebar: rail on tablet+, drawer on mobile */}
       {isTabletUp ? (
         <Sidebar items={navItems} collapsed={collapsed} canCollapse={isDesktop} onToggle={() => setCollapsedPref((c) => !c)} />

@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { cn } from '../../components/ui';
@@ -46,13 +47,15 @@ const components = {
   hr: () => <hr className="my-5 border-line" />,
 };
 
+const REMARK_PLUGINS = [remarkGfm];
+
 /** Assistant prose. `streaming` adds the trailing caret (see chat.css). */
-export default function Markdown({ children, streaming = false }) {
+export default memo(function Markdown({ children, streaming = false }) {
   return (
     <div className={cn('chat-md text-sm text-fg', streaming && 'is-streaming')}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+      <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={components}>
         {children}
       </ReactMarkdown>
     </div>
   );
-}
+});

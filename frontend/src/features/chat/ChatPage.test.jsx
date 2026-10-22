@@ -7,7 +7,7 @@ import { useSlate } from '../../context/SlateContext'
 import useMediaQuery from '../../hooks/useMediaQuery'
 
 vi.mock('../../services/api', () => ({
-  chatAPI: { getSessions: vi.fn(), getSessionHistory: vi.fn(), deleteSession: vi.fn(), renameSession: vi.fn(), sendFeedback: vi.fn() },
+  chatAPI: { getSessions: vi.fn(), getSessionHistory: vi.fn(), deleteSession: vi.fn(), renameSession: vi.fn(), sendFeedback: vi.fn(), getSuggestions: vi.fn() },
   playersAPI: { getBySlateId: vi.fn() },
   playerSettingsAPI: { getBySlateId: vi.fn(), save: vi.fn() },
   lineupsAPI: { create: vi.fn() },
@@ -76,6 +76,7 @@ beforeEach(() => {
   chatAPI.getSessionHistory.mockResolvedValue({ data: { success: true, messages: [{ role: 'user', content: 'Who is chalk?', created_at: new Date().toISOString() }] } })
   playersAPI.getBySlateId.mockResolvedValue({ data: PLAYERS })
   playerSettingsAPI.getBySlateId.mockResolvedValue({ data: [] })
+  chatAPI.getSuggestions.mockResolvedValue({ data: { success: true, suggestions: [] } })
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(emptyStream()))
 })
 afterEach(() => vi.unstubAllGlobals())
@@ -90,8 +91,9 @@ describe('ChatPage shell', () => {
   it('renders the slate context bar from the slate and its players', async () => {
     renderPage()
     expect(screen.getByRole('heading', { name: 'New chat' })).toBeInTheDocument()
-    expect(screen.getByText('Main 7:10 PM ET')).toBeInTheDocument()
-    expect(screen.getByText('DraftKings')).toBeInTheDocument()
+    const bar = screen.getByRole('region', { name: 'Slate context' })
+    expect(within(bar).getByText('Main 7:10 PM ET')).toBeInTheDocument()
+    expect(within(bar).getByText('DraftKings')).toBeInTheDocument()
     await waitFor(() => expect(screen.getByRole('region', { name: 'Slate context' })).toHaveTextContent('2 games'))
     const lock = new Date('2026-10-22T23:10:00Z').toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
     expect(within(screen.getByRole('region', { name: 'Slate context' })).getByText(/^Lock/)).toHaveTextContent(`Lock ${lock}`)
@@ -156,6 +158,50 @@ describe('ChatPage shell', () => {
     expect(toggle).toHaveAttribute('aria-checked', 'true')
     fireEvent.click(toggle)
     expect(toggle).toHaveAttribute('aria-checked', 'false')
+  })
+
+  it('welcome screen shows suggestions generated for the slate; clicking one sends it', async () => {
+    chatAPI.getSuggestions.mockResolvedValue({
+      data: {
+        success: true,
+        suggestions: [
+          { id: 'game_stack', kind: 'game_stack', label: 'Game stack', prompt: 'Build me a BOS vs NYK game stack.' },
+          { id: 'value_play', kind: 'value_play', label: 'Value play', prompt: 'Is Cheap Wing ($4,000, 7x) a safe value play tonight?' },
+          { id: 'archetype_edge', kind: 'archetype_edge', label: 'Matchup edge', prompt: "Break down C Three's matchup vs NYK tonight." },
+          { id: 'score_lineup', kind: 'score_lineup', label: 'Score a lineup', prompt: 'Score my lineup from last night (2026-10-21).' },
+        ],
+      },
+    })
+    render(<ChatPage />)
+    expect(chatAPI.getSuggestions).toHaveBeenCalledWith('42')
+    const prompts = screen.getByRole('region', { name: 'Suggested prompts' })
+    const stack = await within(prompts).findByRole('button', { name: /BOS vs NYK game stack/ })
+    expect(within(prompts).getAllByRole('button')).toHaveLength(4)
+
+    fireEvent.click(stack)
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1))
+    expect(sentBody()).toMatchObject({ message: 'Build me a BOS vs NYK game stack.', slateId: '42' })
+    expect(screen.queryByRole('region', { name: 'Suggested prompts' })).not.toBeInTheDocument()
+  })
+
+  it('welcome screen falls back to static prompts when suggestions fail to load', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    chatAPI.getSuggestions.mockRejectedValue(new Error('Network Error'))
+    render(<ChatPage />)
+    const prompts = screen.getByRole('region', { name: 'Suggested prompts' })
+    expect(await within(prompts).findByRole('button', { name: /top value plays under \$6,000/ })).toBeInTheDocument()
+    expect(within(prompts).getAllByRole('button')).toHaveLength(4)
+  })
+
+  it('shows an error with retry when a saved chat fails to load', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    chatAPI.getSessionHistory.mockRejectedValueOnce(new Error('boom'))
+    render(<ChatPage />)
+    fireEvent.click(await screen.findByRole('button', { name: /^Lakers stack ideas/ }))
+    expect(await screen.findByText("Couldn't load this conversation")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(await screen.findByText('Who is chalk?')).toBeInTheDocument()
+    expect(chatAPI.getSessionHistory).toHaveBeenCalledTimes(2)
   })
 
   it('toggles the context drawer', () => {

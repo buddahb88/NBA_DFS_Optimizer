@@ -1,40 +1,8 @@
 import { useEffect } from 'react';
-import { IconArrowDown, IconBolt, IconChart, IconSearch, IconUsers } from '../../components/ui';
-import { AssistantMark, ChatMessage, StreamingMessage } from './ChatMessage';
+import { Button, EmptyState, IconAlert, IconArrowDown } from '../../components/ui';
+import { ChatMessage, StreamingMessage } from './ChatMessage';
 import { PlayerHeadshotsContext } from './chatFormat';
 import useAutoScroll from './useAutoScroll';
-
-const SUGGESTED_PROMPTS = [
-  { icon: IconBolt, text: 'Show me top value plays under $6000' },
-  { icon: IconUsers, text: 'Lock Luka Doncic and build an optimal lineup' },
-  { icon: IconChart, text: 'Which games have the highest Vegas totals?' },
-  { icon: IconSearch, text: 'Find high usage, low ownership players' },
-];
-
-function Welcome({ onPickPrompt }) {
-  return (
-    <div className="mx-auto flex max-w-2xl flex-col items-center px-4 py-12 text-center sm:py-16">
-      <AssistantMark size={44} />
-      <h2 className="mt-4 text-xl font-semibold text-fg">What are we building tonight?</h2>
-      <p className="mt-1.5 max-w-md text-sm text-fg-muted">
-        Ask about value plays, matchups, stacks or lineups. Specialist agents (Optimizer, Research, Analyst) dig into the slate for you.
-      </p>
-      <div className="mt-8 grid w-full gap-2 sm:grid-cols-2">
-        {SUGGESTED_PROMPTS.map((prompt) => (
-          <button
-            key={prompt.text}
-            type="button"
-            onClick={() => onPickPrompt(prompt.text)}
-            className="flex items-center gap-3 rounded-lg border border-line bg-surface p-3 text-left text-sm text-fg-muted transition-colors hover:border-line-strong hover:bg-surface-raised hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
-          >
-            <prompt.icon size={16} className="shrink-0 text-accent" />
-            <span>{prompt.text}</span>
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
 
 const bar = 'rounded bg-surface-raised animate-pulse motion-reduce:animate-none';
 
@@ -64,8 +32,21 @@ function HistorySkeleton() {
  * Scrollable message list. `stream` is the live agent stream
  * ({ isStreaming, content, timeline, blocks }).
  * Follows new content until the user scrolls up, then offers "Jump to latest".
+ * With no messages it shows `welcome`; `loading` shows a skeleton and
+ * `historyError` an error with retry while a saved chat loads.
  */
-export default function ConversationView({ messages, stream, showReasoning, headshots, loading = false, onPickPrompt, onRegenerate, onFeedback }) {
+export default function ConversationView({
+  messages,
+  stream,
+  showReasoning,
+  headshots,
+  welcome = null,
+  loading = false,
+  historyError = null,
+  onRetryHistory,
+  onRegenerate,
+  onFeedback,
+}) {
   const contentKey = [loading, messages.length, stream.isStreaming, stream.content?.length, stream.timeline?.steps?.length, stream.blocks?.length].join('|');
   const { ref, onScroll, pinned, scrollToBottom } = useAutoScroll(contentKey);
 
@@ -78,15 +59,23 @@ export default function ConversationView({ messages, stream, showReasoning, head
     if (loading) scrollToBottom();
   }, [loading, scrollToBottom]);
 
-  const empty = messages.length === 0 && !stream.isStreaming && !loading;
+  const empty = messages.length === 0 && !stream.isStreaming && !loading && !historyError;
   const lastIndex = messages.length - 1;
   const canRegenerate = !stream.isStreaming && last?.role === 'assistant';
 
   return (
     <div className="relative h-full">
-      <div ref={ref} onScroll={onScroll} className="scrollbar-thin h-full overflow-y-auto" data-testid="conversation-scroll">
-        {empty ? (
-          <Welcome onPickPrompt={onPickPrompt} />
+      <div ref={ref} onScroll={onScroll} className="scrollbar-thin h-full overflow-y-auto overscroll-contain" data-testid="conversation-scroll">
+        {historyError ? (
+          <EmptyState
+            className="h-full"
+            icon={<IconAlert size={18} className="text-negative" />}
+            title="Couldn't load this conversation"
+            description={historyError}
+            action={onRetryHistory && <Button size="sm" onClick={onRetryHistory}>Try again</Button>}
+          />
+        ) : empty ? (
+          welcome
         ) : (
           <PlayerHeadshotsContext.Provider value={headshots}>
             <section className="mx-auto flex max-w-3xl flex-col px-3 pb-6 pt-2 sm:px-6" aria-label="Conversation">
@@ -113,7 +102,7 @@ export default function ConversationView({ messages, stream, showReasoning, head
           </PlayerHeadshotsContext.Provider>
         )}
       </div>
-      {!pinned && !empty && (
+      {!pinned && !empty && !historyError && (
         <button
           type="button"
           onClick={scrollToBottom}

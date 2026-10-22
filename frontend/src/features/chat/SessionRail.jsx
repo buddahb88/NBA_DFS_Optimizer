@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Button,
+  EmptyState,
+  IconAlert,
   IconChat,
   IconChevronLeft,
   IconChevronRight,
@@ -11,7 +13,6 @@ import {
   IconX,
   Input,
   Modal,
-  Spinner,
   Tooltip,
   cn,
 } from '../../components/ui';
@@ -116,6 +117,7 @@ export default function SessionRail({
   onSelect,
   onRename,
   onDelete,
+  onRetry,
   className,
 }) {
   const [query, setQuery] = useState('');
@@ -190,16 +192,26 @@ export default function SessionRail({
 
       <nav aria-label="Conversation history" className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-2 pb-3">
         {loading ? (
-          <div className="flex justify-center py-6">
-            <Spinner size="sm" />
+          <div className="space-y-1.5 px-2.5 pt-3" aria-busy="true" aria-label="Loading conversations">
+            {[90, 70, 80, 60, 75].map((w) => (
+              <div key={w} className="h-7 animate-pulse rounded-md bg-surface-sunken motion-reduce:animate-none" style={{ width: `${w}%` }} />
+            ))}
           </div>
         ) : error ? (
-          <p className="px-2 py-4 text-xs text-negative">{error}</p>
+          <EmptyState
+            compact
+            icon={<IconAlert size={18} className="text-negative" />}
+            title={error}
+            description="Check that the backend is running."
+            action={onRetry && <Button size="sm" variant="secondary" onClick={onRetry}>Retry</Button>}
+          />
         ) : groups.length === 0 ? (
-          <div className="flex flex-col items-center gap-1.5 px-2 py-8 text-center">
-            <IconChat size={18} className="text-fg-subtle" />
-            <p className="text-xs text-fg-muted">{query.trim() ? 'No chats match your search' : 'No conversations yet'}</p>
-          </div>
+          <EmptyState
+            compact
+            icon={<IconChat size={18} />}
+            title={query.trim() ? 'No chats match your search' : 'No conversations yet'}
+            description={query.trim() ? undefined : 'Your chats show up here, grouped by day.'}
+          />
         ) : (
           groups.map((group) => (
             <section key={group.key} className="mt-2 first:mt-0" aria-labelledby={`chat-group-${group.key}`}>

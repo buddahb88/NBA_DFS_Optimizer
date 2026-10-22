@@ -2,6 +2,7 @@ import express from 'express';
 import agenticChatService from '../services/agenticChatService.js';
 import { StreamHandler, createStreamCallbacks } from '../services/streamHandler.js';
 import { FEEDBACK_RATINGS, saveFeedback } from '../services/chatFeedbackService.js';
+import { buildChatSuggestions } from '../services/chatSuggestions.js';
 
 const router = express.Router();
 
@@ -95,6 +96,22 @@ router.get('/agents', (req, res) => {
     res.json({ success: true, agents });
   } catch (error) {
     console.error('❌ Get agents error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * GET /api/chat/suggestions?slateId=
+ * Starter prompts for a new chat built from the slate (default: latest).
+ * Returns { success, slateId, suggestions: [{ id, kind, label, prompt, detail }] };
+ * suggestions is empty when the data can't support any.
+ */
+router.get('/suggestions', async (req, res) => {
+  try {
+    const result = await buildChatSuggestions({ slateId: req.query.slateId || undefined });
+    res.json({ success: true, ...result });
+  } catch (error) {
+    console.error('❌ Chat suggestions error:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });

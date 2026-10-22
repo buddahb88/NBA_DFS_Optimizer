@@ -1,6 +1,6 @@
 // Chat turns: user prompts as compact right-aligned bubbles, assistant answers full-width
 // with the assistant mark, its agent activity timeline and rich tool-result cards (ui blocks).
-import { useDeferredValue, useMemo, useState } from 'react';
+import { memo, useDeferredValue, useMemo, useState } from 'react';
 import { Badge, IconCheck, IconCopy, IconRefresh, IconThumbDown, IconThumbUp, Tooltip, cn } from '../../components/ui';
 import AgentTimeline from './AgentTimeline';
 import { timelineFromMetadata } from './timelineSteps';
@@ -122,9 +122,10 @@ function AssistantFrame({ header, children }) {
 
 /**
  * One finished turn. Assistant answers get copy / feedback actions; `isLast`
- * keeps them visible and enables regenerate.
+ * keeps them visible and enables regenerate. Memoized so streamed tokens only
+ * re-render the live message.
  */
-export function ChatMessage({ message, isLast = false, showReasoning = true, onRegenerate, onFeedback }) {
+export const ChatMessage = memo(function ChatMessage({ message, isLast = false, showReasoning = true, onRegenerate, onFeedback }) {
   const isUser = message.role === 'user';
   // Live messages carry the full timeline; saved ones only have tools/agents metadata
   const timeline = useMemo(() => (isUser ? null : message.timeline || timelineFromMetadata(message.metadata)), [isUser, message.timeline, message.metadata]);
@@ -182,7 +183,7 @@ export function ChatMessage({ message, isLast = false, showReasoning = true, onR
       </div>
     </AssistantFrame>
   );
-}
+});
 
 export function StreamingMessage({ content, timeline, blocks, showReasoning, isStreaming }) {
   // Lets React drop intermediate markdown renders when chunks arrive faster than it can paint

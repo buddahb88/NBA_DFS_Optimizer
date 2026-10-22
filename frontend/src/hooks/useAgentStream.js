@@ -112,7 +112,7 @@ export function useAgentStream() {
             try {
               const data = JSON.parse(eventData);
               handleEvent(eventType, data);
-            } catch (e) {
+            } catch {
               console.error('Failed to parse event data:', eventData);
             }
           }

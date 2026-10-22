@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { IconPanelLeft, IconPanelRight, Tooltip, cn } from '../../components/ui';
 import useMediaQuery from '../../hooks/useMediaQuery';
 
@@ -15,19 +15,28 @@ function readCollapsed() {
 const headerButton =
   'rounded p-1.5 text-fg-muted transition-colors hover:bg-surface-raised hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50';
 
-function Overlay({ side, onClose, children }) {
+function Overlay({ side, label, onClose, children }) {
+  const panelRef = useRef(null);
+
   useEffect(() => {
     const onKey = (e) => e.key === 'Escape' && onClose();
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
 
+  // Move focus into the slide-over so keyboard users land in it
+  useEffect(() => {
+    panelRef.current?.querySelector('button, input, [tabindex]:not([tabindex="-1"])')?.focus();
+  }, []);
+
   return (
     <div className={cn('fixed inset-0 z-50 flex', side === 'right' && 'justify-end')}>
       <div className="absolute inset-0 bg-black/60 animate-fade-in motion-reduce:animate-none" onClick={onClose} aria-hidden="true" />
       <div
+        ref={panelRef}
         role="dialog"
         aria-modal="true"
+        aria-label={label}
         className={cn(
           'relative z-10 h-full max-w-[85vw] shadow-pop motion-reduce:animate-none',
           side === 'right' ? 'animate-slide-in-right' : 'animate-slide-in-left',
@@ -74,7 +83,7 @@ export default function ChatShell({ renderRail, title, actions, contextBar, comp
     <div className="flex h-full min-h-0 bg-canvas text-fg">
       {isTabletUp
         ? renderRail({ collapsed, onToggleCollapse: () => setCollapsed((c) => !c), dismiss: () => {} })
-        : railOpen && <Overlay onClose={closeRail}>{renderRail({ collapsed: false, onClose: closeRail, dismiss: closeRail })}</Overlay>}
+        : railOpen && <Overlay label="Conversations" onClose={closeRail}>{renderRail({ collapsed: false, onClose: closeRail, dismiss: closeRail })}</Overlay>}
 
       <section className="flex min-w-0 flex-1 flex-col" aria-label="Chat">
         <header className="flex h-11 shrink-0 items-center gap-2 border-b border-line bg-surface px-3">
@@ -110,7 +119,7 @@ export default function ChatShell({ renderRail, title, actions, contextBar, comp
         {composer}
       </section>
 
-      {drawerOpen && (isDesktop ? renderDrawer({ onClose: closeDrawer }) : <Overlay side="right" onClose={closeDrawer}>{renderDrawer({ onClose: closeDrawer })}</Overlay>)}
+      {drawerOpen && (isDesktop ? renderDrawer({ onClose: closeDrawer }) : <Overlay side="right" label="Context" onClose={closeDrawer}>{renderDrawer({ onClose: closeDrawer })}</Overlay>)}
     </div>
   );
 }

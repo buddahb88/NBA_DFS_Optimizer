@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { IconSettings, Tooltip } from '../components/ui';
 import { useSlate } from '../context/SlateContext';
 import { chatAPI } from '../services/api';
@@ -8,6 +8,7 @@ import { ToastProvider } from '../features/chat/blocks/Toasts';
 import { blocksFromMessage, normalizeBlocks } from '../features/chat/blocks/blockModel';
 import ChatSettingsModal from '../features/chat/ChatSettingsModal';
 import ChatShell from '../features/chat/ChatShell';
+import ChatWelcome from '../features/chat/ChatWelcome';
 import Composer from '../features/chat/Composer';
 import ContextDrawer from '../features/chat/ContextDrawer';
 import ConversationView from '../features/chat/ConversationView';
@@ -16,6 +17,7 @@ import SlateContextBar from '../features/chat/SlateContextBar';
 import { UNTITLED_SESSION } from '../features/chat/sessionGroups';
 import useChatPins from '../features/chat/useChatPins';
 import useChatSessions from '../features/chat/useChatSessions';
+import useChatSuggestions from '../features/chat/useChatSuggestions';
 import useComposerDraft from '../features/chat/useComposerDraft';
 import useSlateSummary from '../features/chat/useSlateSummary';
 
@@ -30,7 +32,7 @@ export default function ChatPage() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [maxIterations, setMaxIterations] = useState(10);
   const [showReasoning, setShowReasoning] = useState(true);
-  const [historyLoading, setHistoryLoading] = useState(false);
+  const [history, setHistory] = useState({ loadingId: null, failedId: null });
   const inputRef = useRef(null);
 
   const pins = useChatPins(activeSessionId);
@@ -39,6 +41,8 @@ export default function ChatPage() {
   const stream = useAgentStream();
   const { isStreaming, message: streamedText, error: streamError, metadata, timeline, uiBlocks, stopped, startStream, cancelStream, reset: resetStream } = stream;
   const streamSessionId = stream.sessionId;
+  const isNewChat = messages.length === 0 && !activeSessionId && history.loadingId === null && history.failedId === null;
+  const suggestions = useChatSuggestions(slateId, { enabled: isNewChat });
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -97,15 +101,17 @@ export default function ChatPage() {
     setMessages([]);
     clearDraft();
     setActiveSessionId(null);
+    setHistory({ loadingId: null, failedId: null });
     resetStream();
     inputRef.current?.focus();
   };
 
   const openSession = async (id) => {
-    setHistoryLoading(true);
-    const history = await selectSession(id);
-    if (history) setMessages(history);
-    setHistoryLoading(false);
+    setHistory({ loadingId: id, failedId: null });
+    setMessages([]);
+    const loaded = await selectSession(id);
+    if (loaded) setMessages(loaded);
+    setHistory({ loadingId: null, failedId: loaded ? null : id });
   };
 
   const deleteSession = async (id) => {
@@ -129,6 +135,11 @@ export default function ChatPage() {
     await ask(text, mentions);
   };
 
+  // Stable for the memoized welcome screen; reads the latest send through a ref
+  const sendRef = useRef(send);
+  sendRef.current = send;
+  const sendSuggestion = useCallback((text) => sendRef.current(text), []);
+
   // Up arrow on an empty composer pulls the last message back in for editing
   const editLastMessage = () => {
     const last = [...messages].reverse().find((m) => m.role === 'user');
@@ -144,15 +155,19 @@ export default function ChatPage() {
     await ask(messages[promptIndex].content);
   };
 
-  const sendFeedback = async (message, rating) => {
-    try {
-      const res = await chatAPI.sendFeedback({ rating, sessionId: activeSessionId, messageId: message.id, content: message.content });
-      return res.data?.success !== false;
-    } catch (err) {
-      console.error('Failed to save feedback:', err);
-      return false;
-    }
-  };
+  // Stable per session so memoized messages don't re-render while an answer streams
+  const sendFeedback = useCallback(
+    async (message, rating) => {
+      try {
+        const res = await chatAPI.sendFeedback({ rating, sessionId: activeSessionId, messageId: message.id, content: message.content });
+        return res.data?.success !== false;
+      } catch (err) {
+        console.error('Failed to save feedback:', err);
+        return false;
+      }
+    },
+    [activeSessionId],
+  );
 
   // Latest lineup anywhere in the conversation (streaming blocks win) for the context drawer
   const latestLineup = useMemo(() => {
@@ -188,6 +203,7 @@ export default function ChatPage() {
               }}
               onRename={sessionsState.renameSession}
               onDelete={deleteSession}
+              onRetry={refresh}
             />
           )}
           actions={
@@ -241,13 +257,24 @@ export default function ChatPage() {
             }}
             showReasoning={showReasoning}
             headshots={slateSummary.headshots}
-            loading={historyLoading}
+            loading={history.loadingId !== null}
+            historyError={history.failedId !== null ? 'The server did not return its messages.' : null}
+            onRetryHistory={() => openSession(history.failedId)}
             onRegenerate={regenerate}
             onFeedback={sendFeedback}
-            onPickPrompt={(text) => {
-              setDraft({ text });
-              inputRef.current?.focus();
-            }}
+            welcome={
+              <ChatWelcome
+                slate={slate}
+                siteName={siteConfig?.name}
+                games={slateSummary.games}
+                firstLock={slateSummary.firstLock}
+                slateLoading={slateSummary.loading}
+                suggestions={suggestions.suggestions}
+                suggestionsLoading={suggestions.loading}
+                onSend={sendSuggestion}
+                disabled={isStreaming}
+              />
+            }
           />
         </ChatShell>
       </ChatBlocksProvider>

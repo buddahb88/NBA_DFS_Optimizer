@@ -4,7 +4,7 @@ import App from '../../App'
 import { chatAPI, sitesAPI, slatesAPI } from '../../services/api'
 
 vi.mock('../../services/api', () => ({
-  chatAPI: { getSessions: vi.fn(), getSessionHistory: vi.fn(), deleteSession: vi.fn(), renameSession: vi.fn() },
+  chatAPI: { getSessions: vi.fn(), getSessionHistory: vi.fn(), deleteSession: vi.fn(), renameSession: vi.fn(), getSuggestions: vi.fn() },
   playersAPI: { getBySlateId: vi.fn() },
   sitesAPI: { getAll: vi.fn() },
   slatesAPI: { getAll: vi.fn() },
@@ -20,6 +20,7 @@ vi.mock('../../pages/DataStatusPage', () => ({ default: () => null }))
 
 beforeEach(() => {
   chatAPI.getSessions.mockResolvedValue({ data: { success: true, sessions: [] } })
+  chatAPI.getSuggestions.mockResolvedValue({ data: { success: true, suggestions: [] } })
   sitesAPI.getAll.mockResolvedValue({ data: { draftkings: { key: 'draftkings', name: 'DraftKings', rosterSlots: [], salaryCap: 50000 } } })
   slatesAPI.getAll.mockResolvedValue({ data: [] })
   window.history.pushState({}, '', '/chat')

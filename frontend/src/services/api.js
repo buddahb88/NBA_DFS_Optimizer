@@ -93,6 +93,8 @@ export const chatAPI = {
   // { rating: 'up' | 'down', sessionId?, messageId?, content? }
   sendFeedback: (feedback) =>
     api.post('/chat/feedback', feedback),
+  getSuggestions: (slateId) =>
+    api.get('/chat/suggestions', { params: slateId ? { slateId } : {} }),
 };
 
 // Historical Insights API
