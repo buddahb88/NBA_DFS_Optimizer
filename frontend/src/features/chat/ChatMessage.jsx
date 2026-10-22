@@ -1,10 +1,12 @@
 // Chat turns: user prompts as compact right-aligned bubbles, assistant answers full-width
-// with the assistant mark and its agent activity timeline. Rich tool-result cards come in a later card.
+// with the assistant mark, its agent activity timeline and rich tool-result cards (ui blocks).
 import { useDeferredValue, useMemo, useState } from 'react';
 import { IconCheck, IconCopy, IconRefresh, IconThumbDown, IconThumbUp, Tooltip, cn } from '../../components/ui';
 import AgentTimeline from './AgentTimeline';
 import { timelineFromMetadata } from './timelineSteps';
 import { formatTimestamp } from './chatFormat';
+import { ChatBlocks } from './blocks/ChatBlock';
+import { blocksFromMessage } from './blocks/blockModel';
 import Markdown from './Markdown';
 import useCopy from './useCopy';
 import './chat.css';
@@ -126,6 +128,7 @@ export function ChatMessage({ message, isLast = false, showReasoning = true, onR
   const isUser = message.role === 'user';
   // Live messages carry the full timeline; saved ones only have tools/agents metadata
   const timeline = useMemo(() => (isUser ? null : message.timeline || timelineFromMetadata(message.metadata)), [isUser, message.timeline, message.metadata]);
+  const blocks = useMemo(() => (isUser ? [] : blocksFromMessage(message)), [isUser, message]);
   if (isUser) return <UserMessage message={message} />;
 
   const activity = timeline && <AgentTimeline timeline={timeline} showReasoning={showReasoning} />;
@@ -151,7 +154,8 @@ export function ChatMessage({ message, isLast = false, showReasoning = true, onR
   return (
     <AssistantFrame header={<Timestamp value={message.created_at} className={revealOnHover} />}>
       {activity}
-      <Markdown>{message.content}</Markdown>
+      <ChatBlocks blocks={blocks} />
+      {message.content && <Markdown>{message.content}</Markdown>}
       <div className={cn('mt-2 flex items-center gap-0.5', !isLast && revealOnHover)}>
         <CopyAction text={message.content} />
         {isLast && onRegenerate && (
@@ -165,12 +169,13 @@ export function ChatMessage({ message, isLast = false, showReasoning = true, onR
   );
 }
 
-export function StreamingMessage({ content, timeline, showReasoning, isStreaming }) {
+export function StreamingMessage({ content, timeline, blocks, showReasoning, isStreaming }) {
   // Lets React drop intermediate markdown renders when chunks arrive faster than it can paint
   const deferred = useDeferredValue(content);
   return (
     <AssistantFrame>
       <AgentTimeline timeline={timeline} isStreaming={isStreaming} showReasoning={showReasoning} />
+      <ChatBlocks blocks={blocks} />
       {/* Streaming prose is announced politely as it arrives */}
       <div aria-live="polite" aria-atomic="false">
         {deferred && <Markdown streaming={isStreaming}>{deferred}</Markdown>}

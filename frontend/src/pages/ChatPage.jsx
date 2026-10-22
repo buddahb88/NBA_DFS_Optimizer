@@ -1,8 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { IconSettings, Tooltip } from '../components/ui';
 import { useSlate } from '../context/SlateContext';
 import { chatAPI } from '../services/api';
 import { useAgentStream } from '../hooks/useAgentStream';
+import { ChatBlocksProvider } from '../features/chat/blocks/ChatBlocksProvider';
+import { ToastProvider } from '../features/chat/blocks/Toasts';
+import { blocksFromMessage, normalizeBlocks } from '../features/chat/blocks/blockModel';
 import ChatSettingsModal from '../features/chat/ChatSettingsModal';
 import ChatShell from '../features/chat/ChatShell';
 import Composer from '../features/chat/Composer';
@@ -11,11 +14,12 @@ import ConversationView from '../features/chat/ConversationView';
 import SessionRail from '../features/chat/SessionRail';
 import SlateContextBar from '../features/chat/SlateContextBar';
 import { UNTITLED_SESSION } from '../features/chat/sessionGroups';
+import useChatPins from '../features/chat/useChatPins';
 import useChatSessions from '../features/chat/useChatSessions';
 import useSlateSummary from '../features/chat/useSlateSummary';
 
 export default function ChatPage() {
-  const { slate, slateId, siteConfig } = useSlate();
+  const { slate, slateId, site, siteConfig } = useSlate();
   const sessionsState = useChatSessions();
   const { sessions, activeSessionId, setActiveSessionId, refresh, selectSession } = sessionsState;
   const slateSummary = useSlateSummary(slateId);
@@ -28,6 +32,9 @@ export default function ChatPage() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const inputRef = useRef(null);
 
+  const pins = useChatPins(activeSessionId);
+  const { adoptDraft, clearDraft } = pins;
+
   const stream = useAgentStream();
   const { isStreaming, message: streamedText, error: streamError, metadata, timeline, uiBlocks, startStream, cancelStream, reset: resetStream } = stream;
 
@@ -35,9 +42,12 @@ export default function ChatPage() {
     inputRef.current?.focus();
   }, []);
 
-  // Completed stream -> append the assistant message and adopt the (possibly new) session
+  // Live ui_block cards, normalized once for rendering
+  const streamBlocks = useMemo(() => normalizeBlocks(uiBlocks), [uiBlocks]);
+
+  // Completed stream -> append the assistant message (prose + ui blocks) and adopt the (possibly new) session
   useEffect(() => {
-    if (isStreaming || !streamedText || !metadata) return;
+    if (isStreaming || !metadata || (!streamedText && uiBlocks.length === 0)) return;
     setMessages((prev) => [
       ...prev,
       {
@@ -56,11 +66,12 @@ export default function ChatPage() {
       },
     ]);
     if (metadata.sessionId) {
+      adoptDraft(metadata.sessionId);
       setActiveSessionId(metadata.sessionId);
       refresh();
     }
     resetStream();
-  }, [isStreaming, streamedText, metadata, timeline, uiBlocks, setActiveSessionId, refresh, resetStream]);
+  }, [isStreaming, streamedText, metadata, timeline, uiBlocks, setActiveSessionId, refresh, resetStream, adoptDraft]);
 
   useEffect(() => {
     if (!streamError) return;
@@ -71,6 +82,7 @@ export default function ChatPage() {
 
   const newChat = () => {
     setMessages([]);
+    clearDraft();
     setActiveSessionId(null);
     resetStream();
     inputRef.current?.focus();
@@ -116,88 +128,98 @@ export default function ChatPage() {
     }
   };
 
+  // Latest lineup anywhere in the conversation (streaming blocks win) for the context drawer
+  const latestLineup = useMemo(() => {
+    const all = [...messages.flatMap(blocksFromMessage), ...streamBlocks];
+    return all.findLast((b) => b.type === 'lineup') ?? null;
+  }, [messages, streamBlocks]);
+
   const activeSession = sessions.find((s) => s.id === activeSessionId);
   const title = activeSessionId ? activeSession?.title || UNTITLED_SESSION : 'New chat';
 
   return (
-    <>
-      <ChatShell
-        title={title}
-        renderRail={({ collapsed, onToggleCollapse, onClose, dismiss }) => (
-          <SessionRail
-            sessions={sessions}
-            loading={sessionsState.loading}
-            error={sessionsState.error}
-            activeSessionId={activeSessionId}
-            collapsed={collapsed}
-            onToggleCollapse={onToggleCollapse}
-            onClose={onClose}
-            onNewChat={() => {
-              newChat();
-              dismiss();
+    <ToastProvider>
+      <ChatBlocksProvider slateId={slateId} site={site} siteConfig={siteConfig} slatePlayers={slateSummary.players} pins={pins}>
+        <ChatShell
+          title={title}
+          drawerCount={pins.pinned.length}
+          renderRail={({ collapsed, onToggleCollapse, onClose, dismiss }) => (
+            <SessionRail
+              sessions={sessions}
+              loading={sessionsState.loading}
+              error={sessionsState.error}
+              activeSessionId={activeSessionId}
+              collapsed={collapsed}
+              onToggleCollapse={onToggleCollapse}
+              onClose={onClose}
+              onNewChat={() => {
+                newChat();
+                dismiss();
+              }}
+              onSelect={(id) => {
+                openSession(id);
+                dismiss();
+              }}
+              onRename={sessionsState.renameSession}
+              onDelete={deleteSession}
+            />
+          )}
+          actions={
+            <Tooltip content="Chat settings" side="bottom">
+              <button
+                type="button"
+                onClick={() => setSettingsOpen(true)}
+                aria-label="Chat settings"
+                className="rounded p-1.5 text-fg-muted transition-colors hover:bg-surface-raised hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
+              >
+                <IconSettings size={16} />
+              </button>
+            </Tooltip>
+          }
+          contextBar={
+            <SlateContextBar
+              slate={slate}
+              siteName={siteConfig?.name}
+              gameCount={slateSummary.gameCount}
+              firstLock={slateSummary.firstLock}
+              loading={slateSummary.loading}
+              mode={mode}
+              onModeChange={setMode}
+            />
+          }
+          composer={
+            <Composer
+              ref={inputRef}
+              value={input}
+              onChange={setInput}
+              onSubmit={send}
+              onCancel={cancelStream}
+              isStreaming={isStreaming}
+              maxIterations={maxIterations}
+            />
+          }
+          renderDrawer={({ onClose }) => <ContextDrawer onClose={onClose} lineup={latestLineup} />}
+        >
+          <ConversationView
+            messages={messages}
+            stream={{
+              isStreaming,
+              content: streamedText,
+              timeline,
+              blocks: streamBlocks,
             }}
-            onSelect={(id) => {
-              openSession(id);
-              dismiss();
+            showReasoning={showReasoning}
+            headshots={slateSummary.headshots}
+            loading={historyLoading}
+            onRegenerate={regenerate}
+            onFeedback={sendFeedback}
+            onPickPrompt={(text) => {
+              setInput(text);
+              inputRef.current?.focus();
             }}
-            onRename={sessionsState.renameSession}
-            onDelete={deleteSession}
           />
-        )}
-        actions={
-          <Tooltip content="Chat settings" side="bottom">
-            <button
-              type="button"
-              onClick={() => setSettingsOpen(true)}
-              aria-label="Chat settings"
-              className="rounded p-1.5 text-fg-muted transition-colors hover:bg-surface-raised hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
-            >
-              <IconSettings size={16} />
-            </button>
-          </Tooltip>
-        }
-        contextBar={
-          <SlateContextBar
-            slate={slate}
-            siteName={siteConfig?.name}
-            gameCount={slateSummary.gameCount}
-            firstLock={slateSummary.firstLock}
-            loading={slateSummary.loading}
-            mode={mode}
-            onModeChange={setMode}
-          />
-        }
-        composer={
-          <Composer
-            ref={inputRef}
-            value={input}
-            onChange={setInput}
-            onSubmit={send}
-            onCancel={cancelStream}
-            isStreaming={isStreaming}
-            maxIterations={maxIterations}
-          />
-        }
-        renderDrawer={({ onClose }) => <ContextDrawer onClose={onClose} />}
-      >
-        <ConversationView
-          messages={messages}
-          stream={{
-            isStreaming,
-            content: streamedText,
-            timeline,
-          }}
-          showReasoning={showReasoning}
-          headshots={slateSummary.headshots}
-          loading={historyLoading}
-          onRegenerate={regenerate}
-          onFeedback={sendFeedback}
-          onPickPrompt={(text) => {
-            setInput(text);
-            inputRef.current?.focus();
-          }}
-        />
-      </ChatShell>
+        </ChatShell>
+      </ChatBlocksProvider>
       <ChatSettingsModal
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
@@ -206,6 +228,6 @@ export default function ChatPage() {
         showReasoning={showReasoning}
         setShowReasoning={setShowReasoning}
       />
-    </>
+    </ToastProvider>
   );
 }

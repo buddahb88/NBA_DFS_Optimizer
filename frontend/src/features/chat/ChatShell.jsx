@@ -46,8 +46,9 @@ function Overlay({ side, onClose, children }) {
  *
  * renderRail({ collapsed, onToggleCollapse, onClose, dismiss }) renders the rail;
  * call dismiss() after an action that should close the mobile slide-over.
+ * drawerCount badges the context toggle (e.g. pinned players).
  */
-export default function ChatShell({ renderRail, title, actions, contextBar, composer, renderDrawer, children }) {
+export default function ChatShell({ renderRail, title, actions, contextBar, composer, renderDrawer, drawerCount = 0, children }) {
   const isTabletUp = useMediaQuery('(min-width: 768px)');
   const isDesktop = useMediaQuery('(min-width: 1024px)');
   const [collapsed, setCollapsed] = useState(readCollapsed);
@@ -88,12 +89,17 @@ export default function ChatShell({ renderRail, title, actions, contextBar, comp
             <Tooltip content={drawerOpen ? 'Hide context' : 'Show context'} side="bottom">
               <button
                 type="button"
-                className={cn(headerButton, drawerOpen && 'bg-accent-soft text-accent')}
+                className={cn(headerButton, 'relative', drawerOpen && 'bg-accent-soft text-accent')}
                 aria-label="Toggle context panel"
                 aria-pressed={drawerOpen}
                 onClick={() => setDrawerOpen((o) => !o)}
               >
                 <IconPanelRight size={16} />
+                {drawerCount > 0 && (
+                  <span className="num absolute -right-1 -top-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-accent px-0.5 text-[0.6rem] font-semibold leading-none text-accent-fg">
+                    {drawerCount}
+                  </span>
+                )}
               </button>
             </Tooltip>
           </div>

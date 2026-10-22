@@ -62,11 +62,11 @@ function HistorySkeleton() {
 
 /**
  * Scrollable message list. `stream` is the live agent stream
- * ({ isStreaming, content, timeline }).
+ * ({ isStreaming, content, timeline, blocks }).
  * Follows new content until the user scrolls up, then offers "Jump to latest".
  */
 export default function ConversationView({ messages, stream, showReasoning, headshots, loading = false, onPickPrompt, onRegenerate, onFeedback }) {
-  const contentKey = [loading, messages.length, stream.isStreaming, stream.content?.length, stream.timeline?.steps?.length].join('|');
+  const contentKey = [loading, messages.length, stream.isStreaming, stream.content?.length, stream.timeline?.steps?.length, stream.blocks?.length].join('|');
   const { ref, onScroll, pinned, scrollToBottom } = useAutoScroll(contentKey);
 
   // Sending a prompt always brings the conversation back into view
@@ -107,7 +107,7 @@ export default function ConversationView({ messages, stream, showReasoning, head
                 ))
               )}
               {stream.isStreaming && (
-                <StreamingMessage content={stream.content} timeline={stream.timeline} showReasoning={showReasoning} isStreaming />
+                <StreamingMessage content={stream.content} timeline={stream.timeline} blocks={stream.blocks} showReasoning={showReasoning} isStreaming />
               )}
             </section>
           </PlayerHeadshotsContext.Provider>

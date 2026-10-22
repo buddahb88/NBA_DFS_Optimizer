@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { playersAPI } from '../../services/api';
 import { buildGames, summarizeSlate } from '../../pages/home/slateDashboard';
 
-/** Slate players for the chat: headshot lookup plus game count and first lock for the context bar. */
+/** Slate players for the chat (cards resolve against them), headshot lookup, and game count / first lock for the context bar. */
 export default function useSlateSummary(slateId) {
   const [players, setPlayers] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -30,6 +30,6 @@ export default function useSlateSummary(slateId) {
     const headshots = {};
     for (const p of players) if (p.headshot) headshots[p.name] = p.headshot;
     const { gameCount, firstLock } = summarizeSlate(players, buildGames(players));
-    return { headshots, gameCount, firstLock, loading };
+    return { players, headshots, gameCount, firstLock, loading };
   }, [players, loading]);
 }

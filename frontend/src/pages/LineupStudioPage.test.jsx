@@ -165,6 +165,17 @@ describe('LineupStudioPage', () => {
     expect(screen.getByRole('button', { name: 'Save lineup' })).toBeDisabled()
   })
 
+  it('preloads the manual builder with a lineup handed over from chat', async () => {
+    const chatLineup = { slots: [{ slot: 'PG', id: 1, name: 'Player 1' }, { slot: 'C', id: 5, name: 'Player 5' }, { slot: 'UTIL', name: 'Ghost' }] }
+    renderStudio(undefined, { pathname: '/optimizer', search: '?mode=manual', state: { chatLineup } })
+    const slots = await screen.findByRole('list', { name: 'Roster slots' })
+    const rows = within(slots).getAllByRole('listitem')
+    await waitFor(() => expect(within(rows[0]).getByText('Player 1')).toBeInTheDocument())
+    expect(within(rows[4]).getByText('Player 5')).toBeInTheDocument()
+    expect(screen.getByText("Loaded the chat lineup. Not in this slate's pool: Ghost.")).toBeInTheDocument()
+    expect(screen.getByText('$38,000')).toBeInTheDocument()
+  })
+
   it('simulates a portfolio, shows results and exports the selected lineups', async () => {
     portfolioAPI.getPresets.mockResolvedValue({ data: { presets: PRESETS, limits: LIMITS } })
     portfolioAPI.build.mockResolvedValue({ data: { jobId: 'job-1', status: 'queued' } })

@@ -73,6 +73,25 @@ export function slotsFromLineup(siteConfig, entries) {
   });
 }
 
+/**
+ * Chat "Open in Optimizer" handoff ({ slots: [{ slot, id?, playerId?, name }] })
+ * -> { slots: manual builder slots, missing: names not found in the pool }.
+ */
+export function slotsFromHandoff(siteConfig, pool, handoff) {
+  const byName = (name) => pool.find((p) => String(p.name).toLowerCase() === String(name ?? '').toLowerCase());
+  const missing = [];
+  const entries = (handoff?.slots ?? []).map(({ slot, id, playerId, name }) => {
+    const player =
+      (id != null && pool.find((p) => String(p.id) === String(id))) ||
+      (playerId != null && pool.find((p) => String(p.player_id) === String(playerId))) ||
+      byName(name) ||
+      null;
+    if (!player) missing.push(name);
+    return { slot, player };
+  });
+  return { slots: slotsFromLineup(siteConfig, entries.filter((e) => e.player)), missing };
+}
+
 /** Totals for [{ slot, player }] or a plain player array (nulls skipped). */
 export function lineupTotals(entries, salaryCap) {
   const players = entries.map((e) => (e && 'player' in e ? e.player : e)).filter(Boolean);

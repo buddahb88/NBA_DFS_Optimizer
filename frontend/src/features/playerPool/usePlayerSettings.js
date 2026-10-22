@@ -43,9 +43,12 @@ export default function usePlayerSettings(slateId) {
     reload();
   }, [reload]);
 
-  /** Merge `patch` into a player's controls. Returns a validation error string, if any. */
+  /**
+   * Merge `patch` into a player's controls. Returns a validation error string, if any.
+   * `onError(message)` is called if the save fails (after which settings reload).
+   */
   const update = useCallback(
-    (playerId, patch) => {
+    (playerId, patch, { onError } = {}) => {
       const key = String(playerId);
       const merged = { ...(settingsRef.current[key] || {}), ...patch };
       if (patch.lock) merged.exclude = false;
@@ -64,7 +67,9 @@ export default function usePlayerSettings(slateId) {
         .then(() => playerSettingsAPI.save(slateId, key, body))
         .then(() => setError(null))
         .catch((err) => {
-          setError(`Couldn't save: ${errorMessage(err)}`);
+          const message = `Couldn't save: ${errorMessage(err)}`;
+          setError(message);
+          onError?.(message);
           return reload();
         });
       return null;

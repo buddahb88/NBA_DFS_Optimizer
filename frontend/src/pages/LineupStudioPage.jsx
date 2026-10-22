@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { exportAPI, lineupsAPI, optimizerAPI, playerSettingsAPI, playersAPI } from '../services/api';
@@ -38,6 +38,7 @@ import {
   formatSalary,
   lineupTotals,
   normalizeLineup,
+  slotsFromHandoff,
   slotsFromLineup,
 } from '../features/lineupStudio/lineupMath';
 
@@ -90,12 +91,15 @@ function CenteredState({ children }) {
 /**
  * Lineup Studio: optimizer settings + results, and a manual click-to-fill
  * builder (?mode=manual). Site and slate come from the top bar (SlateContext).
+ * A chat lineup arrives as router state { chatLineup } (see slotsFromHandoff).
  */
 export default function LineupStudioPage() {
   const { slate, slateId, site, siteConfig: contextSiteConfig, loadingSlates } = useSlate();
   const siteConfig = contextSiteConfig || FALLBACK_SITE;
   const salaryCap = siteConfig.salaryCap;
   const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
+  const navigate = useNavigate();
   const view = searchParams.get('mode') === 'manual' ? 'manual' : 'optimize';
   const setView = (v) => setSearchParams(v === 'manual' ? { mode: 'manual' } : {}, { replace: true });
 
@@ -175,6 +179,20 @@ export default function LineupStudioPage() {
       prevCap.current = salaryCap;
     }
   }, [siteConfig, salaryCap]);
+
+  // "Open in Optimizer" from chat: fill the manual builder once the pool and site are in, then drop the state
+  const chatLineup = location.state?.chatLineup;
+  useEffect(() => {
+    if (!chatLineup || pool.status !== 'ready' || !contextSiteConfig) return;
+    const { slots, missing } = slotsFromHandoff(contextSiteConfig, pool.players, chatLineup);
+    setManualSlots(slots);
+    setNotice(
+      missing.length
+        ? { tone: 'caution', text: `Loaded the chat lineup. Not in this slate's pool: ${missing.join(', ')}.` }
+        : { tone: 'positive', text: 'Loaded the lineup from chat.' },
+    );
+    navigate(`${location.pathname}${location.search}`, { replace: true, state: null });
+  }, [chatLineup, pool.status, pool.players, contextSiteConfig, navigate, location.pathname, location.search]);
 
   const players = pool.players;
   const stackErrors = useMemo(() => validateDraftRules(settings.stackRules), [settings.stackRules]);

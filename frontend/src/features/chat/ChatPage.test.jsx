@@ -1,13 +1,16 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
 import ChatPage from '../../pages/ChatPage'
-import { chatAPI, playersAPI } from '../../services/api'
+import { chatAPI, playerSettingsAPI, playersAPI } from '../../services/api'
 import { useSlate } from '../../context/SlateContext'
 import useMediaQuery from '../../hooks/useMediaQuery'
 
 vi.mock('../../services/api', () => ({
   chatAPI: { getSessions: vi.fn(), getSessionHistory: vi.fn(), deleteSession: vi.fn(), renameSession: vi.fn(), sendFeedback: vi.fn() },
   playersAPI: { getBySlateId: vi.fn() },
+  playerSettingsAPI: { getBySlateId: vi.fn(), save: vi.fn() },
+  lineupsAPI: { create: vi.fn() },
 }))
 vi.mock('../../context/SlateContext', () => ({ useSlate: vi.fn() }))
 vi.mock('../../hooks/useMediaQuery', () => ({ default: vi.fn() }))
@@ -15,13 +18,23 @@ vi.mock('../../hooks/useMediaQuery', () => ({ default: vi.fn() }))
 const SLATE = { slate_id: '42', name: 'Main 7:10 PM ET', start_time: '2026-10-22T23:10:00Z' }
 const tip = (iso) => JSON.stringify({ game: { dateTime: iso } })
 const PLAYERS = [
-  { name: 'A One', team: 'LAL', opponent: 'GSW', raw_data: tip('2026-10-23T02:10:00Z') },
+  { id: 1, player_id: 'p1', name: 'A One', team: 'LAL', opponent: 'GSW', position: 'PG', salary: 9000, projected_points: 45, raw_data: tip('2026-10-23T02:10:00Z') },
   { name: 'B Two', team: 'GSW', opponent: 'LAL', raw_data: tip('2026-10-23T02:10:00Z') },
   { name: 'C Three', team: 'BOS', opponent: 'NYK', raw_data: tip('2026-10-22T23:10:00Z'), headshot: 'c.png' },
 ]
 
 // SSE response that ends immediately
 const emptyStream = () => ({ ok: true, body: { getReader: () => ({ read: async () => ({ done: true }) }) } })
+// SSE response that sends `events` ([type, data]) in one chunk
+const sseStream = (events) => {
+  const bytes = new TextEncoder().encode(events.map(([type, data]) => `event: ${type}
+data: ${JSON.stringify(data)}
+
+`).join(''))
+  let sent = false
+  return { ok: true, body: { getReader: () => ({ read: async () => (sent ? { done: true } : ((sent = true), { done: false, value: bytes })) }) } }
+}
+const renderPage = () => render(<MemoryRouter><ChatPage /></MemoryRouter>)
 
 // SSE response that streams one answer and finishes
 const answerStream = (text, sessionId = 7) => {
@@ -62,6 +75,7 @@ beforeEach(() => {
   })
   chatAPI.getSessionHistory.mockResolvedValue({ data: { success: true, messages: [{ role: 'user', content: 'Who is chalk?', created_at: new Date().toISOString() }] } })
   playersAPI.getBySlateId.mockResolvedValue({ data: PLAYERS })
+  playerSettingsAPI.getBySlateId.mockResolvedValue({ data: [] })
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(emptyStream()))
 })
 afterEach(() => vi.unstubAllGlobals())
@@ -74,7 +88,7 @@ const send = (text) => {
 
 describe('ChatPage shell', () => {
   it('renders the slate context bar from the slate and its players', async () => {
-    render(<ChatPage />)
+    renderPage()
     expect(screen.getByRole('heading', { name: 'New chat' })).toBeInTheDocument()
     expect(screen.getByText('Main 7:10 PM ET')).toBeInTheDocument()
     expect(screen.getByText('DraftKings')).toBeInTheDocument()
@@ -85,7 +99,7 @@ describe('ChatPage shell', () => {
   })
 
   it('sends the selected Cash/GPP mode with chat requests', async () => {
-    render(<ChatPage />)
+    renderPage()
     const modes = screen.getByRole('group', { name: 'Contest mode' })
     expect(within(modes).getByRole('tab', { name: 'GPP' })).toHaveAttribute('aria-selected', 'true')
 
@@ -103,7 +117,7 @@ describe('ChatPage shell', () => {
   })
 
   it('collapses the session rail to an icon rail and remembers it', async () => {
-    const { unmount } = render(<ChatPage />)
+    const { unmount } = renderPage()
     const rail = screen.getByRole('complementary', { name: 'Conversations' })
     expect(await within(rail).findByRole('button', { name: /^Lakers stack ideas/ })).toBeInTheDocument()
 
@@ -114,7 +128,7 @@ describe('ChatPage shell', () => {
     expect(localStorage.getItem('nba-dfs:chat-rail-collapsed')).toBe('1')
 
     unmount()
-    render(<ChatPage />)
+    renderPage()
     expect(screen.getByRole('button', { name: 'Expand conversations' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Expand conversations' }))
     expect(screen.getByRole('searchbox', { name: 'Search conversations' })).toBeInTheDocument()
@@ -122,7 +136,7 @@ describe('ChatPage shell', () => {
 
   it('on mobile the rail is a slide-over that closes after picking a chat', async () => {
     mediaMatches = false
-    render(<ChatPage />)
+    renderPage()
     expect(screen.queryByRole('complementary', { name: 'Conversations' })).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Open conversations' }))
@@ -135,7 +149,7 @@ describe('ChatPage shell', () => {
   })
 
   it('opens chat settings in a modal from the header', () => {
-    render(<ChatPage />)
+    renderPage()
     fireEvent.click(screen.getByRole('button', { name: 'Chat settings' }))
     const dialog = screen.getByRole('dialog', { name: 'Chat settings' })
     const toggle = within(dialog).getByRole('switch', { name: /show reasoning/i })
@@ -145,7 +159,7 @@ describe('ChatPage shell', () => {
   })
 
   it('toggles the context drawer', () => {
-    render(<ChatPage />)
+    renderPage()
     expect(screen.queryByRole('complementary', { name: 'Context' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Toggle context panel' }))
     expect(screen.getByRole('complementary', { name: 'Context' })).toHaveTextContent(/nothing pinned yet/i)
@@ -241,5 +255,61 @@ describe('ChatPage agent timeline', () => {
     const list = screen.getByRole('list', { name: 'Agent activity' })
     expect(list).toHaveTextContent('Loading the current slate')
     expect(list).toHaveTextContent('Analyst agent')
+  })
+})
+
+// ui_block events as the backend streams them ({ messageId, block }, chatTools/uiBlocks.js)
+const PLAYER_BLOCK = {
+  messageId: 'm1',
+  block: {
+    version: 1, id: 'call_1:0', tool: 'get_archetype_matchups', type: 'player_list', title: 'Top values',
+    players: [{ name: 'A One', team: 'LAL', opponent: 'GSW', salary: 9000, projection: 45, archetype_label: 'Primary Creator', flags: [] }],
+  },
+}
+const LINEUP_BLOCK = {
+  messageId: 'm1',
+  block: { version: 1, id: 'call_2:0', tool: 'build_lineup', type: 'lineup', title: 'Chat build', slots: [{ slot: 'PG', player: { name: 'A One' } }], totals: {} },
+}
+
+describe('ChatPage ui blocks', () => {
+  it('renders streamed blocks on the assistant message, pins to the drawer and shows the lineup there', async () => {
+    fetch.mockResolvedValueOnce(sseStream([
+      ['ui_block', PLAYER_BLOCK],
+      ['ui_block', LINEUP_BLOCK],
+      ['ui_block', { messageId: 'm1', block: { version: 1, id: 'call_3:0', type: 'mystery', title: 'Mystery' } }],
+      ['message', { text: "Here are tonight's values.", isComplete: true }],
+      ['done', { sessionId: 7, messageId: 'm1', toolsUsed: ['get_archetype_matchups'] }],
+    ]))
+    renderPage()
+    send('Values?')
+
+    const card = await screen.findByRole('article', { name: 'A One' })
+    expect(within(card).getByText('Primary Creator')).toBeInTheDocument()
+    expect(within(card).getByText('5.00x')).toBeInTheDocument()
+    expect(screen.getByRole('article', { name: 'Chat build' })).toBeInTheDocument()
+    expect(screen.getByRole('note')).toHaveTextContent('Mystery')
+    expect(screen.getByText("Here are tonight's values.")).toBeInTheDocument()
+
+    fireEvent.click(within(card).getByRole('button', { name: 'Pin A One' }))
+    const toggle = screen.getByRole('button', { name: 'Toggle context panel' })
+    expect(toggle).toHaveTextContent('1')
+    fireEvent.click(toggle)
+    const drawer = screen.getByRole('complementary', { name: 'Context' })
+    expect(within(within(drawer).getByRole('region', { name: 'Pinned players' })).getByText('A One')).toBeInTheDocument()
+    expect(within(drawer).getByRole('article', { name: 'Chat build' })).toBeInTheDocument()
+
+    // Unpin from the drawer
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Unpin A One' }))
+    expect(within(drawer).getByRole('region', { name: 'Pinned players' })).toHaveTextContent(/use the pin/i)
+  })
+
+  it('renders blocks persisted on history messages', async () => {
+    chatAPI.getSessionHistory.mockResolvedValue({
+      data: { success: true, messages: [{ role: 'assistant', content: 'Saved earlier.', uiBlocks: [PLAYER_BLOCK.block], created_at: new Date().toISOString() }] },
+    })
+    renderPage()
+    fireEvent.click(await screen.findByRole('button', { name: /^Lakers stack ideas/ }))
+    expect(await screen.findByRole('article', { name: 'A One' })).toBeInTheDocument()
+    expect(screen.getByText('Saved earlier.')).toBeInTheDocument()
   })
 })

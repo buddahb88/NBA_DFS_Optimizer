@@ -10,6 +10,7 @@ import {
   lineupTotals,
   normalizeLineup,
   pickSlot,
+  slotsFromHandoff,
   slotsFromLineup,
 } from './lineupMath'
 
@@ -167,5 +168,22 @@ describe('lineupMath', () => {
     })
     const slots = slotsFromLineup(FD, entries)
     expect(slots.map((s) => s?.id ?? null)).toEqual([1, 2, null, null, null, null, null, null, 3])
+  })
+})
+
+describe('slotsFromHandoff', () => {
+  it('refills manual builder slots from a chat lineup by id, player_id or name', () => {
+    const pool = [p(1, 'PG', { player_id: 'a' }), p(2, 'C', { player_id: 'b', name: 'Big Man' }), p(3, 'SF', { player_id: 'c' })]
+    const handoff = {
+      slots: [
+        { slot: 'PG', id: 1, name: 'P1' },
+        { slot: 'C', id: null, playerId: 'b', name: 'Big Man' },
+        { slot: 'SF', id: 999, name: 'p3' },
+        { slot: 'UTIL', name: 'Not In Pool' },
+      ],
+    }
+    const { slots, missing } = slotsFromHandoff(DK, pool, handoff)
+    expect(slots.map((s) => s?.id ?? null)).toEqual([1, null, 3, null, 2, null, null, null])
+    expect(missing).toEqual(['Not In Pool'])
   })
 })
