@@ -10,9 +10,6 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
  */
 export function useAgentStream() {
   const [isStreaming, setIsStreaming] = useState(false);
-  const [reasoning, setReasoning] = useState([]);
-  const [toolCalls, setToolCalls] = useState([]);
-  const [activeAgent, setActiveAgent] = useState(null);
   const [message, setMessage] = useState('');
   const [error, setError] = useState(null);
   const [sessionId, setSessionId] = useState(null);
@@ -40,9 +37,6 @@ export function useAgentStream() {
 
     // Reset state
     setIsStreaming(true);
-    setReasoning([]);
-    setToolCalls([]);
-    setActiveAgent(null);
     setMessage('');
     setError(null);
     setMetadata(null);
@@ -147,46 +141,9 @@ export function useAgentStream() {
         setSessionId(data.sessionId);
         break;
 
-      case 'thinking':
-        setReasoning(prev => [...prev, {
-          text: data.text,
-          timestamp: data.timestamp
-        }]);
-        break;
-
-      case 'tool_call':
-        setToolCalls(prev => [...prev, {
-          tool: data.tool,
-          args: data.args,
-          status: 'running',
-          timestamp: data.timestamp
-        }]);
-        break;
-
-      case 'tool_result':
-        setToolCalls(prev => prev.map(tc =>
-          tc.tool === data.tool && tc.status === 'running'
-            ? { ...tc, result: data.result, success: data.success, status: 'done' }
-            : tc
-        ));
-        break;
-
       case 'ui_block':
         if (!data.block) break;
         setUiBlocks(prev => (prev.some(b => b.id && b.id === data.block.id) ? prev : [...prev, data.block]));
-        break;
-
-      case 'agent_spawn':
-        setActiveAgent({ name: data.agent, task: data.task });
-        setReasoning(prev => [...prev, {
-          text: `Delegating to ${data.agent} agent: ${data.task}`,
-          timestamp: data.timestamp,
-          isAgentSpawn: true
-        }]);
-        break;
-
-      case 'agent_complete':
-        setActiveAgent(null);
         break;
 
       case 'iteration':
@@ -238,9 +195,6 @@ export function useAgentStream() {
    */
   const reset = useCallback(() => {
     setIsStreaming(false);
-    setReasoning([]);
-    setToolCalls([]);
-    setActiveAgent(null);
     setMessage('');
     setError(null);
     setMetadata(null);
@@ -253,9 +207,6 @@ export function useAgentStream() {
   return {
     // State
     isStreaming,
-    reasoning,
-    toolCalls,
-    activeAgent,
     message,
     error,
     sessionId,

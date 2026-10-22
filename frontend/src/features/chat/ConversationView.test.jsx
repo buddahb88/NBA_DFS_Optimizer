@@ -89,9 +89,13 @@ describe('ConversationView auto-scroll', () => {
 })
 
 describe('ConversationView states', () => {
-  it('shows the welcome screen for an empty chat', () => {
-    render(view({ messages: [] }))
+  it('shows the welcome screen for an empty chat, scrolled to the top', () => {
+    const { rerender } = render(view())
+    const box = fakeLayout(screen.getByTestId('conversation-scroll'))
+    box.scrollTop = 600
+    rerender(view({ messages: [] }))
     expect(screen.getByText('Welcome!')).toBeInTheDocument()
+    expect(box.scrollTop).toBe(0)
   })
 
   it('shows an error with retry when a saved chat fails to load', () => {

@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useLayoutEffect } from 'react';
 import { Button, EmptyState, IconAlert, IconArrowDown } from '../../components/ui';
 import { ChatMessage, StreamingMessage } from './ChatMessage';
 import { PlayerHeadshotsContext } from './chatFormat';
@@ -60,6 +60,10 @@ export default function ConversationView({
   }, [loading, scrollToBottom]);
 
   const empty = messages.length === 0 && !stream.isStreaming && !loading && !historyError;
+  // The welcome screen reads top-down; don't leave it pinned to the bottom
+  useLayoutEffect(() => {
+    if (empty && ref.current) ref.current.scrollTop = 0;
+  }, [empty, ref]);
   const lastIndex = messages.length - 1;
   const canRegenerate = !stream.isStreaming && last?.role === 'assistant';
 
