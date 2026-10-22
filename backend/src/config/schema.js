@@ -11,6 +11,7 @@ import { migratePlayerSeasonProfiles } from './playerProfileMigrations.js';
 import { migrateSyncRuns } from './syncRunMigrations.js';
 import { migratePlayerArchetypes } from './archetypeMigrations.js';
 import { migrateTeamArchetypeDefense } from './archetypeDefenseMigrations.js';
+import { migrateAgentValueBacktests } from './agentEvalMigrations.js';
 
 /**
  * Create all database tables
@@ -60,6 +61,8 @@ export const createTables = async (db) => {
   await migrateProjectionOverrides(db);
   // Per-slate player controls (Player Pool lock/exclude/exposure/override)
   await migratePlayerSettings(db);
+  // agent_value_backtests (chat agent value picks vs baselines, scripts/agent-value-backtest.js)
+  await migrateAgentValueBacktests(db);
 };
 
 /**
