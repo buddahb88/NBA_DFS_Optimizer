@@ -6,7 +6,7 @@ import { useSlate } from '../../context/SlateContext'
 import useMediaQuery from '../../hooks/useMediaQuery'
 
 vi.mock('../../services/api', () => ({
-  chatAPI: { getSessions: vi.fn(), getSessionHistory: vi.fn(), deleteSession: vi.fn(), renameSession: vi.fn() },
+  chatAPI: { getSessions: vi.fn(), getSessionHistory: vi.fn(), deleteSession: vi.fn(), renameSession: vi.fn(), sendFeedback: vi.fn() },
   playersAPI: { getBySlateId: vi.fn() },
 }))
 vi.mock('../../context/SlateContext', () => ({ useSlate: vi.fn() }))
@@ -22,6 +22,33 @@ const PLAYERS = [
 
 // SSE response that ends immediately
 const emptyStream = () => ({ ok: true, body: { getReader: () => ({ read: async () => ({ done: true }) }) } })
+
+// SSE response that streams one answer and finishes
+const answerStream = (text, sessionId = 7) => {
+  const sse = [
+    `event: message
+data: ${JSON.stringify({ text, isComplete: true })}
+
+`,
+    `event: done
+data: ${JSON.stringify({ sessionId, toolsUsed: [], agentsUsed: [], iterations: 1 })}
+
+`,
+  ].join('')
+  let sent = false
+  return {
+    ok: true,
+    body: {
+      getReader: () => ({
+        read: async () => {
+          if (sent) return { done: true }
+          sent = true
+          return { done: false, value: new TextEncoder().encode(sse) }
+        },
+      }),
+    },
+  }
+}
 
 let mediaMatches
 beforeEach(() => {
@@ -124,5 +151,44 @@ describe('ChatPage shell', () => {
     expect(screen.getByRole('complementary', { name: 'Context' })).toHaveTextContent(/nothing pinned yet/i)
     fireEvent.click(screen.getByRole('button', { name: 'Close context panel' }))
     expect(screen.queryByRole('complementary', { name: 'Context' })).not.toBeInTheDocument()
+  })
+
+  it('regenerate replaces the last answer by re-sending the previous prompt', async () => {
+    fetch.mockResolvedValueOnce(answerStream('First take: Jokic.')).mockResolvedValueOnce(answerStream('Second take: Doncic.'))
+    render(<ChatPage />)
+    send('Who is the top C?')
+    expect(await screen.findByText('First take: Jokic.')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Regenerate response' }))
+    expect(await screen.findByText('Second take: Doncic.')).toBeInTheDocument()
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(sentBody()).toMatchObject({ message: 'Who is the top C?', sessionId: 7 })
+    expect(screen.queryByText('First take: Jokic.')).not.toBeInTheDocument()
+    expect(screen.getAllByText('Who is the top C?')).toHaveLength(1)
+  })
+
+  it('posts thumbs feedback for an answer', async () => {
+    fetch.mockResolvedValueOnce(answerStream('Fade the chalk.'))
+    chatAPI.sendFeedback.mockResolvedValue({ data: { success: true, id: 1 } })
+    render(<ChatPage />)
+    send('Leverage spots?')
+    await screen.findByText('Fade the chalk.')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Bad response' }))
+    await waitFor(() =>
+      expect(chatAPI.sendFeedback).toHaveBeenCalledWith({ rating: 'down', sessionId: 7, messageId: undefined, content: 'Fade the chalk.' }),
+    )
+    expect(screen.getByRole('button', { name: 'Bad response' })).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('shows a loading skeleton while a conversation loads', async () => {
+    let resolveHistory
+    chatAPI.getSessionHistory.mockReturnValue(new Promise((r) => (resolveHistory = r)))
+    render(<ChatPage />)
+    fireEvent.click(await screen.findByRole('button', { name: /^Lakers stack ideas/ }))
+    expect(await screen.findByRole('status', { name: 'Loading conversation' })).toBeInTheDocument()
+    resolveHistory({ data: { success: true, messages: [{ role: 'user', content: 'Who is chalk?', created_at: new Date().toISOString() }] } })
+    expect(await screen.findByText('Who is chalk?')).toBeInTheDocument()
+    expect(screen.queryByRole('status', { name: 'Loading conversation' })).not.toBeInTheDocument()
   })
 })

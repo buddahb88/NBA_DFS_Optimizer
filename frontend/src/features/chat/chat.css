@@ -1,17 +1,61 @@
-/* Markdown tables in chat render with AG Grid's legacy alpine theme; map it onto the design tokens. */
-.chat-grid.ag-theme-alpine {
-  --ag-background-color: rgb(var(--surface));
-  --ag-foreground-color: rgb(var(--fg));
-  --ag-secondary-foreground-color: rgb(var(--fg-muted));
-  --ag-data-color: rgb(var(--fg));
-  --ag-header-background-color: rgb(var(--surface-raised));
-  --ag-header-foreground-color: rgb(var(--fg-muted));
-  --ag-odd-row-background-color: rgb(var(--surface-raised));
-  --ag-row-hover-color: rgb(var(--accent-soft));
-  --ag-border-color: rgb(var(--line));
-  --ag-row-border-color: rgb(var(--line));
-  --ag-control-panel-background-color: rgb(var(--surface-raised));
-  --ag-input-border-color: rgb(var(--line-strong));
-  --ag-alpine-active-color: rgb(var(--accent));
-  --ag-font-family: inherit;
+/* Chat prose: no outer margin on the first/last block so messages align with their header. */
+.chat-md > :first-child {
+  margin-top: 0;
+}
+.chat-md > :last-child {
+  margin-bottom: 0;
+}
+
+/* Blinking caret at the end of streaming text (only after text blocks; tables/code keep their own edge). */
+.chat-md.is-streaming > :is(p, h1, h2, h3, h4):last-child::after,
+.chat-md.is-streaming > :is(ul, ol):last-child > li:last-child::after,
+.chat-md.is-streaming > blockquote:last-child > p:last-child::after {
+  content: '';
+  display: inline-block;
+  width: 0.45em;
+  height: 1.05em;
+  margin-left: 0.15em;
+  vertical-align: -0.15em;
+  border-radius: 1px;
+  background: rgb(var(--accent));
+  animation: chat-caret-blink 1s steps(1, end) infinite;
+}
+
+@keyframes chat-caret-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* Typing indicator dots */
+.chat-typing-dot {
+  animation: chat-typing 1.2s ease-in-out infinite;
+}
+.chat-typing-dot:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.chat-typing-dot:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes chat-typing {
+  0%,
+  60%,
+  100% {
+    opacity: 0.35;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-md.is-streaming > :is(p, h1, h2, h3, h4):last-child::after,
+  .chat-md.is-streaming > :is(ul, ol):last-child > li:last-child::after,
+  .chat-md.is-streaming > blockquote:last-child > p:last-child::after,
+  .chat-typing-dot {
+    animation: none;
+  }
 }

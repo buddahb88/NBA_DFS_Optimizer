@@ -99,7 +99,8 @@ export default function ChatShell({ renderRail, title, actions, contextBar, comp
           </div>
         </header>
         {contextBar}
-        <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto">{children}</div>
+        {/* children own their scrolling (the conversation tracks its scroll position) */}
+        <div className="relative min-h-0 flex-1">{children}</div>
         {composer}
       </section>
 

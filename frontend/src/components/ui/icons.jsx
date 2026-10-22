@@ -57,3 +57,7 @@ export const IconPanelLeft = make(<><rect x="3" y="3" width="18" height="18" rx=
 export const IconPanelRight = make(<><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M15 3v18" /></>);
 export const IconStop = make(<rect x="6" y="6" width="12" height="12" rx="1.5" />);
 export const IconClock = make(<><circle cx="12" cy="12" r="10" /><path d="M12 6v6l4 2" /></>);
+export const IconCopy = make(<><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></>);
+export const IconRefresh = make(<><path d="M21 12a9 9 0 0 1-15.36 6.36L3 16" /><path d="M3 12a9 9 0 0 1 15.36-6.36L21 8" /><path d="M21 3v5h-5M3 21v-5h5" /></>);
+export const IconThumbUp = make(<><path d="M7 10v12" /><path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88z" /></>);
+export const IconThumbDown = make(<><path d="M17 14V2" /><path d="M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.76a2 2 0 0 0-1.79 1.11L12 22a3.13 3.13 0 0 1-3-3.88z" /></>);

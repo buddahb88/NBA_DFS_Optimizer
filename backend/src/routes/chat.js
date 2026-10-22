@@ -1,6 +1,7 @@
 import express from 'express';
 import agenticChatService from '../services/agenticChatService.js';
 import { StreamHandler, createStreamCallbacks } from '../services/streamHandler.js';
+import { FEEDBACK_RATINGS, saveFeedback } from '../services/chatFeedbackService.js';
 
 const router = express.Router();
 
@@ -173,6 +174,24 @@ router.delete('/sessions/:sessionId', async (req, res) => {
       success: false,
       error: error.message,
     });
+  }
+});
+
+/**
+ * POST /api/chat/feedback
+ * Thumbs up/down on an assistant answer
+ * Body: { rating: 'up' | 'down', sessionId?: number, messageId?: number, content?: string }
+ */
+router.post('/feedback', async (req, res) => {
+  try {
+    const { rating, sessionId, messageId, content } = req.body || {};
+    if (!FEEDBACK_RATINGS.includes(rating)) {
+      return res.status(400).json({ success: false, error: "rating must be 'up' or 'down'" });
+    }
+    res.json(await saveFeedback({ sessionId, messageId, rating, content }));
+  } catch (error) {
+    console.error('❌ Save feedback error:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 

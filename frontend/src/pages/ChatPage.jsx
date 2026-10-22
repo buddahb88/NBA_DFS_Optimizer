@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { IconSettings, Tooltip } from '../components/ui';
 import { useSlate } from '../context/SlateContext';
+import { chatAPI } from '../services/api';
 import { useAgentStream } from '../hooks/useAgentStream';
 import ChatSettingsModal from '../features/chat/ChatSettingsModal';
 import ChatShell from '../features/chat/ChatShell';
@@ -24,6 +25,7 @@ export default function ChatPage() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [maxIterations, setMaxIterations] = useState(10);
   const [showReasoning, setShowReasoning] = useState(true);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const inputRef = useRef(null);
 
   const stream = useAgentStream();
@@ -66,8 +68,10 @@ export default function ChatPage() {
   };
 
   const openSession = async (id) => {
+    setHistoryLoading(true);
     const history = await selectSession(id);
     if (history) setMessages(history);
+    setHistoryLoading(false);
   };
 
   const deleteSession = async (id) => {
@@ -75,11 +79,32 @@ export default function ChatPage() {
     if (wasActive) newChat();
   };
 
+  const ask = (text) => startStream(text, { sessionId: activeSessionId, slateId, maxIterations, mode });
+
   const send = async (text) => {
     if (!text.trim() || isStreaming) return;
     setMessages((prev) => [...prev, { role: 'user', content: text, created_at: new Date().toISOString() }]);
     setInput('');
-    await startStream(text, { sessionId: activeSessionId, slateId, maxIterations, mode });
+    await ask(text);
+  };
+
+  // Drop the last answer and ask the previous prompt again (the server logs the prompt a second time)
+  const regenerate = async () => {
+    if (isStreaming) return;
+    const promptIndex = messages.findLastIndex((m) => m.role === 'user');
+    if (promptIndex < 0) return;
+    setMessages((prev) => prev.slice(0, promptIndex + 1));
+    await ask(messages[promptIndex].content);
+  };
+
+  const sendFeedback = async (message, rating) => {
+    try {
+      const res = await chatAPI.sendFeedback({ rating, sessionId: activeSessionId, messageId: message.id, content: message.content });
+      return res.data?.success !== false;
+    } catch (err) {
+      console.error('Failed to save feedback:', err);
+      return false;
+    }
   };
 
   const activeSession = sessions.find((s) => s.id === activeSessionId);
@@ -158,6 +183,9 @@ export default function ChatPage() {
           }}
           showReasoning={showReasoning}
           headshots={slateSummary.headshots}
+          loading={historyLoading}
+          onRegenerate={regenerate}
+          onFeedback={sendFeedback}
           onPickPrompt={(text) => {
             setInput(text);
             inputRef.current?.focus();

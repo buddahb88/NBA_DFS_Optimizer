@@ -201,6 +201,19 @@ async function createAzureSqlTables(db) {
     )
   `);
 
+  // Thumbs up/down on chat answers
+  await db.exec(`
+    IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='chat_feedback' AND xtype='U')
+    CREATE TABLE chat_feedback (
+      id INT IDENTITY(1,1) PRIMARY KEY,
+      session_id INT,
+      message_id INT,
+      rating NVARCHAR(10) NOT NULL,
+      message_excerpt NVARCHAR(2000),
+      created_at DATETIME2 DEFAULT GETDATE()
+    )
+  `);
+
   // Team defense rankings
   await db.exec(`
     IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='team_defense_rankings' AND xtype='U')
@@ -496,6 +509,18 @@ async function createSqliteTables(db) {
       metadata TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
+    )
+  `);
+
+  // Thumbs up/down on chat answers (message_id is null for answers not yet reloaded from history)
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS chat_feedback (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id INTEGER,
+      message_id INTEGER,
+      rating TEXT NOT NULL CHECK(rating IN ('up', 'down')),
+      message_excerpt TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
 

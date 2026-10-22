@@ -90,6 +90,9 @@ export const chatAPI = {
     api.delete(`/chat/sessions/${sessionId}`),
   renameSession: (sessionId, title) =>
     api.patch(`/chat/sessions/${sessionId}`, { title }),
+  // { rating: 'up' | 'down', sessionId?, messageId?, content? }
+  sendFeedback: (feedback) =>
+    api.post('/chat/feedback', feedback),
 };
 
 // Historical Insights API
