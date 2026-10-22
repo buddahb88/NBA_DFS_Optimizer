@@ -6,8 +6,9 @@
  * compared on the same date with two baselines:
  *
  *   agent           the chat tool layer's picks (agentPicker; by default
- *                   get_archetype_matchups ranked by matchup-adjusted
- *                   projection per $1K, see agentValuePicks)
+ *                   the slate pool ranked by projection per $1K with the
+ *                   get_archetype_matchups edge as an adjustment, see
+ *                   agentValuePicks)
  *   baseline_value  top 5 by projected points per $1K, $3,500-6,500, not OUT
  *   band_average    the average player in the $4,500-6,500 band who played
  *
@@ -16,6 +17,10 @@
  * total salary; band_average is the mean of per-player values, and its total
  * DK is a 5-player set at the band's average. A pick who did not play scores
  * 0 and misses 5x. Pool rows are resultsService.getPlayerResults rows.
+ *
+ * A method with fewer than PICKS picks (or a band with no played players) is
+ * marked incomplete; summarize leaves those dates out of the cumulative
+ * comparison, and avgDk (DK per player) compares methods on equal footing.
  *
  * Results persist to agent_value_backtests (one row per run, date, method).
  */
@@ -54,6 +59,7 @@ export function scorePicks(picks) {
     names: picks.map(p => p.name),
     players: picks.map(pickRow),
     picks: picks.length,
+    avgDk: round2(totalDk / count),
     totalDk: round2(totalDk),
     totalSalary,
     valuePer1k: round2(per1k(totalDk, totalSalary)),
@@ -94,14 +100,21 @@ export function bandAverage(pool) {
   };
 }
 
+/** Pool players the agent may pick: salary <= AGENT_MAX_SALARY, not OUT, with a projection. */
+export function agentEligible(pool) {
+  return pool.filter(p => n(p.salary) > 0 && n(p.salary) <= AGENT_MAX_SALARY && !isOut(p) && n(p.projectedPoints) > 0);
+}
+
 /**
- * The agent's value ranking over get_archetype_matchups rows: salary <=
- * AGENT_MAX_SALARY, not OUT, by (projection + adjusted matchup edge) per $1K.
+ * The agent's value ranking: every eligible pool player by (projection +
+ * matchup adjusted edge) per $1K. get_archetype_matchups only lists players
+ * facing a weak-defense tier, so its rows (matched by player key) adjust the
+ * score and a player without one counts an edge of 0.
  */
-export function agentValuePicks(rows, count = PICKS) {
-  const score = (r) => per1k(n(r.projectedPoints) + n(r.adjustedEdge), n(r.salary));
-  return rows
-    .filter(r => n(r.salary) > 0 && n(r.salary) <= AGENT_MAX_SALARY && !isOut(r))
+export function agentValuePicks(pool, matchupRows = [], count = PICKS) {
+  const edgeOf = new Map(matchupRows.map(r => [playerKey(r.name), n(r.adjustedEdge)]));
+  const score = (p) => per1k(n(p.projectedPoints) + (edgeOf.get(p.playerKey ?? playerKey(p.name)) ?? 0), n(p.salary));
+  return agentEligible(pool)
     .sort((a, b) => score(b) - score(a) || n(b.projectedPoints) - n(a.projectedPoints) || String(a.name).localeCompare(String(b.name)))
     .slice(0, count);
 }
@@ -141,10 +154,10 @@ export async function matchupRowsFor({ date, slateId, site }) {
   };
 }
 
-/** Default agentPicker: the deterministic tool output (no LLM). */
-export async function deterministicAgentPicker({ date, slateId, site }) {
+/** Default agentPicker: the deterministic tool output (no LLM). `eligible` is the candidate count. */
+export async function deterministicAgentPicker({ date, slateId, site, pool }) {
   const { source, rows } = await matchupRowsFor({ date, slateId, site });
-  return { source, names: agentValuePicks(rows).map(r => r.name) };
+  return { source, names: agentValuePicks(pool, rows).map(r => r.name), eligible: agentEligible(pool).length };
 }
 
 /** The question the live agent gets for one date. */
@@ -169,7 +182,7 @@ export function namesFromAnswer(text, pool) {
 export async function liveAgentPicker({ date, slateId, site, pool }) {
   const { default: agenticChatService } = await import('./agenticChatService.js');
   const response = await agenticChatService.chat(valueQuestion({ date, slateId, site }), `value-backtest-${date}`, { slateId });
-  return { source: 'live_llm', names: namesFromAnswer(response.message, pool), answer: response.message };
+  return { source: 'live_llm', names: namesFromAnswer(response.message, pool), eligible: agentEligible(pool).length, answer: response.message };
 }
 
 const DATES_SQL = `SELECT game_date, slate_id, COUNT(*) AS players FROM slate_player_snapshots
@@ -186,9 +199,15 @@ export async function backtestDates(site, { from, to } = {}) {
   return [...byDate].map(([date, slateId]) => ({ date, slateId }));
 }
 
-/** Cumulative totals per method across `dates` (runValueBacktest rows). */
-export function summarize(dates) {
-  const out = {};
+const incompleteDate = (d) => METHODS.some(method => d.methods[method]?.incomplete);
+
+/**
+ * Cumulative totals per method across `dates` (runValueBacktest rows). Dates
+ * where any method is incomplete are left out and listed in `excluded`.
+ */
+export function summarize(allDates) {
+  const dates = allDates.filter(d => !incompleteDate(d));
+  const out = { excluded: allDates.filter(incompleteDate).map(d => d.date) };
   for (const method of ['agent', 'baseline_value']) {
     const list = dates.map(d => d.methods[method]).filter(Boolean);
     const totalDk = list.reduce((s, m) => s + m.totalDk, 0);
@@ -197,6 +216,7 @@ export function summarize(dates) {
     out[method] = {
       dates: list.length,
       totalDk: round2(totalDk),
+      avgDk: round2(totalDk / picks),
       totalSalary,
       valuePer1k: round2(per1k(totalDk, totalSalary)),
       hit5x: round2(list.reduce((s, m) => s + m.hits5x, 0) / picks),
@@ -209,6 +229,7 @@ export function summarize(dates) {
   out.band_average = {
     dates: bands.length,
     totalDk: round2(bands.reduce((s, b) => s + b.totalDk, 0)),
+    avgDk: round2(bands.reduce((s, b) => s + b.avgDk * b.players, 0) / players),
     valuePer1k: round2(bands.reduce((s, b) => s + b.valueSum, 0) / players),
     hit5x: round2(bands.reduce((s, b) => s + b.hits5x, 0) / players),
     projectedMinutes: round2(bands.reduce((s, b) => s + b.projectedMinutes * b.players, 0) / players),
@@ -223,11 +244,11 @@ async function persist(runAt, site, d) {
     const m = d.methods[method];
     await db.run(`
       INSERT INTO agent_value_backtests (run_at, game_date, site, slate_id, method, source, players, n_players,
-        total_salary, total_dk, value_per_1k, hit_5x, projected_minutes, actual_minutes)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        pick_count, incomplete, total_salary, total_dk, value_per_1k, hit_5x, projected_minutes, actual_minutes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, runAt, d.date, site, d.slateId, method, method === 'agent' ? d.source : method,
     JSON.stringify(method === 'band_average' ? [] : m.players), method === 'band_average' ? m.players : m.picks,
-    m.totalSalary ?? null, m.totalDk, m.valuePer1k, m.hit5x, m.projectedMinutes, m.actualMinutes);
+    method === 'band_average' ? null : m.picks, m.incomplete ? 1 : 0, m.totalSalary ?? null, m.totalDk, m.valuePer1k, m.hit5x, m.projectedMinutes, m.actualMinutes);
   }
 }
 
@@ -244,14 +265,17 @@ export async function runValueBacktest(options = {}) {
     const picked = await agentPicker({ date, slateId, site, pool });
     const byKey = new Map(pool.map(p => [p.playerKey, p]));
     const agentPicks = picked.names.map(name => byKey.get(playerKey(name))).filter(Boolean);
+    const agent = scorePicks(agentPicks);
+    const baseline = scorePicks(topProjectedValue(pool));
+    const band = bandAverage(pool);
     const row = {
       date,
       slateId,
       source: picked.source,
       methods: {
-        agent: scorePicks(agentPicks),
-        baseline_value: scorePicks(topProjectedValue(pool)),
-        band_average: bandAverage(pool),
+        agent: { ...agent, eligible: picked.eligible ?? null, incomplete: agent.picks < PICKS },
+        baseline_value: { ...baseline, incomplete: baseline.picks < PICKS },
+        band_average: { ...band, incomplete: band.players === 0 },
       },
     };
     if (options.persist !== false) await persist(runAt, site, row);
@@ -260,4 +284,4 @@ export async function runValueBacktest(options = {}) {
   return { runAt, site, dates, summary: summarize(dates) };
 }
 
-export default { runValueBacktest, summarize, scorePicks, topProjectedValue, bandAverage, agentValuePicks };
+export default { runValueBacktest, summarize, scorePicks, topProjectedValue, bandAverage, agentValuePicks, agentEligible };

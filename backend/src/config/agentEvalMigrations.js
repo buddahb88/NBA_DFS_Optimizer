@@ -8,8 +8,17 @@ import { DATABASE_TYPE } from './database.js';
  * baselines, scored against historical_games. method is 'agent',
  * 'baseline_value' or 'band_average'; players is a JSON array of the picks
  * (empty for band_average). hit_5x is a fraction (0.6 = 3 of 5); minutes are
- * per player.
+ * per player. pick_count is the number of picks (null for band_average) and
+ * incomplete is 1 when a method had fewer than 5 picks or the band had no
+ * played players; rows saved before these columns existed are backfilled
+ * from n_players.
  */
+const ADDED_COLUMNS = [
+  ['pick_count', 'INTEGER', 'INT'],
+  ['incomplete', 'INTEGER', 'BIT'],
+];
+const PICKS = 5; // services/agentValueBacktest.js PICKS
+
 export async function migrateAgentValueBacktests(db) {
   if (DATABASE_TYPE === 'azuresql') {
     await db.exec(`
@@ -36,6 +45,12 @@ export async function migrateAgentValueBacktests(db) {
       IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_agent_value_backtests_date')
         CREATE INDEX idx_agent_value_backtests_date ON agent_value_backtests(game_date, method);
     `);
+    for (const [name, , type] of ADDED_COLUMNS) {
+      await db.exec(`
+        IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('agent_value_backtests') AND name = '${name}')
+          ALTER TABLE agent_value_backtests ADD ${name} ${type};
+      `);
+    }
   } else {
     await db.exec(`
       CREATE TABLE IF NOT EXISTS agent_value_backtests (
@@ -57,5 +72,17 @@ export async function migrateAgentValueBacktests(db) {
       );
       CREATE INDEX IF NOT EXISTS idx_agent_value_backtests_date ON agent_value_backtests(game_date, method);
     `);
+    const existing = new Set((await db.all(`PRAGMA table_info(agent_value_backtests)`)).map(c => c.name));
+    for (const [name, type] of ADDED_COLUMNS) {
+      if (!existing.has(name)) await db.exec(`ALTER TABLE agent_value_backtests ADD COLUMN ${name} ${type}`);
+    }
   }
+
+  await db.run(`
+    UPDATE agent_value_backtests SET
+      pick_count = CASE WHEN method = 'band_average' THEN NULL ELSE n_players END,
+      incomplete = CASE WHEN method = 'band_average' THEN (CASE WHEN n_players = 0 THEN 1 ELSE 0 END)
+        WHEN n_players < ${PICKS} THEN 1 ELSE 0 END
+    WHERE incomplete IS NULL
+  `);
 }

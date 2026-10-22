@@ -290,9 +290,13 @@ describe.skipIf(!HAS_DB)('value-pick backtest (real DB, deterministic agent)', (
     const unloaded = await db.get(`SELECT game_date, slate_id FROM slate_player_snapshots s WHERE site = 'draftkings'
       AND NOT EXISTS (SELECT 1 FROM players p WHERE p.slate_id = s.slate_id) LIMIT 1`);
     if (!unloaded) return;
-    const picked = await bt.deterministicAgentPicker({ date: unloaded.game_date, slateId: unloaded.slate_id, site: 'draftkings' });
+    const { getPlayerResults } = await import('../src/services/resultsService.js');
+    const date = unloaded.game_date instanceof Date ? unloaded.game_date.toISOString().slice(0, 10) : unloaded.game_date;
+    const pool = await getPlayerResults({ from: date, to: date, site: 'draftkings', slateId: String(unloaded.slate_id) });
+    const picked = await bt.deterministicAgentPicker({ date, slateId: unloaded.slate_id, site: 'draftkings', pool });
     assert.equal(picked.source, 'snapshot_replay');
-    assert.ok(picked.names.length <= 5);
+    // Matchups only adjust the ranking, so every eligible player is a candidate
+    assert.equal(picked.names.length, Math.min(5, picked.eligible));
   });
 });
 

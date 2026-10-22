@@ -89,18 +89,42 @@ describe('scoring math (2026-10-21 reference)', () => {
 });
 
 describe('agent value ranking', () => {
-  test('ranks get_archetype_matchups rows by matchup-adjusted points per 1K at <= 6500, not OUT', () => {
-    const rows = [
-      { name: 'Star', salary: 9000, projectedPoints: 60, adjustedEdge: 5 },
-      { name: 'Hurt', salary: 4000, projectedPoints: 30, adjustedEdge: 3, injuryStatus: 'OUT' },
-      { name: 'A', salary: 5000, projectedPoints: 30, adjustedEdge: 1 }, // 6.2
-      { name: 'B', salary: 4000, projectedPoints: 24, adjustedEdge: 2 }, // 6.5
-      { name: 'C', salary: 6500, projectedPoints: 30, adjustedEdge: 0.5 }, // 4.69
-      { name: 'D', salary: 3000, projectedPoints: 9, adjustedEdge: 0 }, // 3
-      { name: 'E', salary: 6000, projectedPoints: 36, adjustedEdge: 1.2 }, // 6.2
-      { name: 'F', salary: 4500, projectedPoints: 20, adjustedEdge: 1 }, // 4.67
+  const pool = (rows) => rows.map(([name, salary, projectedPoints, injuryStatus = null]) => ({ name, playerKey: playerKey(name), salary, projectedPoints, injuryStatus }));
+
+  test('ranks the slate pool by (projection + matchup adjusted edge) per 1K at <= 6500, not OUT', () => {
+    const players = pool([
+      ['Star', 9000, 60], ['Hurt', 4000, 30, 'OUT'], ['A', 5000, 30], ['B', 4000, 24],
+      ['C', 6500, 30], ['D', 3000, 9], ['E', 6000, 36], ['F', 4500, 20],
+    ]);
+    const matchups = [
+      { name: 'Star', adjustedEdge: 5 }, { name: 'Hurt', adjustedEdge: 3 }, { name: 'A', adjustedEdge: 1 }, // 6.2
+      { name: 'B', adjustedEdge: 2 }, // 6.5
+      { name: 'C', adjustedEdge: 0.5 }, // 4.69
+      { name: 'E', adjustedEdge: 1.2 }, // 6.2
+      { name: 'F', adjustedEdge: 1 }, // 4.67
     ];
-    assert.deepEqual(bt.agentValuePicks(rows).map(p => p.name), ['B', 'E', 'A', 'C', 'F']);
+    assert.deepEqual(bt.agentValuePicks(players, matchups).map(p => p.name), ['B', 'E', 'A', 'C', 'F']);
+  });
+
+  // 2026-10-20 regression: get_archetype_matchups only lists players facing a
+  // weak-defense tier, so a 3-game slate gave the ranking one candidate.
+  test('a small slate with one matchup row still yields 5 picks; matchup only adjusts', () => {
+    const players = pool([
+      ['Isaiah Hartenstein', 4900, 29.02], ['Guard One', 4000, 22], ['Wing Two', 5200, 25],
+      ['Big Three', 6000, 27], ['Bench Four', 3500, 14], ['Bench Five', 3000, 9], ['Star', 9800, 55],
+      ['Out Six', 4200, 30, 'OUT'], ['No Proj', 3000, 0],
+    ]);
+    const matchups = [{ name: 'Isaiah Hartenstein', salary: 4900, projectedPoints: 29.02, adjustedEdge: 1.5 }];
+    const picks = bt.agentValuePicks(players, matchups);
+    assert.equal(picks.length, 5);
+    // 6.23, 5.5, 4.81, 4.5, 4.0 (Out Six is OUT, No Proj has no projection, Star is over 6500)
+    assert.deepEqual(picks.map(p => p.name), ['Isaiah Hartenstein', 'Guard One', 'Wing Two', 'Big Three', 'Bench Four']);
+    assert.equal(bt.agentEligible(players).length, 6);
+  });
+
+  test('fewer eligible players than 5 returns them all', () => {
+    const players = pool([['A', 5000, 25], ['B', 4000, 20], ['Star', 9000, 50]]);
+    assert.deepEqual(bt.agentValuePicks(players, []).map(p => p.name), ['A', 'B']);
   });
 });
 
@@ -136,6 +160,29 @@ describe('summary', () => {
     assert.equal(s.baseline_value.hit5x, 0.4);
     assert.equal(s.band_average.valuePer1k, 4);
     assert.equal(s.band_average.hit5x, 0.3);
+    assert.equal(s.agentBeatsBaseline, false);
+  });
+});
+
+describe('summary: incomplete dates', () => {
+  const method = (totalDk, totalSalary, picks, incomplete = false) => ({
+    totalDk, totalSalary, hits5x: 0, picks, avgDk: totalDk / picks, projectedMinutes: 30, actualMinutes: 30, incomplete,
+  });
+  const band = { totalDk: 100, avgDk: 20, valuePer1k: 4, hit5x: 0.3, players: 10, hits5x: 3, valueSum: 40, projectedMinutes: 25, actualMinutes: 24 };
+
+  test('a date where any method returned fewer than 5 picks is excluded from the cumulative comparison', () => {
+    const s = bt.summarize([
+      { date: '2026-10-20', methods: { agent: method(15.25, 4900, 1, true), baseline_value: method(119.25, 22000, 5), band_average: band } },
+      { date: '2026-10-21', methods: { agent: method(100, 25000, 5), baseline_value: method(120, 24000, 5), band_average: band } },
+    ]);
+    assert.deepEqual(s.excluded, ['2026-10-20']);
+    assert.equal(s.agent.dates, 1);
+    assert.equal(s.agent.totalDk, 100);
+    assert.equal(s.agent.avgDk, 20);
+    assert.equal(s.baseline_value.avgDk, 24);
+    assert.equal(s.baseline_value.valuePer1k, 5);
+    assert.equal(s.band_average.dates, 1);
+    assert.equal(s.band_average.avgDk, 20);
     assert.equal(s.agentBeatsBaseline, false);
   });
 });
@@ -194,6 +241,44 @@ describe('runValueBacktest (sqlite)', () => {
     assert.deepEqual(JSON.parse(agent.players).map(p => p.name), d.methods.agent.names);
 
     assert.equal(result.summary.agentBeatsBaseline, false);
+  });
+
+  test('an agent picker returning fewer than 5 marks the row incomplete and records pick_count', async () => {
+    const runAt = '2026-10-22T13:00:00.000Z';
+    const result = await bt.runValueBacktest({
+      site: 'draftkings', runAt, agentPicker: async () => ({ source: 'test', names: ['Charlie Three'], eligible: 7 }),
+    });
+    const [d] = result.dates;
+    assert.equal(d.methods.agent.picks, 1);
+    assert.equal(d.methods.agent.incomplete, true);
+    assert.equal(d.methods.agent.eligible, 7);
+    assert.equal(d.methods.baseline_value.incomplete, false);
+    assert.deepEqual(result.summary.excluded, [DATE]);
+    assert.equal(result.summary.agent.dates, 0);
+
+    const rows = await db.all('SELECT method, pick_count, incomplete FROM agent_value_backtests WHERE run_at = ? ORDER BY method', runAt);
+    assert.deepEqual(rows.map(r => [r.method, r.pick_count, Number(r.incomplete)]),
+      [['agent', 1, 1], ['band_average', null, 0], ['baseline_value', 5, 0]]);
+  });
+
+  test('deterministic picker: no weak-tier matchups on the slate still gives 5 picks from the pool', async () => {
+    const pool = await (await import('../src/services/resultsService.js')).getPlayerResults({ from: DATE, to: DATE, site: 'draftkings', slateId: 'past1' });
+    const picked = await bt.deterministicAgentPicker({ date: DATE, slateId: 'past1', site: 'draftkings', pool });
+    assert.equal(picked.names.length, 5);
+    assert.equal(picked.eligible, 7);
+    assert.ok(!picked.names.includes('Hotel Out'));
+  });
+
+  test('migration adds pick_count / incomplete idempotently and backfills earlier rows', async () => {
+    await db.run(`INSERT INTO agent_value_backtests (run_at, game_date, site, method, n_players) VALUES
+      ('legacy', '2026-10-20', 'draftkings', 'agent', 1), ('legacy', '2026-10-20', 'draftkings', 'baseline_value', 5),
+      ('legacy', '2026-10-20', 'draftkings', 'band_average', 12)`);
+    const { migrateAgentValueBacktests } = await import('../src/config/agentEvalMigrations.js');
+    await migrateAgentValueBacktests(db);
+    await migrateAgentValueBacktests(db);
+    const rows = await db.all("SELECT method, pick_count, incomplete FROM agent_value_backtests WHERE run_at = 'legacy' ORDER BY method");
+    assert.deepEqual(rows.map(r => [r.method, r.pick_count, Number(r.incomplete)]),
+      [['agent', 1, 1], ['band_average', null, 0], ['baseline_value', 5, 0]]);
   });
 
   test('persist: false leaves the table alone', async () => {

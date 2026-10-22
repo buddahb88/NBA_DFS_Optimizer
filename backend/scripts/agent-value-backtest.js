@@ -9,9 +9,11 @@
  * scored against historical_games (services/agentValueBacktest.js). Rows are
  * saved to agent_value_backtests so the trend can be tracked.
  *
- * The agent's picks come from the chat tool layer with no LLM: the
- * get_archetype_matchups tool (or its snapshot replay once the slate is no
- * longer loaded) ranked by matchup-adjusted projection per $1K. With
+ * The agent's picks come from the chat tool layer with no LLM: every eligible
+ * slate player ranked by projection per $1K, adjusted by the
+ * get_archetype_matchups edge (or its snapshot replay once the slate is no
+ * longer loaded). A method with fewer than 5 picks is flagged incomplete and
+ * its date is left out of the cumulative comparison. With
  * RUN_LIVE_AGENT_EVAL=1 the question goes to the configured LLM through the
  * chat orchestrator instead and the picks are read from its answer.
  *
@@ -43,8 +45,11 @@ const pct = (x) => `${Math.round(x * 100)}%`;
 const row = (date, method, m) => ({
   date,
   method: LABELS[method],
-  total_dk: m.totalDk,
+  picks: method === 'band_average' ? '-' : m.picks,
+  incomplete: m.incomplete ? 'YES' : '',
+  dk_per_player: m.avgDk,
   per_1k: m.valuePer1k,
+  total_dk: m.totalDk,
   hit_5x: method === 'band_average' ? pct(m.hit5x) : `${m.hits5x}/${m.picks}`,
   min_proj: m.projectedMinutes,
   min_actual: m.actualMinutes,
@@ -68,13 +73,23 @@ try {
     console.table(result.dates.flatMap(d => Object.entries(d.methods).map(([method, m]) => row(d.date, method, m))));
     console.log('Agent pick source per date:', result.dates.map(d => `${d.date} ${d.source}`).join('; '));
 
+    for (const d of result.dates) {
+      const agent = d.methods.agent;
+      if (agent.incomplete && agent.eligible != null && agent.eligible < 5) {
+        console.warn(`WARNING ${d.date}: only ${agent.eligible} eligible player(s) at <= $6,500 (not OUT, with a projection).`);
+      }
+    }
     const s = result.summary;
-    console.log(`\nCumulative over ${result.dates.length} date(s):`);
+    if (s.excluded.length) {
+      console.warn(`\nWARNING: ${s.excluded.join(', ')} excluded from the cumulative comparison (a method returned fewer than 5 picks).`);
+    }
+    console.log(`\nCumulative over ${result.dates.length - s.excluded.length} complete date(s):`);
     console.table(Object.fromEntries(['agent', 'baseline_value', 'band_average'].map(method => [LABELS[method], {
-      total_dk: s[method].totalDk, per_1k: s[method].valuePer1k, hit_5x: pct(s[method].hit5x),
+      dk_per_player: s[method].avgDk, per_1k: s[method].valuePer1k, hit_5x: pct(s[method].hit5x),
       min_proj: s[method].projectedMinutes, min_actual: s[method].actualMinutes,
     }])));
-    console.log(`Agent ${s.agentBeatsBaseline ? 'BEATS' : 'does NOT beat'} baseline (a) on points per $1K (${s.agent.valuePer1k} vs ${s.baseline_value.valuePer1k}).`);
+    console.log(`Agent ${s.agentBeatsBaseline ? 'BEATS' : 'does NOT beat'} baseline (a) on points per $1K (${s.agent.valuePer1k} vs ${s.baseline_value.valuePer1k}; `
+      + `DK per player ${s.agent.avgDk} vs ${s.baseline_value.avgDk}).`);
     if (!process.argv.includes('--no-save')) console.log('Saved to agent_value_backtests.');
   }
 } finally {
