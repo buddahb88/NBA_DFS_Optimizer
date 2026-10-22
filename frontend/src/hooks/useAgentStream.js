@@ -1,4 +1,5 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useReducer } from 'react';
+import { createTimeline, timelineReducer } from '../features/chat/timelineSteps';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
 
@@ -17,6 +18,8 @@ export function useAgentStream() {
   const [sessionId, setSessionId] = useState(null);
   const [iterations, setIterations] = useState({ current: 0, max: 10 });
   const [metadata, setMetadata] = useState(null);
+  // Ordered agent/tool steps with start/end timestamps (see features/chat/timelineSteps.js)
+  const [timeline, dispatchTimeline] = useReducer(timelineReducer, undefined, createTimeline);
 
   const abortControllerRef = useRef(null);
 
@@ -40,6 +43,7 @@ export function useAgentStream() {
     setError(null);
     setMetadata(null);
     setIterations({ current: 0, max: maxIterations });
+    dispatchTimeline({ type: 'start', now: Date.now() });
 
     // Create abort controller for cancellation
     abortControllerRef.current = new AbortController();
@@ -114,6 +118,7 @@ export function useAgentStream() {
         setError(err.message);
       }
     } finally {
+      dispatchTimeline({ type: 'end', now: Date.now() });
       setIsStreaming(false);
       abortControllerRef.current = null;
     }
@@ -123,6 +128,7 @@ export function useAgentStream() {
    * Handle incoming SSE event
    */
   const handleEvent = useCallback((type, data) => {
+    dispatchTimeline({ type: 'event', event: type, data, now: Date.now() });
     switch (type) {
       case 'connected':
         console.log('SSE connected:', data.timestamp);
@@ -224,6 +230,7 @@ export function useAgentStream() {
     setError(null);
     setMetadata(null);
     setIterations({ current: 0, max: 10 });
+    dispatchTimeline({ type: 'reset' });
   }, []);
 
   return {
@@ -237,6 +244,7 @@ export function useAgentStream() {
     sessionId,
     iterations,
     metadata,
+    timeline,
 
     // Actions
     startStream,

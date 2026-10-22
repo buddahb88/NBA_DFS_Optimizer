@@ -27,35 +27,17 @@
   }
 }
 
-/* Typing indicator dots */
-.chat-typing-dot {
-  animation: chat-typing 1.2s ease-in-out infinite;
-}
-.chat-typing-dot:nth-child(2) {
-  animation-delay: 0.15s;
-}
-.chat-typing-dot:nth-child(3) {
-  animation-delay: 0.3s;
-}
-
-@keyframes chat-typing {
-  0%,
-  60%,
-  100% {
-    opacity: 0.35;
-    transform: translateY(0);
-  }
-  30% {
-    opacity: 1;
-    transform: translateY(-2px);
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
   .chat-md.is-streaming > :is(p, h1, h2, h3, h4):last-child::after,
   .chat-md.is-streaming > :is(ul, ol):last-child > li:last-child::after,
-  .chat-md.is-streaming > blockquote:last-child > p:last-child::after,
-  .chat-typing-dot {
+  .chat-md.is-streaming > blockquote:last-child > p:last-child::after {
     animation: none;
   }
 }
+
+/* Agent avatars in the activity timeline: each agent maps onto an existing theme token. */
+.agent-tone { --agent: var(--fg-muted); }
+.agent-tone-orchestrator { --agent: var(--accent); }
+.agent-tone-research { --agent: var(--info); }
+.agent-tone-analyst { --agent: var(--positive); }
+.agent-tone-optimizer { --agent: var(--chart-2); }

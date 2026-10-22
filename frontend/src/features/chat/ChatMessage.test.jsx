@@ -131,12 +131,12 @@ describe('ChatMessage', () => {
 })
 
 describe('StreamingMessage', () => {
-  it('shows a typing indicator, then streams text into a polite live region with a caret', () => {
-    const { container, rerender } = render(<StreamingMessage content="" reasoning={[]} toolCalls={[]} activeAgent={{ name: 'Research' }} isStreaming />)
-    expect(screen.getByRole('status')).toHaveTextContent('Research agent is working')
+  it('shows the working timeline chip, then streams text into a polite live region with a caret', () => {
+    const timeline = { steps: [], startedAt: Date.now() }
+    const { container, rerender } = render(<StreamingMessage content="" timeline={timeline} showReasoning isStreaming />)
+    expect(screen.getByRole('button', { name: /working/i })).toBeInTheDocument()
 
-    rerender(<StreamingMessage content="Jokic is the" reasoning={[]} toolCalls={[]} isStreaming />)
-    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    rerender(<StreamingMessage content="Jokic is the" timeline={timeline} showReasoning isStreaming />)
     const live = container.querySelector('[aria-live="polite"]')
     expect(live).toHaveTextContent('Jokic is the')
     expect(live.querySelector('.chat-md')).toHaveClass('is-streaming')

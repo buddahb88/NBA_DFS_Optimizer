@@ -192,3 +192,54 @@ describe('ChatPage shell', () => {
     expect(screen.queryByRole('status', { name: 'Loading conversation' })).not.toBeInTheDocument()
   })
 })
+
+describe('ChatPage agent timeline', () => {
+  const sse = (type, data) => `event: ${type}\ndata: ${JSON.stringify(data)}\n\n`
+  const T = (ms) => new Date(Date.UTC(2026, 9, 22, 20, 0, 0, ms)).toISOString()
+  const streamOf = (text) => {
+    const chunks = [new TextEncoder().encode(text)]
+    return { ok: true, body: { getReader: () => ({ read: async () => (chunks.length ? { done: false, value: chunks.shift() } : { done: true }) }) } }
+  }
+
+  it('keeps the finished timeline on the answer as a summary chip with a step-limit callout', async () => {
+    fetch.mockResolvedValue(
+      streamOf(
+        sse('agent_spawn', { agent: 'research', task: 'Rank value', timestamp: T(0) }) +
+          sse('tool_call', { tool: 'get_archetype_matchups', args: {}, timestamp: T(10) }) +
+          sse('tool_result', { tool: 'get_archetype_matchups', result: [], success: true, timestamp: T(400) }) +
+          sse('agent_complete', { agent: 'research', result: { success: true, maxIterationsReached: true }, timestamp: T(500) }) +
+          sse('message', { text: 'Here are the plays.', isComplete: true, timestamp: T(600) }) +
+          sse('done', { sessionId: 7, toolsUsed: [], agentsUsed: ['research'], iterations: 2, timestamp: T(700) }),
+      ),
+    )
+    render(<ChatPage />)
+    send('Value plays?')
+    await waitFor(() => expect(screen.getByText('Here are the plays.')).toBeInTheDocument())
+    expect(screen.getByRole('button', { name: /^Used 1 tool across 1 agent · / })).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.getByRole('note', { name: 'Agent warnings' })).toHaveTextContent('Research agent hit its step limit before finishing')
+  })
+
+  it('renders saved tool/agent metadata for history messages', async () => {
+    chatAPI.getSessionHistory.mockResolvedValue({
+      data: {
+        success: true,
+        messages: [
+          { role: 'user', content: 'Who is chalk?', created_at: new Date().toISOString() },
+          {
+            role: 'assistant',
+            content: 'Chalk list.',
+            created_at: new Date().toISOString(),
+            metadata: { toolsUsed: [{ name: 'get_current_slate', args: {} }, { name: 'delegate_to_agent', args: { agent: 'analyst', task: 'Ownership' } }], agentsUsed: ['analyst'] },
+          },
+        ],
+      },
+    })
+    render(<ChatPage />)
+    fireEvent.click(await screen.findByText('Lakers stack ideas'))
+    const chip = await screen.findByRole('button', { name: 'Used 1 tool across 1 agent' })
+    fireEvent.click(chip)
+    const list = screen.getByRole('list', { name: 'Agent activity' })
+    expect(list).toHaveTextContent('Loading the current slate')
+    expect(list).toHaveTextContent('Analyst agent')
+  })
+})

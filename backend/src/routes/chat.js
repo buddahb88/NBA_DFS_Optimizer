@@ -64,7 +64,8 @@ router.post('/stream', async (req, res) => {
     await agenticChatService.saveMessage(activeSessionId, 'assistant', response.message, {
       toolsUsed: response.toolsUsed,
       agentsUsed: response.agentsUsed,
-      iterations: response.iterations
+      iterations: response.iterations,
+      maxIterationsReached: response.maxIterationsReached || false
     });
 
     // Send completion

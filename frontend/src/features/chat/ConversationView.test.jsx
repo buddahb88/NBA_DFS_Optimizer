@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import ConversationView from './ConversationView'
 
-const idle = { isStreaming: false, content: '', reasoning: [], toolCalls: [], activeAgent: null, iterations: { current: 0, max: 10 } }
+const idle = { isStreaming: false, content: '', timeline: null }
 const MESSAGES = [
   { role: 'user', content: 'Best value?', created_at: '2026-10-22T20:00:00Z' },
   { role: 'assistant', content: 'Max Christie.', created_at: '2026-10-22T20:00:05Z' },

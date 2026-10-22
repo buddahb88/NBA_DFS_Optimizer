@@ -29,7 +29,7 @@ export default function ChatPage() {
   const inputRef = useRef(null);
 
   const stream = useAgentStream();
-  const { isStreaming, message: streamedText, error: streamError, metadata, startStream, cancelStream, reset: resetStream } = stream;
+  const { isStreaming, message: streamedText, error: streamError, metadata, timeline, startStream, cancelStream, reset: resetStream } = stream;
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -43,7 +43,13 @@ export default function ChatPage() {
       {
         role: 'assistant',
         content: streamedText,
-        metadata: { toolsUsed: metadata.toolsUsed, agentsUsed: metadata.agentsUsed, iterations: metadata.iterations },
+        metadata: {
+          toolsUsed: metadata.toolsUsed,
+          agentsUsed: metadata.agentsUsed,
+          iterations: metadata.iterations,
+          maxIterationsReached: metadata.maxIterationsReached,
+        },
+        timeline,
         created_at: new Date().toISOString(),
       },
     ]);
@@ -52,13 +58,14 @@ export default function ChatPage() {
       refresh();
     }
     resetStream();
-  }, [isStreaming, streamedText, metadata, setActiveSessionId, refresh, resetStream]);
+  }, [isStreaming, streamedText, metadata, timeline, setActiveSessionId, refresh, resetStream]);
 
   useEffect(() => {
     if (!streamError) return;
-    setMessages((prev) => [...prev, { role: 'assistant', content: `Error: ${streamError}`, created_at: new Date().toISOString(), isError: true }]);
+    if (isStreaming) return; // wait for the stream to close so the timeline is finalized
+    setMessages((prev) => [...prev, { role: 'assistant', content: `Error: ${streamError}`, timeline, created_at: new Date().toISOString(), isError: true }]);
     resetStream();
-  }, [streamError, resetStream]);
+  }, [streamError, isStreaming, timeline, resetStream]);
 
   const newChat = () => {
     setMessages([]);
@@ -176,10 +183,7 @@ export default function ChatPage() {
           stream={{
             isStreaming,
             content: streamedText,
-            reasoning: stream.reasoning,
-            toolCalls: stream.toolCalls,
-            activeAgent: stream.activeAgent,
-            iterations: stream.iterations,
+            timeline,
           }}
           showReasoning={showReasoning}
           headshots={slateSummary.headshots}

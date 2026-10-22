@@ -1,8 +1,9 @@
 // Chat turns: user prompts as compact right-aligned bubbles, assistant answers full-width
-// with the assistant mark. Rich tool-result cards and the agent timeline come in later cards.
-import { useDeferredValue, useState } from 'react';
-import { Badge, IconCheck, IconCopy, IconRefresh, IconThumbDown, IconThumbUp, Tooltip, cn } from '../../components/ui';
-import { ReasoningPanel } from '../../components/ReasoningPanel';
+// with the assistant mark and its agent activity timeline. Rich tool-result cards come in a later card.
+import { useDeferredValue, useMemo, useState } from 'react';
+import { IconCheck, IconCopy, IconRefresh, IconThumbDown, IconThumbUp, Tooltip, cn } from '../../components/ui';
+import AgentTimeline from './AgentTimeline';
+import { timelineFromMetadata } from './timelineSteps';
 import { formatTimestamp } from './chatFormat';
 import Markdown from './Markdown';
 import useCopy from './useCopy';
@@ -88,27 +89,6 @@ function Timestamp({ value, className }) {
   );
 }
 
-function UsageBadges({ metadata }) {
-  const tools = metadata?.toolsUsed || [];
-  const agents = metadata?.agentsUsed || [];
-  if (!tools.length && !agents.length) return null;
-  return (
-    <div className="mt-3 flex flex-wrap items-center gap-1.5 text-2xs text-fg-subtle">
-      {agents.map((agent, i) => (
-        <Badge key={`a${i}`} tone="accent" size="sm">
-          {agent}
-        </Badge>
-      ))}
-      {tools.slice(0, 5).map((tool, i) => (
-        <Badge key={`t${i}`} tone="info" size="sm">
-          {typeof tool === 'object' ? tool.name : tool}
-        </Badge>
-      ))}
-      {tools.length > 5 && <Badge size="sm">+{tools.length - 5} more</Badge>}
-    </div>
-  );
-}
-
 function UserMessage({ message }) {
   return (
     <article className="group flex flex-col items-end py-2" aria-label="You">
@@ -142,12 +122,18 @@ function AssistantFrame({ header, children }) {
  * One finished turn. Assistant answers get copy / feedback actions; `isLast`
  * keeps them visible and enables regenerate.
  */
-export function ChatMessage({ message, isLast = false, onRegenerate, onFeedback }) {
-  if (message.role === 'user') return <UserMessage message={message} />;
+export function ChatMessage({ message, isLast = false, showReasoning = true, onRegenerate, onFeedback }) {
+  const isUser = message.role === 'user';
+  // Live messages carry the full timeline; saved ones only have tools/agents metadata
+  const timeline = useMemo(() => (isUser ? null : message.timeline || timelineFromMetadata(message.metadata)), [isUser, message.timeline, message.metadata]);
+  if (isUser) return <UserMessage message={message} />;
+
+  const activity = timeline && <AgentTimeline timeline={timeline} showReasoning={showReasoning} />;
 
   if (message.isError) {
     return (
       <AssistantFrame header={<Timestamp value={message.created_at} className={revealOnHover} />}>
+        {activity}
         <div role="alert" className="rounded-md border border-negative/30 bg-negative-soft px-3 py-2 text-sm text-negative">
           {message.content}
         </div>
@@ -164,8 +150,8 @@ export function ChatMessage({ message, isLast = false, onRegenerate, onFeedback 
 
   return (
     <AssistantFrame header={<Timestamp value={message.created_at} className={revealOnHover} />}>
+      {activity}
       <Markdown>{message.content}</Markdown>
-      <UsageBadges metadata={message.metadata} />
       <div className={cn('mt-2 flex items-center gap-0.5', !isLast && revealOnHover)}>
         <CopyAction text={message.content} />
         {isLast && onRegenerate && (
@@ -179,27 +165,12 @@ export function ChatMessage({ message, isLast = false, onRegenerate, onFeedback 
   );
 }
 
-export function TypingIndicator({ label = 'Thinking' }) {
-  return (
-    <div role="status" className="flex h-6 items-center gap-2 text-xs text-fg-muted">
-      <span className="flex items-center gap-1" aria-hidden="true">
-        <span className="chat-typing-dot h-1.5 w-1.5 rounded-full bg-accent" />
-        <span className="chat-typing-dot h-1.5 w-1.5 rounded-full bg-accent" />
-        <span className="chat-typing-dot h-1.5 w-1.5 rounded-full bg-accent" />
-      </span>
-      <span>{label}…</span>
-    </div>
-  );
-}
-
-export function StreamingMessage({ content, reasoning, toolCalls, activeAgent, iterations, isStreaming }) {
+export function StreamingMessage({ content, timeline, showReasoning, isStreaming }) {
   // Lets React drop intermediate markdown renders when chunks arrive faster than it can paint
   const deferred = useDeferredValue(content);
-  const agentName = typeof activeAgent === 'string' ? activeAgent : activeAgent?.name;
   return (
     <AssistantFrame>
-      <ReasoningPanel reasoning={reasoning} toolCalls={toolCalls} activeAgent={activeAgent} iterations={iterations} isStreaming={isStreaming} />
-      {!deferred && <TypingIndicator label={agentName ? `${agentName} agent is working` : 'Thinking'} />}
+      <AgentTimeline timeline={timeline} isStreaming={isStreaming} showReasoning={showReasoning} />
       {/* Streaming prose is announced politely as it arrives */}
       <div aria-live="polite" aria-atomic="false">
         {deferred && <Markdown streaming={isStreaming}>{deferred}</Markdown>}

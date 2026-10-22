@@ -62,13 +62,11 @@ function HistorySkeleton() {
 
 /**
  * Scrollable message list. `stream` is the live agent stream
- * ({ isStreaming, content, reasoning, toolCalls, activeAgent, iterations }).
+ * ({ isStreaming, content, timeline }).
  * Follows new content until the user scrolls up, then offers "Jump to latest".
  */
 export default function ConversationView({ messages, stream, showReasoning, headshots, loading = false, onPickPrompt, onRegenerate, onFeedback }) {
-  const reasoning = showReasoning ? stream.reasoning : [];
-  const toolCalls = showReasoning ? stream.toolCalls : [];
-  const contentKey = [loading, messages.length, stream.isStreaming, stream.content?.length, reasoning?.length, toolCalls?.length].join('|');
+  const contentKey = [loading, messages.length, stream.isStreaming, stream.content?.length, stream.timeline?.steps?.length].join('|');
   const { ref, onScroll, pinned, scrollToBottom } = useAutoScroll(contentKey);
 
   // Sending a prompt always brings the conversation back into view
@@ -101,6 +99,7 @@ export default function ConversationView({ messages, stream, showReasoning, head
                     <ChatMessage
                       message={msg}
                       isLast={idx === lastIndex}
+                      showReasoning={showReasoning}
                       onRegenerate={canRegenerate && idx === lastIndex ? onRegenerate : undefined}
                       onFeedback={onFeedback}
                     />
@@ -108,14 +107,7 @@ export default function ConversationView({ messages, stream, showReasoning, head
                 ))
               )}
               {stream.isStreaming && (
-                <StreamingMessage
-                  content={stream.content}
-                  reasoning={reasoning}
-                  toolCalls={toolCalls}
-                  activeAgent={stream.activeAgent}
-                  iterations={stream.iterations}
-                  isStreaming
-                />
+                <StreamingMessage content={stream.content} timeline={stream.timeline} showReasoning={showReasoning} isStreaming />
               )}
             </section>
           </PlayerHeadshotsContext.Provider>
