@@ -60,17 +60,19 @@ router.post('/stream', async (req, res) => {
       return;
     }
 
-    // Save assistant message with metadata
+    // Save assistant message with metadata and the ui blocks streamed with it
     await agenticChatService.saveMessage(activeSessionId, 'assistant', response.message, {
       toolsUsed: response.toolsUsed,
       agentsUsed: response.agentsUsed,
       iterations: response.iterations,
       maxIterationsReached: response.maxIterationsReached || false
-    });
+    }, stream.uiBlocks);
 
     // Send completion
     stream.sendDone({
       sessionId: activeSessionId,
+      messageId: stream.messageId,
+      uiBlockCount: stream.uiBlocks.length,
       toolsUsed: response.toolsUsed,
       agentsUsed: response.agentsUsed,
       iterations: response.iterations,

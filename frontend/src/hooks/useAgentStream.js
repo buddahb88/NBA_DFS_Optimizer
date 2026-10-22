@@ -20,6 +20,8 @@ export function useAgentStream() {
   const [metadata, setMetadata] = useState(null);
   // Ordered agent/tool steps with start/end timestamps (see features/chat/timelineSteps.js)
   const [timeline, dispatchTimeline] = useReducer(timelineReducer, undefined, createTimeline);
+  // Typed result blocks for the streamed message (backend chatTools/uiBlocks.js)
+  const [uiBlocks, setUiBlocks] = useState([]);
 
   const abortControllerRef = useRef(null);
 
@@ -42,6 +44,7 @@ export function useAgentStream() {
     setMessage('');
     setError(null);
     setMetadata(null);
+    setUiBlocks([]);
     setIterations({ current: 0, max: maxIterations });
     dispatchTimeline({ type: 'start', now: Date.now() });
 
@@ -162,6 +165,11 @@ export function useAgentStream() {
         ));
         break;
 
+      case 'ui_block':
+        if (!data.block) break;
+        setUiBlocks(prev => (prev.some(b => b.id && b.id === data.block.id) ? prev : [...prev, data.block]));
+        break;
+
       case 'agent_spawn':
         setActiveAgent({ name: data.agent, task: data.task });
         setReasoning(prev => [...prev, {
@@ -190,6 +198,7 @@ export function useAgentStream() {
       case 'done':
         setMetadata({
           sessionId: data.sessionId,
+          messageId: data.messageId,
           toolsUsed: data.toolsUsed,
           agentsUsed: data.agentsUsed,
           iterations: data.iterations,
@@ -229,6 +238,7 @@ export function useAgentStream() {
     setMessage('');
     setError(null);
     setMetadata(null);
+    setUiBlocks([]);
     setIterations({ current: 0, max: 10 });
     dispatchTimeline({ type: 'reset' });
   }, []);
@@ -245,6 +255,7 @@ export function useAgentStream() {
     iterations,
     metadata,
     timeline,
+    uiBlocks,
 
     // Actions
     startStream,

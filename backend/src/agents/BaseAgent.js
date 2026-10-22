@@ -10,6 +10,7 @@
 
 import OpenAI from 'openai';
 import { createClaudeClient, isClaudeEndpoint, runClaudeToolLoop, toClaudeHistory, toClaudeTool } from '../services/llm/claude.js';
+import { getUiBlocks } from '../services/chatTools/uiBlocks.js';
 
 export default class BaseAgent {
   constructor(config) {
@@ -63,9 +64,10 @@ export default class BaseAgent {
    * @param {string} name - Tool name
    * @param {object} args - Tool arguments
    * @param {object} callbacks - Streaming callbacks
+   * @param {string} toolCallId - LLM tool call id (keys the call's ui blocks)
    * @returns {Promise<string>} Tool result as JSON string
    */
-  async executeTool(name, args, callbacks = {}) {
+  async executeTool(name, args, callbacks = {}, toolCallId = null) {
     const tool = this.tools.find(t => t.name === name);
     if (!tool) {
       const error = `Tool "${name}" not found in ${this.name} agent`;
@@ -80,6 +82,8 @@ export default class BaseAgent {
       const result = await tool.execute(args);
 
       callbacks.onToolResult?.(name, result, true);
+      const blocks = getUiBlocks(result);
+      if (blocks.length) callbacks.onUiBlock?.(blocks, { tool: name, toolCallId });
       console.log(`✅ [${this.name}] Tool ${name} completed`);
 
       return typeof result === 'string' ? result : JSON.stringify(result);
@@ -101,7 +105,7 @@ export default class BaseAgent {
   async execute(task, context = {}, callbacks = {}) {
     this.initializeClient();
 
-    const { onThinking, onToolCall, onToolResult, onMessage, onIteration } = callbacks;
+    const { onThinking, onToolCall, onToolResult, onUiBlock, onMessage, onIteration } = callbacks;
 
     if (this.claudeClient) {
       return this.executeWithClaude(task, context, callbacks);
@@ -167,7 +171,7 @@ export default class BaseAgent {
             onThinking?.(`Using ${toolName} tool...`);
 
             // Execute tool
-            const result = await this.executeTool(toolName, toolArgs, { onToolCall, onToolResult });
+            const result = await this.executeTool(toolName, toolArgs, { onToolCall, onToolResult, onUiBlock }, toolCall.id);
             toolsUsed.push({ name: toolName, args: toolArgs, result });
 
             // Add tool result to messages
@@ -234,7 +238,7 @@ export default class BaseAgent {
    * Same execution loop as execute(), against Claude on Azure AI Foundry
    */
   async executeWithClaude(task, context, callbacks) {
-    const { onThinking, onToolCall, onToolResult, onMessage, onIteration } = callbacks;
+    const { onThinking, onToolCall, onToolResult, onUiBlock, onMessage, onIteration } = callbacks;
     const toolsUsed = [];
 
     console.log(`\n🤖 [${this.name}] Starting execution (max ${this.maxIterations} iterations)`);
@@ -248,7 +252,7 @@ export default class BaseAgent {
         tools: this.getOpenAITools().map(t => toClaudeTool(t.function)),
         executeTool: async (toolName, toolArgs) => {
           onThinking?.(`Using ${toolName} tool...`);
-          const result = await this.executeTool(toolName, toolArgs, { onToolCall, onToolResult });
+          const result = await this.executeTool(toolName, toolArgs, { onToolCall, onToolResult, onUiBlock });
           toolsUsed.push({ name: toolName, args: toolArgs, result });
           return result;
         },

@@ -416,6 +416,9 @@ tables:
       - name: metadata
         type: TEXT
         description: "JSON string with additional data"
+      - name: ui_blocks
+        type: TEXT
+        description: "JSON array of typed result blocks (player_list, lineup, ...) streamed with an assistant message"
       - name: created_at
         type: DATETIME
 

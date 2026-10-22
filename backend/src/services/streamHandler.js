@@ -5,6 +5,8 @@
  * - thinking: AI reasoning/planning step
  * - tool_call: Tool invocation starting
  * - tool_result: Tool execution complete
+ * - ui_block: Typed result block for the assistant message ({ messageId, block },
+ *   see chatTools/uiBlocks.js), in tool order, once per tool call
  * - agent_spawn: Sub-agent starting work
  * - agent_complete: Sub-agent finished
  * - message: Final response chunk
@@ -12,10 +14,17 @@
  * - error: Error occurred
  */
 
+import { randomUUID } from 'crypto';
+
 export class StreamHandler {
   constructor(res) {
     this.res = res;
     this.isOpen = false;
+    // One stream = one assistant message; its blocks are persisted with it
+    this.messageId = randomUUID();
+    this.uiBlocks = [];
+    this.uiBlockCalls = new Set();
+    this.uiBlockCount = 0;
   }
 
   /**
@@ -92,6 +101,24 @@ export class StreamHandler {
       result,
       success,
       timestamp: new Date().toISOString()
+    });
+  }
+
+  /**
+   * Send a tool call's ui blocks (once per tool call) and keep them for
+   * persistence. Each block gets id `<toolCallId>:<n>`.
+   * @param {Array} blocks - Validated blocks (chatTools/uiBlocks.js)
+   * @param {object} source - { tool, toolCallId }
+   */
+  sendUiBlocks(blocks, { tool, toolCallId } = {}) {
+    const callId = toolCallId || `${tool || 'tool'}-${++this.uiBlockCount}`;
+    if (this.uiBlockCalls.has(callId)) return;
+    this.uiBlockCalls.add(callId);
+
+    blocks.forEach((block, i) => {
+      const withId = { ...block, id: `${callId}:${i}`, tool };
+      this.uiBlocks.push(withId);
+      this.sendEvent('ui_block', { messageId: this.messageId, block: withId });
     });
   }
 
@@ -194,6 +221,7 @@ export function createStreamCallbacks(stream) {
     onThinking: (text) => stream.sendThinking(text),
     onToolCall: (tool, args) => stream.sendToolCall(tool, args),
     onToolResult: (tool, result, success) => stream.sendToolResult(tool, result, success),
+    onUiBlock: (blocks, source) => stream.sendUiBlocks(blocks, source),
     onAgentSpawn: (agent, task) => stream.sendAgentSpawn(agent, task),
     onAgentComplete: (agent, result) => stream.sendAgentComplete(agent, result),
     onMessage: (text, isComplete) => stream.sendMessage(text, isComplete),

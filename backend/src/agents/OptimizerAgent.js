@@ -11,6 +11,7 @@ import BaseAgent from './BaseAgent.js';
 import db from '../config/database.js';
 import optimizerService from '../services/optimizerService.js';
 import { resolveSite } from '../utils/resolveSite.js';
+import { withUiBlocks } from '../services/chatTools/uiBlockBuilders.js';
 
 const SYSTEM_PROMPT = `You are an expert DFS lineup optimizer for DraftKings NBA.
 
@@ -140,13 +141,14 @@ class OptimizerAgent extends BaseAgent {
             remainingSalary: lineup.remainingSalary,
           }));
 
-          return {
+          const result = {
             success: true,
             lineups: formattedLineups,
             count: formattedLineups.length,
             mode,
             slateId,
           };
+          return withUiBlocks('build_lineup', result);
         }
       },
 

@@ -421,3 +421,123 @@ describe('wiring', () => {
     assert.match(research.systemPrompt, /get_archetype_matchups/);
   });
 });
+
+describe('ui blocks', () => {
+  let getUiBlocks;
+  let validateUiBlock;
+  before(async () => {
+    ({ getUiBlocks, validateUiBlock } = await import('../src/services/chatTools/uiBlocks.js'));
+  });
+
+  // Every block is schema-valid and invisible to the LLM's JSON
+  const blocksOf = (result) => {
+    const blocks = getUiBlocks(result);
+    for (const b of blocks) assert.equal(validateUiBlock(b).success, true, validateUiBlock(b).error);
+    assert.doesNotMatch(JSON.stringify(result), /"version":1/);
+    return blocks;
+  };
+
+  test('get_archetype_matchups -> player_list with edges, minutes, headshot and ownership', async () => {
+    await db.run(`UPDATE players SET headshot = 'https://img/steady.png', rostership = 18.5 WHERE slate_id = 's1' AND name = 'Steady Guard'`);
+    const [block, ...rest] = blocksOf(await run('get_archetype_matchups', {}));
+    assert.equal(rest.length, 0);
+    assert.equal(block.type, 'player_list');
+    assert.equal(block.context.slate_id, 's1');
+    assert.equal(block.context.season, PRIOR);
+    const steady = block.players[0];
+    assert.equal(steady.name, 'Steady Guard');
+    assert.equal(steady.player_key, 'steady guard');
+    assert.equal(steady.opponent, 'T00');
+    assert.equal(steady.archetype, 'scoring_guard');
+    assert.equal(steady.matchup_edge, 4);
+    assert.equal(steady.adjusted_edge, 3.2);
+    assert.equal(steady.projected_minutes, 34);
+    assert.equal(steady.last_season_minutes, 33);
+    assert.equal(steady.headshot, 'https://img/steady.png');
+    assert.equal(steady.ownership, 18.5);
+    assert.ok(steady.flags.includes('crowded'));
+    assert.ok(block.players.find(p => p.name === 'Bench Guard').flags.includes('role_down'));
+  });
+
+  test('get_player_profile -> single-player player_list with role stats', async () => {
+    const [block] = blocksOf(await run('get_player_profile', { name: 'Tyrese Maxey' }));
+    assert.equal(block.type, 'player_list');
+    const [maxey] = block.players;
+    assert.equal(maxey.player_key, 'tyrese maxey');
+    assert.equal(maxey.archetype, 'primary_creator');
+    assert.equal(maxey.last_season_minutes, 37.5);
+    assert.equal(maxey.stats.usg_pct, 0.281);
+    assert.equal(maxey.stats.games, 14);
+  });
+
+  test('get_team_defense_profile -> team_defense plus a matchup_table per grouping', async () => {
+    const blocks = blocksOf(await run('get_team_defense_profile', { team: 'T01' }));
+    assert.deepEqual(blocks.map(b => b.type), ['team_defense', 'matchup_table', 'matchup_table']);
+    const [defense, archetypes, positions] = blocks;
+    assert.equal(defense.team, 'T01');
+    assert.deepEqual(defense.groups.map(g => g.group_by), ['archetype', 'position']);
+    assert.equal(defense.groups[0].strongest[0].group_key, 'rim_running_big');
+    assert.equal(archetypes.group_by, 'archetype');
+    const wing = archetypes.rows.find(r => r.group_key === 'three_and_d_wing');
+    assert.equal(wing.fp_over_expectation, 2.5);
+    assert.equal(wing.games, 41);
+    assert.equal(wing.rank, 1);
+    assert.equal(positions.rows.length, 2);
+  });
+
+  test('get_usage_bumps and get_missing_players', async () => {
+    const [bumps] = blocksOf(await run('get_usage_bumps', { team: 'PHI' }));
+    assert.equal(bumps.type, 'usage_bumps');
+    const maxey = bumps.bumps.find(b => b.player.name === 'Tyrese Maxey');
+    assert.equal(maxey.player.player_key, 'tyrese maxey');
+    assert.equal(maxey.missing_player, 'Joel Embiid');
+    assert.equal(maxey.avg_without, 45);
+    assert.equal(maxey.avg_with, 30);
+    // No bumps -> no block
+    assert.deepEqual(blocksOf(await run('get_usage_bumps', { team: 'MIL' })), []);
+
+    const [missing] = blocksOf(await run('get_missing_players', { slateId: 's1' }));
+    assert.equal(missing.type, 'player_list');
+    const embiid = missing.players.find(p => p.name === 'Joel Embiid');
+    assert.equal(embiid.team, 'PHI');
+    assert.deepEqual(embiid.flags, ['missing']);
+  });
+
+  test('get_streaks_and_consistency -> streaks', async () => {
+    const [hot] = blocksOf(await run('get_streaks_and_consistency', { type: 'hot' }));
+    assert.equal(hot.kind, 'hot');
+    assert.equal(hot.players[0].name, 'Tyrese Maxey');
+    assert.equal(hot.players[0].last3_avg, 45);
+    assert.ok(hot.players[0].pct > 0);
+    const [steady] = blocksOf(await run('get_streaks_and_consistency', { type: 'consistency', minGames: 8 }));
+    assert.equal(steady.kind, 'consistency');
+    assert.equal(steady.players[0].consistency_score, 100);
+    assert.deepEqual(blocksOf(await run('get_streaks_and_consistency', { type: 'lukewarm' })), []);
+  });
+
+  test('score_lineup -> lineup_score with totals and not-found names', async () => {
+    const [block] = blocksOf(await run('score_lineup', {
+      players: ['Luka Doncic', 'Hurt Center', 'Lukka Dončič Sr'], date: day(10),
+    }));
+    assert.equal(block.type, 'lineup_score');
+    assert.equal(block.context.date, day(10));
+    const luka = block.players.find(p => p.player_key === 'luka doncic');
+    assert.equal(luka.actual, 61.5);
+    assert.equal(luka.projected, 55);
+    assert.equal(luka.value_per_1k, 5.59);
+    assert.equal(block.players.find(p => p.name === 'Hurt Center').status, 'INACTIVE');
+    assert.equal(block.totals.actual, 61.5);
+    assert.equal(block.totals.salary, 15000);
+    assert.equal(block.incomplete, true);
+    assert.deepEqual(block.not_found, ['Lukka Dončič Sr']);
+  });
+
+  test('get_projection_results -> projection_results; failures get no block', async () => {
+    const [block] = blocksOf(await run('get_projection_results', { date: day(10) }));
+    assert.equal(block.type, 'projection_results');
+    assert.equal(block.overall.mae, 6.375);
+    assert.equal(block.overall.hit_rates['5x'], 50);
+    assert.deepEqual(block.misses.map(m => m.name), ['Jaren Jackson Jr.', 'Luka Doncic']);
+    assert.deepEqual(blocksOf(await run('get_projection_results', { startDate: '2019-01-01', endDate: '2019-01-31' })), []);
+  });
+});

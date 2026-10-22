@@ -189,6 +189,7 @@ class AgenticChatService {
         onThinking: (text) => callbacks.onThinking?.(`[${agentName}] ${text}`),
         onToolCall: callbacks.onToolCall,
         onToolResult: callbacks.onToolResult,
+        onUiBlock: callbacks.onUiBlock,
         onIteration: callbacks.onIteration
       });
 
@@ -216,13 +217,14 @@ class AgenticChatService {
       onThinking,
       onToolCall,
       onToolResult,
+      onUiBlock,
       onAgentSpawn,
       onAgentComplete,
       onMessage,
       onIteration
     } = options;
 
-    const callbacks = { onThinking, onToolCall, onToolResult, onAgentSpawn, onAgentComplete, onMessage, onIteration };
+    const callbacks = { onThinking, onToolCall, onToolResult, onUiBlock, onAgentSpawn, onAgentComplete, onMessage, onIteration };
     const context = { slateId, chatHistory, sessionId };
 
     // Build messages array
@@ -441,16 +443,18 @@ class AgenticChatService {
   }
 
   /**
-   * Save a message to the database
+   * Save a message to the database (uiBlocks: the assistant message's
+   * streamed result blocks, chatTools/uiBlocks.js)
    */
-  async saveMessage(sessionId, role, content, metadata = null) {
+  async saveMessage(sessionId, role, content, metadata = null, uiBlocks = null) {
     try {
       const metadataStr = metadata ? JSON.stringify(metadata) : null;
+      const uiBlocksStr = uiBlocks?.length ? JSON.stringify(uiBlocks) : null;
 
       await db.run(
-        `INSERT INTO chat_messages (session_id, role, content, metadata, created_at)
-         VALUES (?, ?, ?, ?, datetime('now'))`,
-        sessionId, role, content, metadataStr
+        `INSERT INTO chat_messages (session_id, role, content, metadata, ui_blocks, created_at)
+         VALUES (?, ?, ?, ?, ?, datetime('now'))`,
+        sessionId, role, content, metadataStr, uiBlocksStr
       );
 
       // Update session timestamp
@@ -472,7 +476,7 @@ class AgenticChatService {
   async getChatHistory(sessionId, limit = 50) {
     try {
       const messages = await db.all(
-        `SELECT id, role, content, metadata, created_at
+        `SELECT id, role, content, metadata, ui_blocks, created_at
          FROM chat_messages
          WHERE session_id = ?
          ORDER BY created_at ASC
@@ -482,9 +486,10 @@ class AgenticChatService {
 
       return {
         success: true,
-        messages: messages.map(m => ({
+        messages: messages.map(({ ui_blocks, ...m }) => ({
           ...m,
-          metadata: m.metadata ? JSON.parse(m.metadata) : null
+          metadata: m.metadata ? JSON.parse(m.metadata) : null,
+          uiBlocks: ui_blocks ? JSON.parse(ui_blocks) : []
         }))
       };
     } catch (error) {

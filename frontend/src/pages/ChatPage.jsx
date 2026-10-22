@@ -29,7 +29,7 @@ export default function ChatPage() {
   const inputRef = useRef(null);
 
   const stream = useAgentStream();
-  const { isStreaming, message: streamedText, error: streamError, metadata, timeline, startStream, cancelStream, reset: resetStream } = stream;
+  const { isStreaming, message: streamedText, error: streamError, metadata, timeline, uiBlocks, startStream, cancelStream, reset: resetStream } = stream;
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -50,6 +50,8 @@ export default function ChatPage() {
           maxIterationsReached: metadata.maxIterationsReached,
         },
         timeline,
+        // Same shape session history returns; without blocks the markdown is the answer
+        uiBlocks,
         created_at: new Date().toISOString(),
       },
     ]);
@@ -58,7 +60,7 @@ export default function ChatPage() {
       refresh();
     }
     resetStream();
-  }, [isStreaming, streamedText, metadata, timeline, setActiveSessionId, refresh, resetStream]);
+  }, [isStreaming, streamedText, metadata, timeline, uiBlocks, setActiveSessionId, refresh, resetStream]);
 
   useEffect(() => {
     if (!streamError) return;

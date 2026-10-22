@@ -14,6 +14,8 @@
  * - get_projection_results    resultsService.getResults / getPlayerResults
  *
  * Slate tools default to the latest slate. Rates are fractions (0.31 = 31%).
+ * Successful results carry ui blocks (uiBlocks.js) under a symbol key the
+ * LLM never sees.
  */
 
 import slateModel from '../../models/slateModel.js';
@@ -26,6 +28,7 @@ import { resolvePlayer } from './historyTools.js';
 import { canonicalTeam } from '../../utils/playerKey.js';
 import { getCurrentSeason } from '../../utils/season.js';
 import { resolveSite } from '../../utils/resolveSite.js';
+import { withUiBlocks } from './uiBlockBuilders.js';
 
 export const RESEARCH_TOOL_NAMES = Object.freeze([
   'get_archetype_matchups',
@@ -506,7 +509,7 @@ export function createResearchTools() {
     execute: async (args = {}) => {
       console.log(`\n🔎 [research] ${def.name}`, JSON.stringify(args));
       try {
-        return await handler(args);
+        return await withUiBlocks(def.name, await handler(args), args);
       } catch (error) {
         console.error(`❌ ${def.name} error:`, error);
         return { success: false, message: error.message };

@@ -12,6 +12,7 @@ import { migrateSyncRuns } from './syncRunMigrations.js';
 import { migratePlayerArchetypes } from './archetypeMigrations.js';
 import { migrateTeamArchetypeDefense } from './archetypeDefenseMigrations.js';
 import { migrateAgentValueBacktests } from './agentEvalMigrations.js';
+import { migrateChatUiBlocks } from './chatMigrations.js';
 
 /**
  * Create all database tables
@@ -63,6 +64,8 @@ export const createTables = async (db) => {
   await migratePlayerSettings(db);
   // agent_value_backtests (chat agent value picks vs baselines, scripts/agent-value-backtest.js)
   await migrateAgentValueBacktests(db);
+  // chat_messages.ui_blocks (typed result blocks streamed with assistant messages)
+  await migrateChatUiBlocks(db);
 };
 
 /**
