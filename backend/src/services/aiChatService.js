@@ -8,6 +8,7 @@ import { fileURLToPath } from 'url';
 import db, { DATABASE_TYPE } from '../config/database.js';
 import optimizerService from './optimizerService.js';
 import { createHistoryTools } from './chatTools/historyTools.js';
+import { createResearchTools } from './chatTools/researchTools.js';
 import { SITE_KEYS } from '../config/sites.js';
 import { resolveSite } from '../utils/resolveSite.js';
 import { getCurrentSeason } from '../utils/season.js';
@@ -217,6 +218,14 @@ ${schemaDoc}
 - Format lineup results clearly with positions, salaries, and projections
 - Include strategic rationale: WHY you made certain selections
 
+**Tool Choice (dedicated tools first, sql_query only as a fallback):**
+- Tonight's best matchups: get_archetype_matchups (adjusted edge = matchup x minutes x crowding)
+- A defense's strengths/weaknesses: get_team_defense_profile
+- A player's role, usage, archetype: get_player_profile (rates are fractions: 0.28 = 28%)
+- Injuries / who benefits: get_missing_players, get_usage_bumps, get_usage_without_teammate
+- Form: get_streaks_and_consistency, get_player_history
+- Past results: score_lineup (a lineup on a date), get_projection_results (projection accuracy)
+
 **Important Notes:**
 - ALWAYS use tools to get actual data - never make up stats or player names
 - When users ask to "lock" or "build around" players, extract their names and use the lineup_builder tool
@@ -232,7 +241,7 @@ ${schemaDoc}
       // SQL Query Tool
       new DynamicStructuredTool({
         name: 'sql_query',
-        description: 'Execute SQL queries against the NBA DFS database. Use this to query player stats, Vegas lines, recent performance, or any data analysis. Returns rows as JSON array.',
+        description: 'FALLBACK: execute SQL queries against the NBA DFS database, only when no dedicated tool (get_archetype_matchups, get_player_profile, get_team_defense_profile, get_usage_bumps, score_lineup, get_player_history, ...) answers the question. Returns rows as JSON array.',
         schema: z.object({
           query: z.string().describe('SQL SELECT query to execute'),
           explanation: z.string().describe('Brief explanation of what this query does'),
@@ -446,8 +455,8 @@ ${schemaDoc}
         },
       }),
 
-      // Historical tools shared with AnalystAgent
-      ...createHistoryTools().map(tool => ({
+      // Research and historical tools shared with ResearchAgent / AnalystAgent
+      ...[...createResearchTools(), ...createHistoryTools()].map(tool => ({
         ...tool,
         func: async (args) => JSON.stringify(await tool.execute(args), null, 2),
       })),

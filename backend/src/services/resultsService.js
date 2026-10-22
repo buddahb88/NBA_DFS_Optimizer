@@ -256,4 +256,82 @@ export async function getResults(options = {}) {
   };
 }
 
-export default { getResults, getPlayerResults };
+/**
+ * Results for specific players on one date, whether or not they were on a
+ * saved slate. Snapshot players come from getPlayerResults (salary,
+ * projection, value); the rest are built from the box score and
+ * game_player_status the same way, with no salary or projection. A player
+ * whose team has no box score that date is NO_GAME, or PENDING when the date
+ * is after the latest box score. Returns rows in playerKeys order, with
+ * `onSnapshot` marking the snapshot ones.
+ * @param {Object} options - { playerKeys, date, site }
+ */
+export async function getPlayerResultsOnDate({ playerKeys, date, site: requestedSite } = {}) {
+  const site = getSiteConfig(requestedSite || DEFAULT_SITE).key;
+  const keys = [...new Set(playerKeys)];
+  if (keys.length === 0) return [];
+  const marks = keys.map(() => '?').join(', ');
+
+  const snapshots = new Map(
+    (await getPlayerResults({ from: date, to: date, site })).filter(r => keys.includes(r.playerKey)).map(r => [r.playerKey, r])
+  );
+  const missing = keys.filter(k => !snapshots.has(k));
+  const built = new Map();
+  if (missing.length > 0) {
+    const missingMarks = missing.map(() => '?').join(', ');
+    const [box, statuses, lastTeams, latest, teamsInBox] = await Promise.all([
+      db.all(`
+        SELECT player_key, player_name, team, opponent, position, minutes, dk_fantasy_points, fd_fantasy_points, yahoo_fantasy_points
+        FROM historical_games WHERE game_date = ? AND player_key IN (${missingMarks})
+        ORDER BY minutes DESC
+      `, date, ...missing),
+      db.all(`SELECT player_key, player_name, team, status, reason FROM game_player_status WHERE game_date = ? AND player_key IN (${missingMarks})`,
+        date, ...missing),
+      // Team as of the date, for players with neither a box row nor a listing
+      db.all(`
+        SELECT h.player_key, h.team, h.player_name FROM historical_games h
+        JOIN (SELECT player_key, MAX(game_date) AS d FROM historical_games
+              WHERE game_date <= ? AND player_key IN (${missingMarks}) GROUP BY player_key) x
+          ON x.player_key = h.player_key AND x.d = h.game_date
+      `, date, ...missing),
+      db.get('SELECT MAX(game_date) AS d FROM historical_games'),
+      loadTeamsInBox(date, date)
+    ]);
+    const first = (rows) => {
+      const m = new Map();
+      for (const r of rows) if (!m.has(r.player_key)) m.set(r.player_key, r);
+      return m;
+    };
+    const boxBy = first(box);
+    const statusBy = first(statuses);
+    const teamBy = first(lastTeams);
+    const afterData = !latest?.d || date > toDateStr(latest.d);
+
+    for (const key of missing) {
+      const b = boxBy.get(key);
+      const s = statusBy.get(key);
+      const t = teamBy.get(key);
+      const row = buildResultRow({
+        site, game_date: date, slate_id: null, player_key: key,
+        player_name: b?.player_name ?? s?.player_name ?? t?.player_name ?? key,
+        team: b?.team ?? s?.team ?? t?.team ?? null,
+        opponent: b?.opponent ?? null,
+        position: b?.position ?? null,
+        has_box_row: b ? 1 : 0,
+        actual_minutes: b?.minutes ?? null,
+        dk_fantasy_points: b?.dk_fantasy_points, fd_fantasy_points: b?.fd_fantasy_points, yahoo_fantasy_points: b?.yahoo_fantasy_points,
+        box_status: s?.status ?? null,
+        box_reason: s?.reason ?? null
+      }, { teamsInBox });
+      if (row.status === 'PENDING' && !afterData) {
+        row.status = 'NO_GAME';
+        row.statusReason = 'No box score for his team on this date';
+      }
+      built.set(key, row);
+    }
+  }
+
+  return keys.map(k => (snapshots.has(k) ? { ...snapshots.get(k), onSnapshot: true } : { ...built.get(k), onSnapshot: false }));
+}
+
+export default { getResults, getPlayerResults, getPlayerResultsOnDate };

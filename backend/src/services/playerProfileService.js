@@ -171,6 +171,37 @@ export async function refreshSeasonProfiles(season) {
   return { season, players: rows.length, games: gameRows.length };
 }
 
+// ---------------------------------------------------------------------------
+// Reads (chat tools)
+// ---------------------------------------------------------------------------
+
+const READ_PROFILES_SQL = `
+  SELECT sp.season, sp.player_key, sp.player_name, sp.team, sp.teams, sp.position, sp.games, sp.starts, sp.minutes_pg,
+         sp.usg_pct, sp.ast_pct, sp.reb_pct, sp.stl_pct, sp.blk_pct, sp.three_pa_rate, sp.ts_pct,
+         sp.pts_per36, sp.reb_per36, sp.ast_per36, sp.fg3m_per36, sp.dk_fppm, sp.fd_fppm,
+         a.archetype, a.secondary_archetype
+  FROM player_season_profiles sp
+  LEFT JOIN player_archetypes a ON a.season = sp.season AND a.player_key = sp.player_key
+  WHERE sp.player_key = ?`;
+
+/** Stored profiles (with archetypes) for one player_key, newest season first; `seasons` filters. */
+export async function getPlayerProfiles(playerKey, { seasons } = {}) {
+  const list = Array.isArray(seasons) ? seasons.filter(Boolean) : [];
+  const where = list.length ? ` AND sp.season IN (${list.map(() => '?').join(', ')})` : '';
+  return db.all(`${READ_PROFILES_SQL}${where} ORDER BY sp.season DESC`, playerKey, ...list);
+}
+
+/** Regular-season games so far (minutes > 0) for one player in `season`. */
+export async function getSeasonToDate(playerKey, season) {
+  return db.get(`
+    SELECT COUNT(*) AS games, SUM(CASE WHEN is_starter = 1 THEN 1 ELSE 0 END) AS starts,
+           AVG(minutes) AS minutes_pg, AVG(dk_fantasy_points) AS dk_avg, AVG(fd_fantasy_points) AS fd_avg,
+           MAX(game_date) AS last_game
+    FROM historical_games
+    WHERE player_key = ? AND season = ? AND COALESCE(season_type, 'regular') = 'regular' AND minutes > 0
+  `, playerKey, season);
+}
+
 /** Refresh several seasons (default: FIRST_PROFILE_SEASON through the current one, oldest first). */
 export async function refreshProfiles(seasons = listSeasons(FIRST_PROFILE_SEASON).reverse()) {
   const results = [];

@@ -272,7 +272,8 @@ describe('shared by both chat paths', () => {
       assert.ok(chatNames.includes(name), `aiChatService has ${name}`);
       assert.ok(analystNames.includes(name), `AnalystAgent has ${name}`);
     }
-    assert.deepEqual([...analystNames].sort(), [...HISTORY_TOOL_NAMES].sort());
+    const { RESEARCH_TOOL_NAMES } = await import('../src/services/chatTools/researchTools.js');
+    assert.deepEqual([...analystNames].sort(), [...HISTORY_TOOL_NAMES, ...RESEARCH_TOOL_NAMES].sort());
     // aiChatService hands the shared JSON schema to OpenAI unchanged
     const chatTool = aiChatService.createTools().find(t => t.name === 'get_usage_without_teammate');
     const fn = aiChatService.convertToolToFunction(chatTool);

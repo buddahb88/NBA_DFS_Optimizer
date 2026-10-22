@@ -10,6 +10,7 @@
 
 import BaseAgent from './BaseAgent.js';
 import { createHistoryTools } from '../services/chatTools/historyTools.js';
+import { createResearchTools } from '../services/chatTools/researchTools.js';
 
 const SYSTEM_PROMPT = `You are an NBA analytics expert specializing in DFS insights.
 
@@ -37,6 +38,12 @@ ROLE AND MATCHUP TABLES (join on player_key and season):
 - player_archetypes: per (season, player_key) - archetype, secondary_archetype (primary_creator, point_forward, scoring_guard, bench_scorer, stretch_big, rim_running_big, three_and_d_wing, spot_up_shooter, role_player, unclassified)
 - team_archetype_defense: per (season, site, group_by 'archetype'/'position', team = defense, group_key) - fp_over_expectation = fantasy points per player-game allowed above (+) / below (-) what those players normally score, shrunk toward 0 when games are few; pts/reb/ast/fg3m/stocks_delta likewise. Always filter season, site and group_by
 - slate_player_snapshots: past slates per (game_date, site, slate_id, player_key) - salary, projected_points, rostership (projected ownership)
+
+TOOLS FIRST (query_historical_data only for what they do not cover):
+- Tonight's archetype matchups: get_archetype_matchups; one defense: get_team_defense_profile
+- Role / usage / archetype by season: get_player_profile (rates are fractions)
+- Teammate out: get_usage_without_teammate, analyze_roster_context; slate-wide: get_usage_bumps, get_missing_players
+- Form: get_player_history, get_streaks_and_consistency; past nights: score_lineup, get_projection_results
 
 PLAYER NAMES:
 - Resolve names with the tools (get_player_history, compare_players, ...); they map accents, punctuation and Jr./III to player_key and return closest matches when a name is unknown
@@ -72,7 +79,7 @@ class AnalystAgent extends BaseAgent {
       description: 'Historical analysis and matchup insights specialist',
       maxIterations: 5,
       systemPrompt: SYSTEM_PROMPT,
-      tools: createHistoryTools()
+      tools: [...createResearchTools(), ...createHistoryTools()]
     });
   }
 }

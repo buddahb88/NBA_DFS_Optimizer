@@ -10,6 +10,7 @@
 
 import BaseAgent from './BaseAgent.js';
 import db from '../config/database.js';
+import { createResearchTools } from '../services/chatTools/researchTools.js';
 
 const SYSTEM_PROMPT = `You are a DFS research specialist with expertise in database queries and data retrieval.
 
@@ -18,6 +19,15 @@ Your job is to:
 2. Search for players by name (partial matching supported)
 3. Get current slate information
 4. Provide accurate, structured data for analysis
+
+USE THE DEDICATED TOOLS FIRST; sql_query is only a fallback for questions they do not cover:
+- get_archetype_matchups: tonight's best archetype matchups, ranked by adjusted edge (matchup x minutes x crowding)
+- get_team_defense_profile: one defense vs each archetype and G/F/C (fp over expectation, per-stat deltas, rank, games)
+- get_player_profile: role by season - archetype, usage/assist/rebound rates (fractions), minutes, per-36, fppm
+- get_missing_players / get_usage_bumps: regulars missing from the slate and who benefits
+- get_streaks_and_consistency: hot, cold, consistency, boom_bust
+- score_lineup: actual points for players on a past date; get_projection_results: projection accuracy
+- search_players, get_slate_summary, get_game_environment: tonight's slate
 
 Database Tables Available:
 - players: Current slate player data (name, salary, projected_points, position, team, opponent, vegas data, advanced metrics)
@@ -78,7 +88,7 @@ class ResearchAgent extends BaseAgent {
     return [
       {
         name: 'sql_query',
-        description: 'Execute SQL SELECT queries against the NBA DFS database. Returns data as JSON array.',
+        description: 'FALLBACK ONLY: execute SQL SELECT queries against the NBA DFS database when no dedicated tool answers the question. Returns data as JSON array.',
         parameters: {
           type: 'object',
           properties: {
@@ -386,7 +396,9 @@ class ResearchAgent extends BaseAgent {
             }))
           };
         }
-      }
+      },
+
+      ...createResearchTools()
     ];
   }
 }
