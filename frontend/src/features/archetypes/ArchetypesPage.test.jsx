@@ -27,11 +27,27 @@ const DEFENSE = {
   season: '2025-26', grouping: 'archetype', lastNGames: null,
   rows: [{ team: 'NYK', group_key: 'scoring_guard', fp_over_expectation: 2.4, games: 8, player_games: 12 }],
 }
+const EDGE = (adjusted_edge, extra = {}) => ({
+  adjusted_edge, flags: [], last_team: null, projected_minutes: 34,
+  minutes: { projected: 34, last_season: 33, current: null, current_games: 0, change: 1, basis: 'projected' },
+  crowding: { count: 0, teammates: [] },
+  components: { volume: 1, role_factor: 1, minutes_confidence: 1, crowding_factor: 1 },
+  ...extra,
+})
 const TONIGHT = {
   season: '2025-26', grouping: 'archetype', slatePlayers: 3, matchedPlayers: 2, defenseRows: 1,
+  edgeConfig: { fullMinutes: 32, penalties: { new_team: 0.85, role_down: 0.8, role_up: 0.9, no_history: 0.85 }, crowdingPenalty: 0.25 },
   players: [
-    { player_id: '1', name: 'Guard One', position: 'PG', team: 'MIA', opponent: 'NYK', label: 'Scoring Guard / Wing', salary: 8000, projected_points: 40, matchup_delta: 2.4, rank: 1, teams: 30 },
-    { player_id: '2', name: 'Wing Two', position: 'SF', team: 'BOS', opponent: 'PHX', label: 'Scoring Guard / Wing', salary: 9000, projected_points: 30, matchup_delta: 1.1, rank: 4, teams: 30 },
+    {
+      player_id: '1', name: 'Guard One', position: 'PG', team: 'MIA', opponent: 'NYK', label: 'Scoring Guard / Wing', salary: 8000, projected_points: 40, matchup_delta: 2.4, rank: 1, teams: 30,
+      ...EDGE(0.8, {
+        projected_minutes: 24, last_team: 'BOS', flags: ['new_team', 'role_down', 'crowded'],
+        minutes: { projected: 24, last_season: 32.1, current: null, current_games: 0, change: -8.1, basis: 'projected' },
+        crowding: { count: 1, teammates: ['Guard Three'] },
+        components: { volume: 0.75, role_factor: 0.68, minutes_confidence: 0.51, crowding_factor: 0.8 },
+      }),
+    },
+    { player_id: '2', name: 'Wing Two', position: 'SF', team: 'BOS', opponent: 'PHX', label: 'Scoring Guard / Wing', salary: 9000, projected_points: 30, matchup_delta: 1.1, rank: 4, teams: 30, ...EDGE(1.1) },
   ],
 }
 const GAMES = {
@@ -105,15 +121,47 @@ describe('ArchetypesPage', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Tonight' }))
     const names = async () => (await screen.findAllByRole('row')).slice(1).map((r) => within(r).getAllByRole('cell')[0].textContent)
     expect(await screen.findByText('Guard One')).toBeInTheDocument()
+    // Adjusted edge first by default; raw matchup on the toggle
+    expect(await names()).toEqual(['Wing Two', 'Guard One'])
+    fireEvent.click(screen.getByRole('tab', { name: 'Raw matchup' }))
     expect(await names()).toEqual(['Guard One', 'Wing Two'])
+    fireEvent.click(screen.getByRole('tab', { name: 'Adjusted edge' }))
+    expect(await names()).toEqual(['Wing Two', 'Guard One'])
     expect(screen.getByText('$8,000')).toBeInTheDocument()
     expect(screen.getByText('+2.40')).toBeInTheDocument()
+    expect(screen.getByText('+0.80')).toBeInTheDocument()
+    // Minutes: projection with change vs last season
+    expect(screen.getByText('-8.1')).toBeInTheDocument()
 
     // Numeric columns sort high-to-low first
     fireEvent.click(screen.getByRole('button', { name: 'Salary' }))
     expect(await names()).toEqual(['Wing Two', 'Guard One'])
     fireEvent.click(screen.getByRole('button', { name: 'Salary' }))
     expect(await names()).toEqual(['Guard One', 'Wing Two'])
+  })
+
+  it('flags new team, role and crowding with explanatory tooltips', async () => {
+    renderPage()
+    fireEvent.click(screen.getByRole('tab', { name: 'Tonight' }))
+    const row = (await screen.findByText('Guard One')).closest('tr')
+    expect(within(row).getByText('New team')).toBeInTheDocument()
+    expect(within(row).getByText('Role ↓')).toBeInTheDocument()
+    const crowded = within(row).getByText('Crowded')
+    fireEvent.mouseEnter(crowded.parentElement)
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('Shares Scoring Guard / Wing vs NYK with Guard Three: edge x0.80.')
+    fireEvent.mouseLeave(crowded.parentElement)
+
+    fireEvent.mouseEnter(within(row).getByText('New team').parentElement)
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('Was BOS last season (32.1 min).')
+    fireEvent.mouseLeave(within(row).getByText('New team').parentElement)
+
+    // The edge explains itself
+    fireEvent.mouseEnter(within(row).getByText('+0.80'))
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('+2.40 matchup x 0.75 minutes (24 min) x 0.68 role x 0.80 crowding = +0.80')
+
+    // A steady player has no badges
+    const steady = screen.getByText('Wing Two').closest('tr')
+    expect(within(steady).queryByText('Crowded')).not.toBeInTheDocument()
   })
 
   it('says when tonight is tiered on last season because the current one is thin', async () => {

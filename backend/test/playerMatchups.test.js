@@ -107,6 +107,8 @@ describe('GET /api/players/:slateId with archetype matchups', () => {
     assert.deepEqual(guard.matchup, {
       season: SEASON, site: 'fanduel', grouping: 'archetype', group_key: 'scoring_guard', label: 'Scoring Guard / Wing',
       opponent: 'NYK', delta: 3, rank: 1, teams: 3, grade: 'A', games: 8,
+      // No projected minutes (0.5 volume) and no last-season profile (x0.85)
+      adjusted_edge: 1.275, edge_flags: ['no_history'],
     });
 
     // Unclassified this season -> last season's archetype

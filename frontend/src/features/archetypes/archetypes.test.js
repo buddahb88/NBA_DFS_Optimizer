@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildHeatmap, cellColor, defenseParams, formatDelta, STATS } from './archetypes'
+import { buildHeatmap, cellColor, defenseParams, edgeBadges, edgeExplanation, formatDelta, STATS, TONIGHT_SORTS, tonightSorting } from './archetypes'
 
 const DEFINITIONS = {
   archetypes: [
@@ -77,5 +77,54 @@ describe('defenseParams', () => {
 
   it('every stat maps to a defense column', () => {
     expect(STATS.map((s) => s.value)).toEqual(['fp', 'pts', 'reb', 'ast', 'fg3m'])
+  })
+})
+
+const EDGE_CONFIG = { fullMinutes: 32, penalties: { new_team: 0.85, role_down: 0.8, role_up: 0.9, no_history: 0.85 }, crowdingPenalty: 0.25 }
+const edgePlayer = (extra = {}) => ({
+  name: "Kel'el Ware", team: 'MIL', opponent: 'WAS', label: 'Stretch Big', matchup_delta: 4.449, adjusted_edge: 2.363,
+  projected_minutes: 25, last_team: 'MIA', flags: ['new_team', 'crowded'],
+  minutes: { projected: 25, last_season: 22.2, current: null, current_games: 0, change: 2.8, basis: 'projected' },
+  crowding: { count: 1, teammates: ['Myles Turner'] },
+  components: { volume: 0.781, role_factor: 0.85, minutes_confidence: 0.664, crowding_factor: 0.8 },
+  ...extra,
+})
+
+describe('tonight edge helpers', () => {
+  it('sorts by adjusted edge by default, raw matchup on request', () => {
+    expect(tonightSorting('adjusted')).toEqual([{ id: 'adjusted_edge', desc: true }])
+    expect(tonightSorting('raw')).toEqual([{ id: 'matchup_delta', desc: true }])
+    expect(TONIGHT_SORTS.map((s) => s.value)).toEqual(['adjusted', 'raw'])
+  })
+
+  it('builds a badge with a tooltip per flag', () => {
+    const badges = edgeBadges(edgePlayer(), EDGE_CONFIG)
+    expect(badges.map((b) => [b.key, b.label, b.tone])).toEqual([
+      ['new_team', 'New team', 'info'],
+      ['crowded', 'Crowded', 'caution'],
+    ])
+    expect(badges[0].tip).toBe('Was MIA last season (22.2 min). Role on a new team is uncertain: edge x0.85.')
+    expect(badges[1].tip).toBe('Shares Stretch Big vs WAS with Myles Turner: edge x0.80.')
+  })
+
+  it('role badges explain the minutes change', () => {
+    const down = edgeBadges(edgePlayer({
+      flags: ['role_down'],
+      minutes: { projected: 24, last_season: 32.1, current: 22, current_games: 2, change: -8.1, basis: 'projected' },
+    }), EDGE_CONFIG)
+    expect(down).toEqual([{
+      key: 'role_down', label: 'Role ↓', tone: 'negative',
+      tip: 'Projected 24 min vs 32.1 last season (-8.1); 22.0 min over 2 games this season. Edge x0.80.',
+    }])
+    const up = edgeBadges(edgePlayer({ flags: ['role_up', 'no_history'] }), EDGE_CONFIG)
+    expect(up.map((b) => b.label)).toEqual(['Role ↑', 'No history'])
+    expect(up[1].tip).toBe('No last-season profile to check minutes or role against: edge x0.85.')
+  })
+
+  it('explains the adjusted edge from its components', () => {
+    expect(edgeExplanation(edgePlayer())).toBe(
+      '+4.45 matchup x 0.78 minutes (25 min) x 0.85 role x 0.80 crowding = +2.36',
+    )
+    expect(edgeExplanation(edgePlayer({ adjusted_edge: null }))).toBe(null)
   })
 })

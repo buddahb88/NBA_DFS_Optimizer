@@ -132,6 +132,52 @@ describe('GET /tonight', () => {
     assert.deepEqual(body.players.map(p => [p.name, p.group_key, p.matchup_delta]), [['Guard One', 'G', 1.5]]);
   });
 
+  test('adjusted edge: minutes, new team and crowding, best adjusted first', async () => {
+    await db.run(`INSERT INTO slates (slate_id, name, site) VALUES ('s3', 'Edge', 'fanduel')`);
+    const player = (id, name, minutes) => db.run(
+      `INSERT INTO players (slate_id, player_id, name, team, opponent, position, salary, projected_points, projected_minutes)
+       VALUES ('s3', ?, ?, 'MIL', 'NYK', 'PG', 6000, 30, ?)`, id, name, minutes);
+    await player('1', 'Bench Guard', 20);
+    await player('2', 'New Guard', 33);
+    await player('3', 'Steady Guard', 34);
+    await db.run(`INSERT INTO player_archetypes (season, player_key, archetype) VALUES
+      (?, 'bench guard', 'scoring_guard'), (?, 'new guard', 'scoring_guard'), (?, 'steady guard', 'scoring_guard')`,
+    SEASON, SEASON, SEASON);
+    // Last season (relative to the archetype season) profiles
+    await db.run(`INSERT INTO player_season_profiles (season, player_key, player_name, team, games, minutes_pg) VALUES
+      (?, 'bench guard', 'Bench Guard', 'MIL', 60, 28), (?, 'new guard', 'New Guard', 'MIA', 60, 31),
+      (?, 'steady guard', 'Steady Guard', 'MIL', 70, 33)`, PRIOR, PRIOR, PRIOR);
+    // Minutes so far this season count only before `date`
+    await db.run(`INSERT INTO historical_games (game_id, game_date, season, season_type, player_key, player_name, team, opponent, minutes)
+      VALUES ('g1', '2026-01-02', ?, 'regular', 'steady guard', 'Steady Guard', 'MIL', 'BOS', 35),
+             ('g2', '2026-01-04', ?, 'regular', 'steady guard', 'Steady Guard', 'MIL', 'BOS', 35),
+             ('g3', '2026-01-09', ?, 'regular', 'steady guard', 'Steady Guard', 'MIL', 'BOS', 10)`, SEASON, SEASON, SEASON);
+
+    const body = await (await fetch(`${baseUrl}/tonight?slateId=s3&season=${SEASON}&date=2026-01-08`)).json();
+    assert.deepEqual(body.players.map(p => p.name), ['Steady Guard', 'New Guard', 'Bench Guard']);
+    assert.equal(body.edgeConfig.fullMinutes, 32);
+    const by = Object.fromEntries(body.players.map(p => [p.name, p]));
+
+    const steady = by['Steady Guard'];
+    assert.equal(steady.matchup_delta, 3);
+    assert.equal(steady.minutes.current, 35);
+    assert.equal(steady.minutes.current_games, 2);
+    assert.equal(steady.crowding.count, 2);
+    assert.deepEqual(steady.flags, ['crowded']);
+    assert.equal(steady.components.crowding_factor, 0.667);
+    assert.equal(steady.adjusted_edge, 2.001);
+
+    assert.equal(by['New Guard'].new_team, true);
+    assert.equal(by['New Guard'].last_team, 'MIA');
+    assert.deepEqual(by['New Guard'].flags, ['new_team', 'crowded']);
+
+    const bench = by['Bench Guard'];
+    assert.equal(bench.role, 'role_down');
+    assert.equal(bench.minutes.change, -8);
+    assert.equal(bench.components.minutes_confidence, 0.5);
+    assert.ok(bench.adjusted_edge < by['New Guard'].adjusted_edge);
+  });
+
   test('validates params', async () => {
     assert.equal((await fetch(`${baseUrl}/tonight?season=${SEASON}`)).status, 400);
     assert.equal((await fetch(`${baseUrl}/tonight?slateId=s1&stat=blk`)).status, 400);

@@ -36,6 +36,7 @@ import { SITE_KEYS, isValidSite } from '../config/sites.js';
 import { getCurrentSeason } from '../utils/season.js';
 import { canonicalTeam, playerKey } from '../utils/playerKey.js';
 import { resolveSite } from '../utils/resolveSite.js';
+import { MATCHUP_EDGE_CONFIG, loadEdgeContext, scoreMatchupEdges } from './archetypeMatchupService.js';
 
 export const DEFAULT_DEFENSE_CONFIG = {
   baselinePriorMinutes: 100,
@@ -508,14 +509,14 @@ export function weakTiers(rows, stat = 'fp') {
 }
 
 const SLATE_SQL = 'SELECT slate_id FROM slates WHERE slate_id = ?';
-const SLATE_PLAYERS_SQL = `SELECT player_id, name, team, opponent, position, salary, projected_points, injury_status
+const SLATE_PLAYERS_SQL = `SELECT player_id, name, team, opponent, position, salary, projected_points, projected_minutes, injury_status
   FROM players WHERE slate_id = ?`;
 
 /**
  * player_key -> archetype for `season`, falling back to the prior season's
  * when the row is missing or unclassified (as the defense aggregation does).
  */
-async function loadArchetypeLookup(season) {
+export async function loadArchetypeLookup(season) {
   const [current, previous] = await Promise.all([
     db.all(ARCHETYPES_SQL, season),
     db.all(ARCHETYPES_SQL, previousSeason(season)),
@@ -537,9 +538,11 @@ export function qualifiedDefenses(rows, minGames = THIN_SEASON.minGames) {
 
 /**
  * Slate players whose opponent is in the weak tier vs their archetype (or
- * G/F/C), with salary, projection and the matchup delta for `stat`, best
- * matchup first. Archetype falls back to the prior season like the defense
- * aggregation. Site defaults to the slate's.
+ * G/F/C), with salary, projection, the matchup delta for `stat` and the
+ * adjusted edge (archetypeMatchupService: minutes, role, crowding), best
+ * adjusted edge first. Archetype falls back to the prior season like the
+ * defense aggregation. Site defaults to the slate's. `date` (YYYY-MM-DD,
+ * default today) bounds the current-season minutes so far.
  *
  * Without an explicit season, a thin current season is tiered on the prior
  * season instead (getDefense seasonFallback; `fallback` says so); archetypes
@@ -549,6 +552,7 @@ export async function getTonight(query = {}) {
   if (!query.slateId) throw new DefenseError('slateId is required');
   const stat = query.stat || 'fp';
   if (!STAT_COLUMNS[stat]) throw new DefenseError(`stat must be one of: ${Object.keys(STAT_COLUMNS).join(', ')}`);
+  const asOfDate = checkDate(query.date, 'date') ?? undefined;
   if (!(await db.get(SLATE_SQL, query.slateId))) throw new DefenseError(`Slate ${query.slateId} not found`, 404);
 
   const { site, error } = await resolveSite(query.site ? (SITE_ALIASES[String(query.site).toLowerCase()] || query.site) : null, query.slateId);
@@ -559,23 +563,51 @@ export async function getTonight(query = {}) {
   const archetypeSeason = fallback?.from ?? defense.season;
   const { season, grouping } = defense;
 
-  const [players, archetypeOf] = await Promise.all([
+  const [players, archetypeOf, edgeContext] = await Promise.all([
     db.all(SLATE_PLAYERS_SQL, query.slateId),
     loadArchetypeLookup(archetypeSeason),
+    loadEdgeContext({ season: archetypeSeason, lastSeason: previousSeason(archetypeSeason), asOfDate }),
   ]);
 
-  const tiers = weakTiers(defense.rows, stat);
-  const column = STAT_COLUMNS[stat];
+  const { matchedPlayers, players: out } = buildTonight(players, {
+    tiers: weakTiers(defense.rows, stat), column: STAT_COLUMNS[stat], grouping, archetypeOf, edgeContext,
+  });
+
+  return {
+    slateId: query.slateId, season, site, grouping, stat, fallback,
+    lastNGames: defense.lastNGames, source: defense.source, edgeConfig: MATCHUP_EDGE_CONFIG,
+    slatePlayers: players.length, matchedPlayers, defenseRows: defense.rows.length,
+    players: out,
+  };
+}
+
+/**
+ * Tonight rows for slate `players` (players-table shape) against weak `tiers`
+ * on `column`, best adjusted edge first. Shared with the Tonight backtest
+ * (scripts/tonightEdgeBacktest.js), which feeds slate_player_snapshots rows.
+ * Returns { matchedPlayers, players }.
+ */
+export function buildTonight(players, { tiers, column, grouping, archetypeOf, edgeContext }) {
   let matchedPlayers = 0;
-  const out = [];
+  const listed = [];
+  // Every slate player is scored so crowding sees the whole roster
+  const edgeInput = [];
   for (const p of players) {
-    const archetype = archetypeOf(playerKey(p.name));
+    const key = playerKey(p.name);
+    const archetype = archetypeOf(key);
     const group = grouping === 'position' ? dvpPosition(p.position) : archetype;
+    const opponent = canonicalTeam(p.opponent);
+    const hit = group && group !== 'unclassified' ? tiers.get(group)?.get(opponent) : null;
+    edgeInput.push({ ...p, player_key: key, archetype, matchup_edge: hit ? hit.row[column] : null });
     if (!group || group === 'unclassified') continue;
     matchedPlayers += 1;
-    const opponent = canonicalTeam(p.opponent);
-    const hit = tiers.get(group)?.get(opponent);
-    if (!hit) continue;
+    if (hit) listed.push({ p, archetype, group, opponent, hit });
+  }
+  const edges = scoreMatchupEdges(edgeInput, edgeContext);
+
+  const out = [];
+  for (const { p, archetype, group, opponent, hit } of listed) {
+    const { matchup_edge, ...edge } = edges.get(p.player_id);
     out.push({
       player_id: p.player_id,
       name: p.name,
@@ -593,16 +625,13 @@ export async function getTonight(query = {}) {
       rank: hit.rank,
       teams: hit.teams,
       games: hit.row.games,
+      projected_minutes: p.projected_minutes,
+      ...edge,
     });
   }
-  out.sort((a, b) => b.matchup_delta - a.matchup_delta || n(b.projected_points) - n(a.projected_points));
-
-  return {
-    slateId: query.slateId, season, site, grouping, stat, fallback,
-    lastNGames: defense.lastNGames, source: defense.source,
-    slatePlayers: players.length, matchedPlayers, defenseRows: defense.rows.length,
-    players: out,
-  };
+  out.sort((a, b) => b.adjusted_edge - a.adjusted_edge || b.matchup_delta - a.matchup_delta
+    || n(b.projected_points) - n(a.projected_points));
+  return { matchedPlayers, players: out };
 }
 
 // ---------------------------------------------------------------------------
@@ -638,7 +667,8 @@ const matchupFrom = (hit, grouping, group, opponent, base) => ({
 /**
  * Archetype + opponent matchup per player, keyed by player_id. The matchup is
  * the opponent's FP-over-expectation cell for the player's archetype, else
- * for his G/F/C position (as dvpAdjustment looks it up), else null.
+ * for his G/F/C position (as dvpAdjustment looks it up), else null, with the
+ * adjusted edge and its flags (archetypeMatchupService).
  *
  * Season resolves like /tonight: without `season`, a thin current season
  * falls back to last season's defense; archetypes still come from the
@@ -651,9 +681,11 @@ export async function getSlateMatchups(slateId, query = {}) {
 
   const byArchetype = await getDefense({ ...base, grouping: 'archetype', seasonFallback: true });
   const { season } = byArchetype;
-  const [players, archetypeOf] = await Promise.all([
+  const archetypeSeason = byArchetype.fallback?.from ?? season;
+  const [players, archetypeOf, edgeContext] = await Promise.all([
     db.all(SLATE_PLAYERS_SQL, slateId),
-    loadArchetypeLookup(byArchetype.fallback?.from ?? season),
+    loadArchetypeLookup(archetypeSeason),
+    loadEdgeContext({ season: archetypeSeason, lastSeason: previousSeason(archetypeSeason) }),
   ]);
   const archetypeRanks = rankDefenses(byArchetype.rows);
   let positionRanks = null; // loaded on first need
@@ -680,6 +712,18 @@ export async function getSlateMatchups(slateId, query = {}) {
     }
     const posHit = positionRanks.get(position)?.get(opponent);
     if (posHit) info.matchup = matchupFrom(posHit, 'position', position, opponent, { season, site });
+  }
+
+  const edges = scoreMatchupEdges(players.map(p => {
+    const info = out.get(String(p.player_id));
+    return { ...p, player_id: String(p.player_id), player_key: playerKey(p.name), archetype: info.archetype,
+      matchup_edge: info.matchup?.delta ?? null };
+  }), edgeContext);
+  for (const [id, info] of out) {
+    if (!info.matchup) continue;
+    const edge = edges.get(id);
+    info.matchup.adjusted_edge = edge.adjusted_edge;
+    info.matchup.edge_flags = edge.flags;
   }
   return out;
 }

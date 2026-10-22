@@ -113,3 +113,65 @@ export function formatDelta(value, digits = 1) {
 }
 
 export const errorMessage = (err) => err?.response?.data?.error || err?.message || 'Request failed'
+
+// Tonight: adjusted edge (backend archetypeMatchupService) vs raw matchup
+export const TONIGHT_SORTS = [
+  { value: 'adjusted', label: 'Adjusted edge' },
+  { value: 'raw', label: 'Raw matchup' },
+]
+
+export const tonightSorting = (mode) => [{ id: mode === 'raw' ? 'matchup_delta' : 'adjusted_edge', desc: true }]
+
+const times = (x) => (x == null ? '' : ` x${Number(x).toFixed(2)}`)
+
+function roleTip(m, penalty) {
+  const parts = []
+  if (m.projected != null) parts.push(`Projected ${m.projected} min vs ${m.last_season} last season (${formatDelta(m.projected - m.last_season)})`)
+  if (m.current != null) {
+    const vs = m.projected == null ? ` vs ${m.last_season} last season` : ''
+    parts.push(`${Number(m.current).toFixed(1)} min over ${m.current_games} game${m.current_games === 1 ? '' : 's'} this season${vs}`)
+  }
+  return `${parts.join('; ')}. Edge${times(penalty)}.`
+}
+
+/**
+ * Badges for a Tonight row's flags, in flag order: [{ key, label, tone, tip }].
+ * `config` = the response's edgeConfig (penalties per flag).
+ */
+export function edgeBadges(p, config) {
+  const penalty = (flag) => config?.penalties?.[flag]
+  const m = p.minutes ?? {}
+  return (p.flags ?? []).map((flag) => {
+    switch (flag) {
+      case 'new_team':
+        return { key: flag, label: 'New team', tone: 'info', tip: `Was ${p.last_team} last season (${m.last_season} min). Role on a new team is uncertain: edge${times(penalty(flag))}.` }
+      case 'role_down':
+        return { key: flag, label: 'Role ↓', tone: 'negative', tip: roleTip(m, penalty(flag)) }
+      case 'role_up':
+        return { key: flag, label: 'Role ↑', tone: 'positive', tip: roleTip(m, penalty(flag)) }
+      case 'crowded':
+        return { key: flag, label: 'Crowded', tone: 'caution', tip: `Shares ${p.label} vs ${p.opponent} with ${p.crowding?.teammates?.join(', ')}: edge${times(p.components?.crowding_factor)}.` }
+      case 'no_history':
+        return { key: flag, label: 'No history', tone: 'neutral', tip: `No last-season profile to check minutes or role against: edge${times(penalty(flag))}.` }
+      default:
+        return { key: flag, label: flag, tone: 'neutral', tip: null }
+    }
+  })
+}
+
+const MINUTES_USED = {
+  projected: (m) => `${m.projected} min`,
+  current: (m) => `${Number(m.current).toFixed(1)} min so far`,
+  last_season: (m) => `${m.last_season} min last season`,
+}
+
+/** "+4.45 matchup x 0.78 minutes (25 min) x 0.85 role x 0.80 crowding = +2.36"; null without an edge. */
+export function edgeExplanation(p) {
+  if (p.adjusted_edge == null || !p.components) return null
+  const c = p.components
+  const used = MINUTES_USED[p.minutes?.basis]?.(p.minutes) ?? 'minutes unknown'
+  let text = `${formatDelta(p.matchup_delta, 2)} matchup x ${c.volume.toFixed(2)} minutes (${used})`
+  if (c.role_factor !== 1) text += ` x ${c.role_factor.toFixed(2)} role`
+  if (c.crowding_factor !== 1) text += ` x ${c.crowding_factor.toFixed(2)} crowding`
+  return `${text} = ${formatDelta(p.adjusted_edge, 2)}`
+}
