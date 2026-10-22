@@ -9,6 +9,7 @@
  */
 
 import OpenAI from 'openai';
+import { createClaudeClient, isClaudeEndpoint, runClaudeToolLoop, toClaudeHistory, toClaudeTool } from '../services/llm/claude.js';
 
 export default class BaseAgent {
   constructor(config) {
@@ -25,7 +26,12 @@ export default class BaseAgent {
    * Initialize OpenAI client (lazy loading)
    */
   initializeClient() {
-    if (this.client) return;
+    if (this.client || this.claudeClient) return;
+
+    if (isClaudeEndpoint()) {
+      this.claudeClient = createClaudeClient();
+      return;
+    }
 
     const apiVersion = process.env.AZURE_OPENAI_API_VERSION || '2024-04-01-preview';
     this.client = new OpenAI({
@@ -96,6 +102,10 @@ export default class BaseAgent {
     this.initializeClient();
 
     const { onThinking, onToolCall, onToolResult, onMessage, onIteration } = callbacks;
+
+    if (this.claudeClient) {
+      return this.executeWithClaude(task, context, callbacks);
+    }
 
     // Build initial messages
     const messages = [
@@ -218,6 +228,56 @@ export default class BaseAgent {
       maxIterationsReached: true,
       agent: this.name
     };
+  }
+
+  /**
+   * Same execution loop as execute(), against Claude on Azure AI Foundry
+   */
+  async executeWithClaude(task, context, callbacks) {
+    const { onThinking, onToolCall, onToolResult, onMessage, onIteration } = callbacks;
+    const toolsUsed = [];
+
+    console.log(`\n🤖 [${this.name}] Starting execution (max ${this.maxIterations} iterations)`);
+    console.log(`📝 Task: ${task.substring(0, 100)}...`);
+
+    try {
+      const result = await runClaudeToolLoop({
+        client: this.claudeClient,
+        system: this.buildSystemPrompt(context),
+        messages: [...toClaudeHistory(context.chatHistory), { role: 'user', content: task }],
+        tools: this.getOpenAITools().map(t => toClaudeTool(t.function)),
+        executeTool: async (toolName, toolArgs) => {
+          onThinking?.(`Using ${toolName} tool...`);
+          const result = await this.executeTool(toolName, toolArgs, { onToolCall, onToolResult });
+          toolsUsed.push({ name: toolName, args: toolArgs, result });
+          return result;
+        },
+        maxIterations: this.maxIterations,
+        onIteration: (i) => {
+          onIteration?.(i, this.maxIterations);
+          console.log(`\n🔄 [${this.name}] Iteration ${i}/${this.maxIterations}`);
+        },
+      });
+
+      if (result.maxIterationsReached) {
+        console.log(`⚠️ [${this.name}] Max iterations (${this.maxIterations}) reached`);
+        return {
+          success: true,
+          message: `I've gathered information but reached the iteration limit. Here's what I found so far based on ${toolsUsed.length} tool calls.`,
+          toolsUsed,
+          iterations: this.maxIterations,
+          maxIterationsReached: true,
+          agent: this.name
+        };
+      }
+
+      console.log(`✅ [${this.name}] Completed in ${result.iterations} iteration(s)`);
+      onMessage?.(result.text, true);
+      return { success: true, message: result.text, toolsUsed, iterations: result.iterations, agent: this.name };
+    } catch (error) {
+      console.error(`❌ [${this.name}] API Error:`, error);
+      return { success: false, error: error.message, toolsUsed, iterations: 0, agent: this.name };
+    }
   }
 
   /**

@@ -14,6 +14,7 @@
  */
 
 import OpenAI from 'openai';
+import { createClaudeClient, isClaudeEndpoint, runClaudeToolLoop, toClaudeHistory, toClaudeTool } from './llm/claude.js';
 import OptimizerAgent from '../agents/OptimizerAgent.js';
 import ResearchAgent from '../agents/ResearchAgent.js';
 import AnalystAgent from '../agents/AnalystAgent.js';
@@ -82,6 +83,14 @@ class AgenticChatService {
 
     if (!process.env.AZURE_OPENAI_KEY || !process.env.AZURE_OPENAI_ENDPOINT) {
       throw new Error('Azure OpenAI credentials not configured');
+    }
+
+    if (isClaudeEndpoint()) {
+      this.claudeClient = createClaudeClient();
+      this.initialized = true;
+      console.log('✅ Agentic Chat Service initialized (Claude on Azure AI Foundry)');
+      console.log(`   Agents: ${Object.keys(this.agents).join(', ')}`);
+      return;
     }
 
     const apiVersion = process.env.AZURE_OPENAI_API_VERSION || '2024-04-01-preview';
@@ -243,6 +252,10 @@ class AgenticChatService {
 
     onThinking?.('Analyzing your request...');
 
+    if (this.claudeClient) {
+      return this.chatWithClaude(message, sessionId, { maxIterations, chatHistory, context, callbacks });
+    }
+
     while (iterations < maxIterations) {
       iterations++;
       onIteration?.(iterations, maxIterations);
@@ -274,23 +287,7 @@ class AgenticChatService {
               console.error('Failed to parse tool arguments:', toolCall.function.arguments);
             }
 
-            // Stream thinking
-            if (toolName === 'delegate_to_agent') {
-              onThinking?.(`Delegating to ${toolArgs.agent} agent: ${toolArgs.task}`);
-              if (!agentsUsed.includes(toolArgs.agent)) {
-                agentsUsed.push(toolArgs.agent);
-              }
-            } else {
-              onThinking?.(`Using ${toolName}...`);
-            }
-
-            onToolCall?.(toolName, toolArgs);
-
-            // Execute tool
-            const result = await this.executeOrchestratorTool(toolName, toolArgs, context, callbacks);
-            allToolsUsed.push({ name: toolName, args: toolArgs });
-
-            onToolResult?.(toolName, JSON.parse(result), true);
+            const result = await this.runToolCall(toolName, toolArgs, context, callbacks, allToolsUsed, agentsUsed);
 
             // Add result to messages
             messages.push({
@@ -354,6 +351,70 @@ class AgenticChatService {
       iterations,
       maxIterationsReached: true
     };
+  }
+
+  /**
+   * Stream progress, execute one orchestrator tool call and record it
+   */
+  async runToolCall(toolName, toolArgs, context, callbacks, allToolsUsed, agentsUsed) {
+    const { onThinking, onToolCall, onToolResult } = callbacks;
+
+    // Stream thinking
+    if (toolName === 'delegate_to_agent') {
+      onThinking?.(`Delegating to ${toolArgs.agent} agent: ${toolArgs.task}`);
+      if (!agentsUsed.includes(toolArgs.agent)) {
+        agentsUsed.push(toolArgs.agent);
+      }
+    } else {
+      onThinking?.(`Using ${toolName}...`);
+    }
+
+    onToolCall?.(toolName, toolArgs);
+
+    const result = await this.executeOrchestratorTool(toolName, toolArgs, context, callbacks);
+    allToolsUsed.push({ name: toolName, args: toolArgs });
+
+    onToolResult?.(toolName, JSON.parse(result), true);
+    return result;
+  }
+
+  /**
+   * Same orchestration loop as chat(), against Claude on Azure AI Foundry
+   */
+  async chatWithClaude(message, sessionId, { maxIterations, chatHistory, context, callbacks }) {
+    const allToolsUsed = [];
+    const agentsUsed = [];
+
+    try {
+      const result = await runClaudeToolLoop({
+        client: this.claudeClient,
+        system: ORCHESTRATOR_SYSTEM_PROMPT,
+        messages: [...toClaudeHistory(chatHistory.slice(-10)), { role: 'user', content: message }],
+        tools: this.orchestratorTools.map(t => toClaudeTool(t.function)),
+        executeTool: (toolName, toolArgs) =>
+          this.runToolCall(toolName, toolArgs, context, callbacks, allToolsUsed, agentsUsed),
+        maxIterations,
+        onIteration: (i) => {
+          callbacks.onIteration?.(i, maxIterations);
+          console.log(`\n🔄 Orchestrator iteration ${i}/${maxIterations}`);
+        },
+      });
+
+      if (result.maxIterationsReached) {
+        console.log(`⚠️ Max iterations (${maxIterations}) reached`);
+        const partialResponse = `I've gathered information through ${allToolsUsed.length} tool calls across ${agentsUsed.length} agent(s), but reached the iteration limit. Here's what I found so far - you may want to ask a more specific follow-up question.`;
+        callbacks.onMessage?.(partialResponse, true);
+        return { success: true, message: partialResponse, toolsUsed: allToolsUsed, agentsUsed, iterations: maxIterations, maxIterationsReached: true };
+      }
+
+      console.log(`✅ Completed in ${result.iterations} iteration(s)`);
+      console.log(`   Tools used: ${allToolsUsed.length}, Agents: ${agentsUsed.join(', ') || 'none'}`);
+      callbacks.onMessage?.(result.text, true);
+      return { success: true, message: result.text, toolsUsed: allToolsUsed, agentsUsed, iterations: result.iterations, sessionId };
+    } catch (error) {
+      console.error('❌ Orchestrator API Error:', error);
+      return { success: false, error: error.message, toolsUsed: allToolsUsed, agentsUsed, iterations: 0 };
+    }
   }
 
   /**

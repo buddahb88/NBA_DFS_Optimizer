@@ -12,6 +12,7 @@ import { createResearchTools } from './chatTools/researchTools.js';
 import { SITE_KEYS } from '../config/sites.js';
 import { resolveSite } from '../utils/resolveSite.js';
 import { getCurrentSeason } from '../utils/season.js';
+import { createClaudeClient, isClaudeEndpoint, runClaudeToolLoop, toClaudeHistory, toClaudeTool } from './llm/claude.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -70,6 +71,13 @@ class AIChatService {
 
       if (!process.env.AZURE_OPENAI_ENDPOINT) {
         throw new Error('AZURE_OPENAI_ENDPOINT not found in environment variables');
+      }
+
+      if (isClaudeEndpoint()) {
+        this.claudeClient = createClaudeClient();
+        console.log('✅ Claude (Azure AI Foundry) client initialized');
+        this.initializeAgent();
+        return;
       }
 
       // Initialize OpenAI client with Azure configuration
@@ -474,6 +482,10 @@ ${schemaDoc}
       console.log(`\n💬 Processing chat message for session ${sessionId}`);
       console.log(`Message: ${message}`);
 
+      if (this.claudeClient) {
+        return await this.chatWithClaude(message, chatHistory);
+      }
+
       // Build messages array
       const messages = [
         { role: 'system', content: this.getSystemPrompt() },
@@ -575,6 +587,39 @@ ${schemaDoc}
   }
 
   /**
+   * Same tool loop as chat(), against Claude on Azure AI Foundry
+   */
+  async chatWithClaude(message, chatHistory) {
+    const toolsUsed = [];
+    const result = await runClaudeToolLoop({
+      client: this.claudeClient,
+      system: this.getSystemPrompt(),
+      messages: [...toClaudeHistory(chatHistory), { role: 'user', content: message }],
+      tools: this.tools.map(tool => toClaudeTool(this.convertToolToFunction(tool))),
+      executeTool: async (toolName, toolArgs) => {
+        console.log(`🔧 Tool call ${toolsUsed.length + 1}: ${toolName}`);
+        console.log(`Args:`, toolArgs);
+        toolsUsed.push(toolName);
+        const tool = this.toolsMap.get(toolName);
+        if (!tool) throw new Error(`Tool ${toolName} not found`);
+        return tool.func(toolArgs);
+      },
+    });
+
+    if (result.maxIterationsReached) {
+      console.log('⚠️ Max iterations (10) reached');
+      return {
+        success: true,
+        message: 'I apologize, but I needed to make too many tool calls. Please try rephrasing your question.',
+        toolsUsed,
+      };
+    }
+
+    console.log(`✅ Response generated (${toolsUsed.length} tool calls)`);
+    return { success: true, message: result.text, toolsUsed };
+  }
+
+  /**
    * Convert DynamicStructuredTool to OpenAI function format
    */
   convertToolToFunction(tool) {
@@ -583,55 +628,13 @@ ${schemaDoc}
       return { name: tool.name, description: tool.description, parameters: tool.parameters };
     }
 
-    const properties = {};
-    const required = [];
-
-    // Convert Zod schema to JSON Schema
-    Object.entries(tool.schema.shape).forEach(([key, value]) => {
-      const zodType = value._def.typeName;
-
-      let propDef = {
-        description: value.description || '',
-      };
-
-      if (zodType === 'ZodString') {
-        propDef.type = 'string';
-      } else if (zodType === 'ZodNumber') {
-        propDef.type = 'number';
-      } else if (zodType === 'ZodBoolean') {
-        propDef.type = 'boolean';
-      } else if (zodType === 'ZodArray') {
-        propDef.type = 'array';
-        propDef.items = { type: 'string' };
-      } else if (zodType === 'ZodEnum') {
-        propDef.type = 'string';
-        propDef.enum = value._def.values;
-      } else if (zodType === 'ZodOptional') {
-        const innerType = value._def.innerType._def.typeName;
-        if (innerType === 'ZodString') propDef.type = 'string';
-        else if (innerType === 'ZodNumber') propDef.type = 'number';
-        else if (innerType === 'ZodArray') {
-          propDef.type = 'array';
-          propDef.items = { type: 'string' };
-        }
-      }
-
-      properties[key] = propDef;
-
-      // Check if required
-      if (!value.isOptional || zodType !== 'ZodOptional') {
-        required.push(key);
-      }
-    });
+    // io: 'input' leaves fields with defaults optional for the caller
+    const { $schema, ...parameters } = z.toJSONSchema(tool.schema, { io: 'input' });
 
     return {
       name: tool.name,
       description: tool.description,
-      parameters: {
-        type: 'object',
-        properties,
-        required,
-      },
+      parameters,
     };
   }
 
