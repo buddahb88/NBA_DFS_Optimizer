@@ -274,7 +274,7 @@ class OptimizerAgent extends BaseAgent {
           console.log(`\n📋 [OptimizerAgent] Getting player pool for slate ${slateId}`);
 
           let query = `SELECT id, name, position, team, salary, projected_points, floor, ceiling,
-                       ownership, leverage_score, boom_probability, injury_status
+                       rostership AS ownership, leverage_score, boom_probability, injury_status
                        FROM players WHERE slate_id = ?`;
           const params = [slateId];
 

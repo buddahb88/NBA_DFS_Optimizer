@@ -85,6 +85,20 @@ describe('build_lineup', () => {
   });
 });
 
+describe('get_player_pool', () => {
+  test('returns slate players with ownership from players.rostership', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const OptimizerAgent = (await import('../src/agents/OptimizerAgent.js')).default;
+    const tool = new OptimizerAgent().tools.find(t => t.name === 'get_player_pool');
+    const result = await tool.execute({ slateId: 'opt', limit: 3 });
+    assert.equal(result.success, true);
+    assert.equal(result.count, 3);
+    const top = buildPlayerPool().sort((a, b) => b.projected_points - a.projected_points)[0];
+    assert.equal(result.players[0].name, top.name);
+    assert.equal(result.players[0].ownership, top.rostership);
+  });
+});
+
 describe('BaseAgent.executeTool', () => {
   test('forwards attached blocks with the tool call id', async () => {
     const BaseAgent = (await import('../src/agents/BaseAgent.js')).default;
