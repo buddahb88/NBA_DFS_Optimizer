@@ -27,7 +27,8 @@ export function useAgentStream() {
     const {
       sessionId: existingSessionId,
       slateId,
-      maxIterations = 10
+      maxIterations = 10,
+      mode
     } = options;
 
     // Reset state
@@ -53,7 +54,8 @@ export function useAgentStream() {
           message: userMessage,
           sessionId: existingSessionId,
           slateId,
-          maxIterations
+          maxIterations,
+          mode
         }),
         signal: abortControllerRef.current.signal
       });

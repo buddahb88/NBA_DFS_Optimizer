@@ -455,6 +455,25 @@ class AgenticChatService {
   }
 
   /**
+   * Rename a session. Returns { success, session } or { success: false, notFound } when missing.
+   */
+  async renameSession(sessionId, title) {
+    try {
+      const result = await db.run(
+        `UPDATE chat_sessions SET title = ?, updated_at = datetime('now') WHERE id = ?`,
+        title, sessionId
+      );
+      if (!result.changes) return { success: false, notFound: true, error: 'Session not found' };
+
+      const session = await db.get('SELECT id, title, slate_id, created_at, updated_at FROM chat_sessions WHERE id = ?', sessionId);
+      return { success: true, session };
+    } catch (error) {
+      console.error('❌ Rename Session Error:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
    * Delete a session
    */
   async deleteSession(sessionId) {

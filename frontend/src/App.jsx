@@ -29,7 +29,7 @@ function App() {
             <Route path="/lineup-builder" element={<Navigate to="/optimizer?mode=manual" replace />} />
             <Route path="/optimizer" element={<LineupStudioPage />} />
             <Route path="/lineups" element={<LegacyPage><LineupsPage /></LegacyPage>} />
-            <Route path="/chat" element={<LegacyPage fullBleed><ChatPage /></LegacyPage>} />
+            <Route path="/chat" element={<ChatPage />} />
             <Route
               path="/ui-kit"
               element={

@@ -1,0 +1,17 @@
+/* Markdown tables in chat render with AG Grid's legacy alpine theme; map it onto the design tokens. */
+.chat-grid.ag-theme-alpine {
+  --ag-background-color: rgb(var(--surface));
+  --ag-foreground-color: rgb(var(--fg));
+  --ag-secondary-foreground-color: rgb(var(--fg-muted));
+  --ag-data-color: rgb(var(--fg));
+  --ag-header-background-color: rgb(var(--surface-raised));
+  --ag-header-foreground-color: rgb(var(--fg-muted));
+  --ag-odd-row-background-color: rgb(var(--surface-raised));
+  --ag-row-hover-color: rgb(var(--accent-soft));
+  --ag-border-color: rgb(var(--line));
+  --ag-row-border-color: rgb(var(--line));
+  --ag-control-panel-background-color: rgb(var(--surface-raised));
+  --ag-input-border-color: rgb(var(--line-strong));
+  --ag-alpine-active-color: rgb(var(--accent));
+  --ag-font-family: inherit;
+}

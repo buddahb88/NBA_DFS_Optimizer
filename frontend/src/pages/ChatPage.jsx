@@ -1,945 +1,177 @@
-import { useState, useEffect, useRef, useMemo, createContext, useContext } from 'react';
-import { chatAPI, playersAPI } from '../services/api';
+import { useEffect, useRef, useState } from 'react';
+import { IconSettings, Tooltip } from '../components/ui';
 import { useSlate } from '../context/SlateContext';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import { AgGridReact } from 'ag-grid-react';
-import { ModuleRegistry, AllCommunityModule } from 'ag-grid-community';
-import 'ag-grid-community/styles/ag-grid.css';
-import 'ag-grid-community/styles/ag-theme-alpine.css';
-
-// Import new agentic components
 import { useAgentStream } from '../hooks/useAgentStream';
-import { ReasoningPanel } from '../components/ReasoningPanel';
-import { ChatSettings } from '../components/ChatSettings';
-
-// Register AG Grid modules
-ModuleRegistry.registerModules([AllCommunityModule]);
-
-// Create context for player headshots
-const PlayerHeadshotsContext = createContext({});
-
-// Player cell renderer component with headshot
-function PlayerCellRenderer({ value }) {
-  if (!value) return null;
-
-  const playerHeadshots = useContext(PlayerHeadshotsContext);
-  const [imageError, setImageError] = useState(false);
-
-  // Create a simple hash from player name for consistent avatar colors
-  const hash = value.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-  const colors = ['3b82f6', 'ef4444', '10b981', 'f59e0b', '8b5cf6', 'ec4899'];
-  const bgColor = colors[hash % colors.length];
-
-  // Get initials for fallback
-  const initials = value
-    .split(' ')
-    .map(n => n[0])
-    .join('')
-    .toUpperCase()
-    .slice(0, 2);
-
-  // Look up headshot from database
-  const headshotUrl = playerHeadshots[value];
-
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-      {headshotUrl && !imageError ? (
-        <img
-          src={headshotUrl}
-          alt={value}
-          onError={() => setImageError(true)}
-          style={{
-            width: '40px',
-            height: '40px',
-            borderRadius: '50%',
-            objectFit: 'cover',
-            border: '2px solid #e5e7eb',
-            flexShrink: 0,
-            backgroundColor: '#f3f4f6',
-          }}
-        />
-      ) : (
-        <div style={{
-          width: '40px',
-          height: '40px',
-          borderRadius: '50%',
-          background: `linear-gradient(135deg, #${bgColor} 0%, #${bgColor}dd 100%)`,
-          color: 'white',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontWeight: '600',
-          fontSize: '12px',
-          flexShrink: 0,
-        }}>
-          {initials}
-        </div>
-      )}
-      <span style={{ fontWeight: '500' }}>{value}</span>
-    </div>
-  );
-}
-
-// Interactive data table component with AG Grid
-function AGGridTable({ children }) {
-  // Extract table data from React children
-  const { columnDefs, rowData } = useMemo(() => {
-    let headers = [];
-    let rows = [];
-
-    // Parse the React children to extract table structure
-    const childArray = Array.isArray(children) ? children : [children];
-
-    // Helper function to extract text content from nested children
-    const extractText = (child) => {
-      if (typeof child === 'string') return child;
-      if (typeof child === 'number') return String(child);
-      if (!child) return '';
-      if (child.props?.children) {
-        if (Array.isArray(child.props.children)) {
-          return child.props.children.map(extractText).join('');
-        }
-        return extractText(child.props.children);
-      }
-      return '';
-    };
-
-    childArray.forEach((child) => {
-      if (!child || !child.props) return;
-
-      // Check by key instead of type (react-markdown uses keys like 'thead-0', 'tbody-0')
-      const isTheadElement = child.key && child.key.startsWith('thead');
-      const isTbodyElement = child.key && child.key.startsWith('tbody');
-
-      // Extract headers from thead
-      if (isTheadElement) {
-        // Access the actual thead node from props
-        const theadNode = child.props.node;
-        const theadChildren = Array.isArray(child.props.children)
-          ? child.props.children
-          : [child.props.children];
-
-        theadChildren.forEach((tr) => {
-          if (!tr || !tr.props) return;
-          const thChildren = Array.isArray(tr.props.children)
-            ? tr.props.children
-            : [tr.props.children];
-
-          headers = thChildren
-            .filter(th => th && th.props)
-            .map((th, idx) => {
-              const headerText = extractText(th);
-              const isPlayerColumn = headerText && (
-                headerText.toLowerCase().includes('player') ||
-                headerText.toLowerCase() === 'name'
-              );
-
-              return {
-                field: `col_${idx}`,
-                headerName: headerText || `Column ${idx + 1}`,
-                sortable: true,
-                filter: true,
-                resizable: true,
-                flex: isPlayerColumn ? 1.5 : 1,
-                minWidth: isPlayerColumn ? 180 : 100,
-                cellRenderer: isPlayerColumn ? PlayerCellRenderer : undefined,
-              };
-            });
-        });
-      }
-
-      // Extract rows from tbody
-      if (isTbodyElement) {
-        const tbodyChildren = Array.isArray(child.props.children)
-          ? child.props.children
-          : [child.props.children];
-
-        rows = tbodyChildren
-          .filter(tr => tr && tr.props)
-          .map((tr) => {
-            const tdChildren = Array.isArray(tr.props.children)
-              ? tr.props.children
-              : [tr.props.children];
-
-            const rowData = {};
-            tdChildren
-              .filter(td => td && td.props)
-              .forEach((td, idx) => {
-                const cellContent = extractText(td);
-                rowData[`col_${idx}`] = cellContent;
-              });
-
-            return rowData;
-          });
-      }
-    });
-
-    return { columnDefs: headers, rowData: rows };
-  }, [children]);
-
-  if (!columnDefs.length || !rowData.length) {
-
-    // Fallback to regular table rendering if parsing fails
-    return (
-      <div className="overflow-x-auto my-6">
-        <table className="min-w-full border-collapse border border-gray-300 rounded-lg">
-          {children}
-        </table>
-      </div>
-    );
-  }
-
-  return (
-    <div className="my-6 ag-theme-alpine" style={{ width: '100%' }}>
-      <AgGridReact
-        columnDefs={columnDefs}
-        rowData={rowData}
-        theme="legacy"
-        defaultColDef={{
-          sortable: true,
-          filter: true,
-          resizable: true,
-        }}
-        animateRows={true}
-        pagination={rowData.length > 10}
-        paginationPageSize={10}
-        domLayout="autoHeight"
-      />
-    </div>
-  );
-}
-
-// Code block component with copy button
-function CodeBlock({ inline, className, children, ...props }) {
-  const [copied, setCopied] = useState(false);
-  const match = /language-(\w+)/.exec(className || '');
-  const language = match ? match[1] : '';
-  const code = String(children).replace(/\n$/, '');
-
-  const handleCopy = () => {
-    navigator.clipboard.writeText(code);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  if (inline) {
-    return (
-      <code className="bg-gray-100 text-red-600 px-1.5 py-0.5 rounded text-sm font-mono" {...props}>
-        {children}
-      </code>
-    );
-  }
-
-  return (
-    <div className="relative group my-4">
-      <div className="absolute top-2 right-2 z-10">
-        <button
-          onClick={handleCopy}
-          className="px-3 py-1.5 text-xs bg-gray-700 hover:bg-gray-600 text-white rounded opacity-0 group-hover:opacity-100 transition-opacity duration-200 font-medium"
-        >
-          {copied ? 'Copied!' : 'Copy'}
-        </button>
-      </div>
-      {language ? (
-        <>
-          <div className="bg-gray-800 text-gray-300 px-4 py-2 text-xs font-semibold rounded-t-lg border-b border-gray-700">
-            {language}
-          </div>
-          <SyntaxHighlighter
-            style={vscDarkPlus}
-            language={language}
-            PreTag="div"
-            className="!mt-0 !rounded-t-none !rounded-b-lg"
-            {...props}
-          >
-            {code}
-          </SyntaxHighlighter>
-        </>
-      ) : (
-        <SyntaxHighlighter
-          style={vscDarkPlus}
-          language="text"
-          PreTag="div"
-          className="!rounded-lg"
-          {...props}
-        >
-          {code}
-        </SyntaxHighlighter>
-      )}
-    </div>
-  );
-}
-
-// Custom markdown components for Claude-style rendering
-const MarkdownComponents = {
-  code: CodeBlock,
-  h1: ({ children }) => (
-    <h1 className="text-2xl font-semibold mb-4 mt-6 text-gray-900">
-      {children}
-    </h1>
-  ),
-  h2: ({ children }) => (
-    <h2 className="text-xl font-semibold mb-3 mt-5 text-gray-900">{children}</h2>
-  ),
-  h3: ({ children }) => (
-    <h3 className="text-lg font-semibold mb-2 mt-4 text-gray-900">{children}</h3>
-  ),
-  p: ({ children }) => <p className="mb-4 leading-7 text-gray-800">{children}</p>,
-  ul: ({ children }) => (
-    <ul className="list-disc list-outside mb-4 space-y-2 ml-6 text-gray-800">{children}</ul>
-  ),
-  ol: ({ children }) => (
-    <ol className="list-decimal list-outside mb-4 space-y-2 ml-6 text-gray-800">{children}</ol>
-  ),
-  li: ({ children }) => <li className="leading-7 pl-1">{children}</li>,
-  blockquote: ({ children }) => (
-    <blockquote className="border-l-4 border-blue-500 pl-4 py-2 my-4 italic text-gray-700 bg-blue-50">
-      {children}
-    </blockquote>
-  ),
-  table: ({ children }) => <AGGridTable>{children}</AGGridTable>,
-  thead: ({ children }) => <thead>{children}</thead>,
-  tbody: ({ children }) => <tbody>{children}</tbody>,
-  tr: ({ children }) => <tr>{children}</tr>,
-  th: ({ children }) => <th>{children}</th>,
-  td: ({ children }) => <td>{children}</td>,
-  a: ({ href, children }) => (
-    <a
-      href={href}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="text-blue-600 hover:text-blue-700 underline font-medium"
-    >
-      {children}
-    </a>
-  ),
-  strong: ({ children }) => (
-    <strong className="font-semibold text-gray-900">{children}</strong>
-  ),
-  em: ({ children }) => <em className="italic">{children}</em>,
-  hr: () => <hr className="my-6 border-gray-300" />,
-};
-
-// Message component - Claude style
-function Message({ message, formatTimestamp }) {
-  const isUser = message.role === 'user';
-  const isError = message.isError;
-
-  return (
-    <div className={`w-full ${isUser ? 'bg-gray-50' : 'bg-white'} ${isError ? 'bg-red-50' : ''}`}>
-      <div className="max-w-3xl mx-auto px-6 py-8">
-        <div className="flex gap-4">
-          {/* Avatar */}
-          <div className="flex-shrink-0 pt-1">
-            {isUser ? (
-              <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white font-semibold text-sm">
-                U
-              </div>
-            ) : (
-              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-orange-400 to-red-500 flex items-center justify-center text-lg">
-                🏀
-              </div>
-            )}
-          </div>
-
-          {/* Content */}
-          <div className="flex-1 min-w-0">
-            {/* Role label */}
-            <div className="text-xs font-semibold mb-2 text-gray-500 uppercase tracking-wide">
-              {isUser ? 'You' : 'Assistant'}
-            </div>
-
-            {/* Message content */}
-            <div className={isUser ? '' : 'prose prose-sm max-w-none'}>
-              {isUser ? (
-                <p className="text-gray-800 leading-7 whitespace-pre-wrap">
-                  {message.content}
-                </p>
-              ) : (
-                <div className="text-gray-800">
-                  <ReactMarkdown
-                    remarkPlugins={[remarkGfm]}
-                    components={MarkdownComponents}
-                  >
-                    {message.content}
-                  </ReactMarkdown>
-                </div>
-              )}
-            </div>
-
-            {/* Tools/Agents used metadata */}
-            {(message.metadata?.toolsUsed?.length > 0 || message.metadata?.agentsUsed?.length > 0) && (
-              <div className="mt-4 pt-4 border-t border-gray-200">
-                <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
-                  {message.metadata.agentsUsed?.length > 0 && (
-                    <>
-                      <span>Agents:</span>
-                      <div className="flex flex-wrap gap-1.5">
-                        {message.metadata.agentsUsed.map((agent, i) => (
-                          <span
-                            key={i}
-                            className="px-2 py-1 bg-purple-100 text-purple-700 rounded text-xs font-medium"
-                          >
-                            {agent}
-                          </span>
-                        ))}
-                      </div>
-                    </>
-                  )}
-                  {message.metadata.toolsUsed?.length > 0 && (
-                    <>
-                      <span className="ml-2">Tools:</span>
-                      <div className="flex flex-wrap gap-1.5">
-                        {message.metadata.toolsUsed.slice(0, 5).map((tool, i) => (
-                          <span
-                            key={i}
-                            className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs font-medium"
-                          >
-                            {typeof tool === 'object' ? tool.name : tool}
-                          </span>
-                        ))}
-                        {message.metadata.toolsUsed.length > 5 && (
-                          <span className="px-2 py-1 bg-gray-100 text-gray-600 rounded text-xs">
-                            +{message.metadata.toolsUsed.length - 5} more
-                          </span>
-                        )}
-                      </div>
-                    </>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Timestamp */}
-            {message.created_at && (
-              <div className="text-xs text-gray-400 mt-3">
-                {formatTimestamp(message.created_at)}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// Streaming message component (shows during agentic response)
-function StreamingMessage({ content, reasoning, toolCalls, activeAgent, iterations, isStreaming }) {
-  return (
-    <div className="w-full bg-white">
-      <div className="max-w-3xl mx-auto px-6 py-8">
-        <div className="flex gap-4">
-          {/* Avatar */}
-          <div className="flex-shrink-0 pt-1">
-            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-orange-400 to-red-500 flex items-center justify-center text-lg">
-              🏀
-            </div>
-          </div>
-
-          {/* Content */}
-          <div className="flex-1 min-w-0">
-            {/* Role label with streaming indicator */}
-            <div className="flex items-center gap-2 mb-2">
-              <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                Assistant
-              </span>
-              {isStreaming && (
-                <span className="text-xs text-green-600 flex items-center gap-1">
-                  <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-                  Thinking...
-                </span>
-              )}
-            </div>
-
-            {/* Reasoning Panel */}
-            <ReasoningPanel
-              reasoning={reasoning}
-              toolCalls={toolCalls}
-              activeAgent={activeAgent}
-              iterations={iterations}
-              isStreaming={isStreaming}
-            />
-
-            {/* Response content */}
-            {content && (
-              <div className="prose prose-sm max-w-none text-gray-800">
-                <ReactMarkdown
-                  remarkPlugins={[remarkGfm]}
-                  components={MarkdownComponents}
-                >
-                  {content}
-                </ReactMarkdown>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// Typing indicator component
-function TypingIndicator() {
-  return (
-    <div className="w-full bg-white">
-      <div className="max-w-3xl mx-auto px-6 py-8">
-        <div className="flex gap-4">
-          <div className="flex-shrink-0 pt-1">
-            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-orange-400 to-red-500 flex items-center justify-center text-lg">
-              🏀
-            </div>
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="text-xs font-semibold mb-2 text-gray-500 uppercase tracking-wide">
-              Assistant
-            </div>
-            <div className="flex gap-1.5 pt-2">
-              <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
-              <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
-              <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
+import ChatSettingsModal from '../features/chat/ChatSettingsModal';
+import ChatShell from '../features/chat/ChatShell';
+import Composer from '../features/chat/Composer';
+import ContextDrawer from '../features/chat/ContextDrawer';
+import ConversationView from '../features/chat/ConversationView';
+import SessionRail from '../features/chat/SessionRail';
+import SlateContextBar from '../features/chat/SlateContextBar';
+import { UNTITLED_SESSION } from '../features/chat/sessionGroups';
+import useChatSessions from '../features/chat/useChatSessions';
+import useSlateSummary from '../features/chat/useSlateSummary';
 
 export default function ChatPage() {
-  const { slateId } = useSlate();
+  const { slate, slateId, siteConfig } = useSlate();
+  const sessionsState = useChatSessions();
+  const { sessions, activeSessionId, setActiveSessionId, refresh, selectSession } = sessionsState;
+  const slateSummary = useSlateSummary(slateId);
   const [messages, setMessages] = useState([]);
-  const [inputMessage, setInputMessage] = useState('');
-  const [sessionId, setSessionId] = useState(null);
-  const [sessions, setSessions] = useState([]);
-  const [showSessions, setShowSessions] = useState(false);
-  const [playerHeadshots, setPlayerHeadshots] = useState({});
-  const [showSettings, setShowSettings] = useState(false);
+  const [input, setInput] = useState('');
+  const [mode, setMode] = useState('gpp');
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [maxIterations, setMaxIterations] = useState(10);
   const [showReasoning, setShowReasoning] = useState(true);
-  const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
 
-  // Use the streaming hook
-  const {
-    isStreaming,
-    reasoning,
-    toolCalls,
-    activeAgent,
-    message: streamingMessage,
-    error: streamError,
-    iterations,
-    metadata,
-    startStream,
-    cancelStream,
-    reset: resetStream,
-    sessionId: streamSessionId
-  } = useAgentStream();
+  const stream = useAgentStream();
+  const { isStreaming, message: streamedText, error: streamError, metadata, startStream, cancelStream, reset: resetStream } = stream;
 
-  // Scroll to bottom when messages change
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages, streamingMessage, reasoning]);
-
-  // Load sessions on mount
-  useEffect(() => {
-    loadSessions();
-  }, []);
-
-  // Headshots come from the top-bar slate's player pool
-  useEffect(() => {
-    setPlayerHeadshots({});
-    if (slateId) loadPlayerHeadshots(slateId);
-  }, [slateId]);
-
-  // Focus input on mount
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
 
-  // Handle stream completion
+  // Completed stream -> append the assistant message and adopt the (possibly new) session
   useEffect(() => {
-    if (!isStreaming && streamingMessage && metadata) {
-      // Add completed message to history
-      const assistantMessage = {
+    if (isStreaming || !streamedText || !metadata) return;
+    setMessages((prev) => [
+      ...prev,
+      {
         role: 'assistant',
-        content: streamingMessage,
-        metadata: {
-          toolsUsed: metadata.toolsUsed,
-          agentsUsed: metadata.agentsUsed,
-          iterations: metadata.iterations
-        },
+        content: streamedText,
+        metadata: { toolsUsed: metadata.toolsUsed, agentsUsed: metadata.agentsUsed, iterations: metadata.iterations },
         created_at: new Date().toISOString(),
-      };
-
-      setMessages(prev => [...prev, assistantMessage]);
-
-      // Update session ID
-      if (metadata.sessionId) {
-        setSessionId(metadata.sessionId);
-        loadSessions();
-      }
-
-      // Reset stream state
-      resetStream();
+      },
+    ]);
+    if (metadata.sessionId) {
+      setActiveSessionId(metadata.sessionId);
+      refresh();
     }
-  }, [isStreaming, streamingMessage, metadata]);
+    resetStream();
+  }, [isStreaming, streamedText, metadata, setActiveSessionId, refresh, resetStream]);
 
-  // Handle stream error
   useEffect(() => {
-    if (streamError) {
-      const errorMessage = {
-        role: 'assistant',
-        content: `Error: ${streamError}`,
-        created_at: new Date().toISOString(),
-        isError: true,
-      };
-      setMessages(prev => [...prev, errorMessage]);
-      resetStream();
-    }
-  }, [streamError]);
+    if (!streamError) return;
+    setMessages((prev) => [...prev, { role: 'assistant', content: `Error: ${streamError}`, created_at: new Date().toISOString(), isError: true }]);
+    resetStream();
+  }, [streamError, resetStream]);
 
-  const loadSessions = async () => {
-    try {
-      const response = await chatAPI.getSessions();
-      if (response.data.success) {
-        setSessions(response.data.sessions);
-      }
-    } catch (error) {
-      console.error('Failed to load sessions:', error);
-    }
-  };
-
-  const loadPlayerHeadshots = async (id) => {
-    try {
-      const playersResponse = await playersAPI.getBySlateId(id);
-
-      // The API returns the array directly
-      if (Array.isArray(playersResponse.data)) {
-        // Create a map of player name -> headshot URL
-        const headshotsMap = {};
-        playersResponse.data.forEach(player => {
-          if (player.headshot) {
-            headshotsMap[player.name] = player.headshot;
-          }
-        });
-        setPlayerHeadshots(headshotsMap);
-      }
-    } catch (error) {
-      console.error('Failed to load player headshots:', error);
-    }
-  };
-
-  const loadSessionHistory = async (sessionIdToLoad) => {
-    try {
-      const response = await chatAPI.getSessionHistory(sessionIdToLoad);
-      if (response.data.success) {
-        setMessages(response.data.messages);
-        setSessionId(sessionIdToLoad);
-        setShowSessions(false);
-      }
-    } catch (error) {
-      console.error('Failed to load session history:', error);
-    }
-  };
-
-  const createNewSession = async () => {
+  const newChat = () => {
     setMessages([]);
-    setSessionId(null);
-    setShowSessions(false);
+    setActiveSessionId(null);
     resetStream();
     inputRef.current?.focus();
   };
 
-  const handleSendMessage = async (e) => {
-    e.preventDefault();
-
-    if (!inputMessage.trim() || isStreaming) return;
-
-    const userMessage = {
-      role: 'user',
-      content: inputMessage,
-      created_at: new Date().toISOString(),
-    };
-
-    setMessages((prev) => [...prev, userMessage]);
-    const messageToSend = inputMessage;
-    setInputMessage('');
-
-    // Use streaming API
-    await startStream(messageToSend, {
-      sessionId,
-      slateId,
-      maxIterations
-    });
+  const openSession = async (id) => {
+    const history = await selectSession(id);
+    if (history) setMessages(history);
   };
 
-  const deleteSession = async (sessionIdToDelete) => {
-    if (!confirm('Delete this conversation?')) return;
-
-    try {
-      await chatAPI.deleteSession(sessionIdToDelete);
-      loadSessions();
-      if (sessionIdToDelete === sessionId) {
-        createNewSession();
-      }
-    } catch (error) {
-      console.error('Failed to delete session:', error);
-    }
+  const deleteSession = async (id) => {
+    const { wasActive } = await sessionsState.deleteSession(id);
+    if (wasActive) newChat();
   };
 
-  const formatTimestamp = (timestamp) => {
-    const date = new Date(timestamp);
-    const now = new Date();
-    const diffInMs = now - date;
-    const diffInMins = Math.floor(diffInMs / 60000);
-
-    if (diffInMins < 1) return 'Just now';
-    if (diffInMins < 60) return `${diffInMins}m ago`;
-
-    const diffInHours = Math.floor(diffInMins / 60);
-    if (diffInHours < 24) return `${diffInHours}h ago`;
-
-    return date.toLocaleString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-    });
+  const send = async (text) => {
+    if (!text.trim() || isStreaming) return;
+    setMessages((prev) => [...prev, { role: 'user', content: text, created_at: new Date().toISOString() }]);
+    setInput('');
+    await startStream(text, { sessionId: activeSessionId, slateId, maxIterations, mode });
   };
 
-  // Suggested prompts
-  const suggestedPrompts = [
-    { icon: '💰', text: 'Show me top value plays under $6000' },
-    { icon: '🔒', text: 'Lock Luka Doncic and build an optimal lineup' },
-    { icon: '📊', text: 'Which games have the highest Vegas totals?' },
-    { icon: '🎯', text: 'Find high usage, low ownership players' },
-    { icon: '⚔️', text: 'Analyze Lakers vs Warriors for DFS' },
-  ];
+  const activeSession = sessions.find((s) => s.id === activeSessionId);
+  const title = activeSessionId ? activeSession?.title || UNTITLED_SESSION : 'New chat';
 
   return (
-    <PlayerHeadshotsContext.Provider value={playerHeadshots}>
-      <div className="flex h-screen bg-white">
-      {/* Sidebar - Sessions List */}
-      <div
-        className={`${
-          showSessions ? 'w-72' : 'w-0'
-        } bg-gray-900 text-white transition-all duration-300 flex flex-col overflow-hidden`}
-      >
-        {showSessions && (
-          <>
-            <div className="p-4 border-b border-gray-700">
-              <button
-                onClick={createNewSession}
-                className="w-full px-4 py-2.5 bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors text-sm font-medium flex items-center justify-center gap-2"
-              >
-                <span className="text-lg">+</span>
-                New chat
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-2">
-              {sessions.length === 0 ? (
-                <div className="text-center text-gray-500 text-sm py-8">
-                  No conversations yet
-                </div>
-              ) : (
-                sessions.map((session) => (
-                  <div
-                    key={session.id}
-                    className={`group relative mb-1 rounded-lg hover:bg-gray-800 cursor-pointer transition-colors ${
-                      session.id === sessionId ? 'bg-gray-800' : ''
-                    }`}
-                  >
-                    <button
-                      className="w-full p-3 text-left flex items-center gap-3"
-                      onClick={() => loadSessionHistory(session.id)}
-                    >
-                      <span className="text-lg">💬</span>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-sm truncate">
-                          {session.title || 'Chat Session'}
-                        </div>
-                        <div className="text-xs text-gray-500">
-                          {session.message_count} messages
-                        </div>
-                      </div>
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        deleteSession(session.id);
-                      }}
-                      className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-400 transition-opacity"
-                      title="Delete conversation"
-                    >
-                      🗑️
-                    </button>
-                  </div>
-                ))
-              )}
-            </div>
-          </>
-        )}
-      </div>
-
-      {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col min-w-0">
-        {/* Header */}
-        <div className="bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between shadow-sm">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => setShowSessions(!showSessions)}
-              className="p-2 hover:bg-gray-100 rounded-lg transition-colors text-gray-600"
-              title={showSessions ? 'Hide sidebar' : 'Show sidebar'}
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-              </svg>
-            </button>
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-orange-400 to-red-500 flex items-center justify-center text-lg">
-                🏀
-              </div>
-              <div>
-                <h1 className="text-base font-semibold text-gray-900">
-                  NBA DFS AI Assistant
-                </h1>
-                <p className="text-xs text-gray-500">Agentic Mode</p>
-              </div>
-            </div>
-          </div>
-
-          {/* Settings */}
-          <ChatSettings
-            maxIterations={maxIterations}
-            setMaxIterations={setMaxIterations}
-            showReasoning={showReasoning}
-            setShowReasoning={setShowReasoning}
-            isOpen={showSettings}
-            onToggle={() => setShowSettings(!showSettings)}
+    <>
+      <ChatShell
+        title={title}
+        renderRail={({ collapsed, onToggleCollapse, onClose, dismiss }) => (
+          <SessionRail
+            sessions={sessions}
+            loading={sessionsState.loading}
+            error={sessionsState.error}
+            activeSessionId={activeSessionId}
+            collapsed={collapsed}
+            onToggleCollapse={onToggleCollapse}
+            onClose={onClose}
+            onNewChat={() => {
+              newChat();
+              dismiss();
+            }}
+            onSelect={(id) => {
+              openSession(id);
+              dismiss();
+            }}
+            onRename={sessionsState.renameSession}
+            onDelete={deleteSession}
           />
-        </div>
-
-        {/* Messages Area */}
-        <div className="flex-1 overflow-y-auto px-4">
-          {messages.length === 0 && !isStreaming ? (
-            <div className="max-w-3xl mx-auto py-12">
-              {/* Welcome Section */}
-              <div className="text-center mb-12">
-                <div className="text-6xl mb-4">🏀</div>
-                <h2 className="text-3xl font-semibold text-gray-900 mb-2">
-                  NBA DFS AI Assistant
-                </h2>
-                <p className="text-gray-600 mb-2">
-                  Get expert insights on player analysis, lineup optimization, and matchup breakdowns
-                </p>
-                <p className="text-sm text-purple-600">
-                  Powered by specialized agents: Optimizer, Research, Analyst
-                </p>
-              </div>
-
-              {/* Suggested Prompts */}
-              <div className="space-y-2">
-                <h3 className="text-sm font-semibold text-gray-700 mb-3 px-1">
-                  Suggested prompts
-                </h3>
-                {suggestedPrompts.map((prompt, index) => (
-                  <button
-                    key={index}
-                    onClick={() => setInputMessage(prompt.text)}
-                    className="w-full text-left p-4 bg-gray-50 hover:bg-gray-100 rounded-lg border border-gray-200 hover:border-gray-300 transition-all group"
-                  >
-                    <div className="flex items-center gap-3">
-                      <span className="text-xl group-hover:scale-110 transition-transform">
-                        {prompt.icon}
-                      </span>
-                      <span className="text-sm text-gray-700 font-medium">
-                        {prompt.text}
-                      </span>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <div className="max-w-3xl mx-auto py-4">
-              {messages.map((msg, idx) => (
-                <Message
-                  key={`${msg.created_at}-${idx}`}
-                  message={msg}
-                  formatTimestamp={formatTimestamp}
-                />
-              ))}
-
-              {/* Streaming response */}
-              {isStreaming && (
-                <StreamingMessage
-                  content={streamingMessage}
-                  reasoning={showReasoning ? reasoning : []}
-                  toolCalls={showReasoning ? toolCalls : []}
-                  activeAgent={activeAgent}
-                  iterations={iterations}
-                  isStreaming={isStreaming}
-                />
-              )}
-
-              <div ref={messagesEndRef} />
-            </div>
-          )}
-        </div>
-
-        {/* Input Area */}
-        <div className="border-t border-gray-200 bg-white">
-          <div className="max-w-3xl mx-auto px-4 py-3">
-            <form onSubmit={handleSendMessage} className="relative">
-              <input
-                ref={inputRef}
-                type="text"
-                value={inputMessage}
-                onChange={(e) => setInputMessage(e.target.value)}
-                placeholder="Message NBA DFS AI Assistant..."
-                className="w-full px-4 py-3 pr-24 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all text-gray-900 placeholder-gray-400 bg-white shadow-sm"
-                disabled={isStreaming}
-              />
-              <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                {isStreaming && (
-                  <button
-                    type="button"
-                    onClick={cancelStream}
-                    className="p-2 text-red-500 hover:text-red-600 transition-colors"
-                    title="Cancel"
-                  >
-                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
-                )}
-                <button
-                  type="submit"
-                  disabled={isStreaming || !inputMessage.trim()}
-                  className="p-2 text-gray-400 hover:text-gray-600 disabled:text-gray-300 disabled:cursor-not-allowed transition-colors"
-                  title="Send message"
-                >
-                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
-                  </svg>
-                </button>
-              </div>
-            </form>
-            <div className="text-xs text-gray-400 mt-2 text-center">
-              Max iterations: {maxIterations} | Press Enter to send
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-    </PlayerHeadshotsContext.Provider>
+        )}
+        actions={
+          <Tooltip content="Chat settings" side="bottom">
+            <button
+              type="button"
+              onClick={() => setSettingsOpen(true)}
+              aria-label="Chat settings"
+              className="rounded p-1.5 text-fg-muted transition-colors hover:bg-surface-raised hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
+            >
+              <IconSettings size={16} />
+            </button>
+          </Tooltip>
+        }
+        contextBar={
+          <SlateContextBar
+            slate={slate}
+            siteName={siteConfig?.name}
+            gameCount={slateSummary.gameCount}
+            firstLock={slateSummary.firstLock}
+            loading={slateSummary.loading}
+            mode={mode}
+            onModeChange={setMode}
+          />
+        }
+        composer={
+          <Composer
+            ref={inputRef}
+            value={input}
+            onChange={setInput}
+            onSubmit={send}
+            onCancel={cancelStream}
+            isStreaming={isStreaming}
+            maxIterations={maxIterations}
+          />
+        }
+        renderDrawer={({ onClose }) => <ContextDrawer onClose={onClose} />}
+      >
+        <ConversationView
+          messages={messages}
+          stream={{
+            isStreaming,
+            content: streamedText,
+            reasoning: stream.reasoning,
+            toolCalls: stream.toolCalls,
+            activeAgent: stream.activeAgent,
+            iterations: stream.iterations,
+          }}
+          showReasoning={showReasoning}
+          headshots={slateSummary.headshots}
+          onPickPrompt={(text) => {
+            setInput(text);
+            inputRef.current?.focus();
+          }}
+        />
+      </ChatShell>
+      <ChatSettingsModal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        maxIterations={maxIterations}
+        setMaxIterations={setMaxIterations}
+        showReasoning={showReasoning}
+        setShowReasoning={setShowReasoning}
+      />
+    </>
   );
 }

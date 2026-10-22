@@ -88,6 +88,8 @@ export const chatAPI = {
     api.get(`/chat/sessions/${sessionId}`, { params: { limit } }),
   deleteSession: (sessionId) =>
     api.delete(`/chat/sessions/${sessionId}`),
+  renameSession: (sessionId, title) =>
+    api.patch(`/chat/sessions/${sessionId}`, { title }),
 };
 
 // Historical Insights API

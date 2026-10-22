@@ -7,13 +7,14 @@ const router = express.Router();
 /**
  * POST /api/chat/stream
  * Send a message with SSE streaming response (new agentic system)
- * Body: { message: string, sessionId?: number, slateId?: string, maxIterations?: number }
+ * Body: { message: string, sessionId?: number, slateId?: string, maxIterations?: number, mode?: 'cash' | 'gpp' }
+ * mode is passed through to the chat service (not yet used to steer answers).
  */
 router.post('/stream', async (req, res) => {
   const stream = new StreamHandler(res);
 
   try {
-    const { message, sessionId, slateId, maxIterations = 10 } = req.body;
+    const { message, sessionId, slateId, maxIterations = 10, mode } = req.body;
 
     if (!message || message.trim().length === 0) {
       return res.status(400).json({ error: 'Message is required', code: 'INVALID_MESSAGE' });
@@ -48,6 +49,7 @@ router.post('/stream', async (req, res) => {
     const response = await agenticChatService.chat(message, activeSessionId, {
       maxIterations: Math.min(Math.max(maxIterations, 5), 30), // Clamp between 5-30
       slateId,
+      mode,
       chatHistory,
       ...callbacks
     });
@@ -128,6 +130,31 @@ router.get('/sessions/:sessionId', async (req, res) => {
       success: false,
       error: error.message,
     });
+  }
+});
+
+const MAX_TITLE_LENGTH = 120;
+
+/**
+ * PATCH /api/chat/sessions/:sessionId
+ * Rename a chat session
+ * Body: { title: string }
+ */
+router.patch('/sessions/:sessionId', async (req, res) => {
+  try {
+    const { title } = req.body || {};
+    const trimmed = typeof title === 'string' ? title.trim().slice(0, MAX_TITLE_LENGTH) : '';
+    if (!trimmed) {
+      return res.status(400).json({ success: false, error: 'Title is required' });
+    }
+
+    const result = await agenticChatService.renameSession(parseInt(req.params.sessionId), trimmed);
+    if (result.notFound) return res.status(404).json({ success: false, error: result.error });
+    if (!result.success) return res.status(500).json(result);
+    res.json(result);
+  } catch (error) {
+    console.error('❌ Rename session error:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
