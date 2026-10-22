@@ -1,7 +1,7 @@
 // Chat turns: user prompts as compact right-aligned bubbles, assistant answers full-width
 // with the assistant mark, its agent activity timeline and rich tool-result cards (ui blocks).
 import { useDeferredValue, useMemo, useState } from 'react';
-import { IconCheck, IconCopy, IconRefresh, IconThumbDown, IconThumbUp, Tooltip, cn } from '../../components/ui';
+import { Badge, IconCheck, IconCopy, IconRefresh, IconThumbDown, IconThumbUp, Tooltip, cn } from '../../components/ui';
 import AgentTimeline from './AgentTimeline';
 import { timelineFromMetadata } from './timelineSteps';
 import { formatTimestamp } from './chatFormat';
@@ -151,11 +151,26 @@ export function ChatMessage({ message, isLast = false, showReasoning = true, onR
     );
   }
 
+  const header = (
+    <>
+      {message.stopped && (
+        <Badge tone="caution" size="sm">
+          Stopped
+        </Badge>
+      )}
+      <Timestamp value={message.created_at} className={revealOnHover} />
+    </>
+  );
+
   return (
-    <AssistantFrame header={<Timestamp value={message.created_at} className={revealOnHover} />}>
+    <AssistantFrame header={header}>
       {activity}
       <ChatBlocks blocks={blocks} />
-      {message.content && <Markdown>{message.content}</Markdown>}
+      {message.content ? (
+        <Markdown>{message.content}</Markdown>
+      ) : (
+        message.stopped && !blocks.length && <p className="text-sm italic text-fg-muted">Stopped before a response arrived.</p>
+      )}
       <div className={cn('mt-2 flex items-center gap-0.5', !isLast && revealOnHover)}>
         <CopyAction text={message.content} />
         {isLast && onRegenerate && (

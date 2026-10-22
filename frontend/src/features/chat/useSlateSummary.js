@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { playersAPI } from '../../services/api';
 import { buildGames, summarizeSlate } from '../../pages/home/slateDashboard';
 
-/** Slate players for the chat (cards resolve against them), headshot lookup, and game count / first lock for the context bar. */
+/** Slate players for the chat (cards resolve against them, @mention autocomplete), headshot lookup, and game count / first lock for the context bar. */
 export default function useSlateSummary(slateId) {
   const [players, setPlayers] = useState([]);
   const [loading, setLoading] = useState(false);

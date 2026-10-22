@@ -22,6 +22,7 @@ export function useAgentStream() {
   const [timeline, dispatchTimeline] = useReducer(timelineReducer, undefined, createTimeline);
   // Typed result blocks for the streamed message (backend chatTools/uiBlocks.js)
   const [uiBlocks, setUiBlocks] = useState([]);
+  const [stopped, setStopped] = useState(false);
 
   const abortControllerRef = useRef(null);
 
@@ -33,7 +34,8 @@ export function useAgentStream() {
       sessionId: existingSessionId,
       slateId,
       maxIterations = 10,
-      mode
+      mode,
+      mentions
     } = options;
 
     // Reset state
@@ -45,6 +47,8 @@ export function useAgentStream() {
     setError(null);
     setMetadata(null);
     setUiBlocks([]);
+    setStopped(false);
+    setSessionId(existingSessionId ?? null);
     setIterations({ current: 0, max: maxIterations });
     dispatchTimeline({ type: 'start', now: Date.now() });
 
@@ -62,7 +66,8 @@ export function useAgentStream() {
           sessionId: existingSessionId,
           slateId,
           maxIterations,
-          mode
+          mode,
+          ...(mentions?.length ? { mentions } : {})
         }),
         signal: abortControllerRef.current.signal
       });
@@ -115,7 +120,8 @@ export function useAgentStream() {
       }
     } catch (err) {
       if (err.name === 'AbortError') {
-        console.log('Stream aborted by user');
+        // Stopped by the user: keep the partial text so the caller can mark it as stopped
+        setStopped(true);
       } else {
         console.error('Stream error:', err);
         setError(err.message);
@@ -239,6 +245,7 @@ export function useAgentStream() {
     setError(null);
     setMetadata(null);
     setUiBlocks([]);
+    setStopped(false);
     setIterations({ current: 0, max: 10 });
     dispatchTimeline({ type: 'reset' });
   }, []);
@@ -256,6 +263,7 @@ export function useAgentStream() {
     metadata,
     timeline,
     uiBlocks,
+    stopped,
 
     // Actions
     startStream,

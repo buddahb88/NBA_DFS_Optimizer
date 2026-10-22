@@ -205,6 +205,84 @@ describe('ChatPage shell', () => {
     expect(await screen.findByText('Who is chalk?')).toBeInTheDocument()
     expect(screen.queryByRole('status', { name: 'Loading conversation' })).not.toBeInTheDocument()
   })
+
+  it('stop aborts the stream and keeps the partial answer marked as stopped', async () => {
+    let signal
+    const chunk = new TextEncoder().encode('event: session_created\ndata: {"sessionId":9}\n\nevent: message\ndata: {"text":"Partial answer"}\n\n')
+    fetch.mockImplementation((url, init) => {
+      signal = init.signal
+      let sent = false
+      const read = () => {
+        if (!sent) {
+          sent = true
+          return Promise.resolve({ done: false, value: chunk })
+        }
+        return new Promise((_, reject) => signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError'))))
+      }
+      return Promise.resolve({ ok: true, body: { getReader: () => ({ read }) } })
+    })
+
+    render(<ChatPage />)
+    send('Who is chalk tonight?')
+    expect(await screen.findByText('Partial answer')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Send message' })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Stop generating' }))
+    expect(signal.aborted).toBe(true)
+    expect(await screen.findByText('Stopped')).toBeInTheDocument()
+    expect(screen.getByText('Partial answer')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled()
+    // The session the backend created is adopted so the next message continues it
+    await waitFor(() => expect(chatAPI.getSessions).toHaveBeenCalledTimes(2))
+    send('And the pivots?')
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2))
+    expect(sentBody()).toMatchObject({ message: 'And the pivots?', sessionId: 9 })
+  })
+
+  it('restores the composer draft per session after a reload', async () => {
+    const { unmount } = render(<ChatPage />)
+    fireEvent.change(screen.getByRole('textbox', { name: 'Message' }), { target: { value: 'half-written thought' } })
+    expect(JSON.parse(localStorage.getItem('nba-dfs:chat-draft:new'))).toMatchObject({ text: 'half-written thought' })
+
+    unmount()
+    render(<ChatPage />)
+    expect(screen.getByRole('textbox', { name: 'Message' })).toHaveValue('half-written thought')
+
+    localStorage.setItem('nba-dfs:chat-draft:7', JSON.stringify({ text: 'session 7 draft', mentions: [] }))
+    fireEvent.click(await screen.findByRole('button', { name: /^Lakers stack ideas/ }))
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Message' })).toHaveValue('session 7 draft'))
+    fireEvent.click(screen.getByRole('button', { name: /new chat/i }))
+    expect(screen.getByRole('textbox', { name: 'Message' })).toHaveValue('half-written thought')
+  })
+
+  it('ignores broken draft storage', () => {
+    localStorage.setItem('nba-dfs:chat-draft:new', '{not json')
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('quota')
+    })
+    render(<ChatPage />)
+    expect(screen.getByRole('textbox', { name: 'Message' })).toHaveValue('')
+    fireEvent.change(screen.getByRole('textbox', { name: 'Message' }), { target: { value: 'still typable' } })
+    expect(screen.getByRole('textbox', { name: 'Message' })).toHaveValue('still typable')
+    setItem.mockRestore()
+  })
+
+  it('clears the draft on send, sends mentions, and Up arrow recalls the last message', async () => {
+    render(<ChatPage />)
+    const box = screen.getByRole('textbox', { name: 'Message' })
+    await waitFor(() => expect(playersAPI.getBySlateId).toHaveBeenCalled())
+    fireEvent.change(box, { target: { value: 'Fade @C T', selectionStart: 9 } })
+    fireEvent.keyDown(box, { key: 'Enter' })
+    expect(box).toHaveValue('Fade C Three ')
+    fireEvent.keyDown(box, { key: 'Enter' })
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1))
+    expect(sentBody()).toMatchObject({ message: 'Fade C Three', mentions: [{ name: 'C Three', team: 'BOS', player_key: 'c three' }] })
+    expect(box).toHaveValue('')
+    expect(localStorage.getItem('nba-dfs:chat-draft:new')).toBeNull()
+
+    fireEvent.keyDown(box, { key: 'ArrowUp' })
+    expect(box).toHaveValue('Fade C Three')
+  })
 })
 
 describe('ChatPage agent timeline', () => {

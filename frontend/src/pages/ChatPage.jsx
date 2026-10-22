@@ -16,6 +16,7 @@ import SlateContextBar from '../features/chat/SlateContextBar';
 import { UNTITLED_SESSION } from '../features/chat/sessionGroups';
 import useChatPins from '../features/chat/useChatPins';
 import useChatSessions from '../features/chat/useChatSessions';
+import useComposerDraft from '../features/chat/useComposerDraft';
 import useSlateSummary from '../features/chat/useSlateSummary';
 
 export default function ChatPage() {
@@ -24,7 +25,7 @@ export default function ChatPage() {
   const { sessions, activeSessionId, setActiveSessionId, refresh, selectSession } = sessionsState;
   const slateSummary = useSlateSummary(slateId);
   const [messages, setMessages] = useState([]);
-  const [input, setInput] = useState('');
+  const [draft, setDraft] = useComposerDraft(activeSessionId);
   const [mode, setMode] = useState('gpp');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [maxIterations, setMaxIterations] = useState(10);
@@ -36,7 +37,8 @@ export default function ChatPage() {
   const { adoptDraft, clearDraft } = pins;
 
   const stream = useAgentStream();
-  const { isStreaming, message: streamedText, error: streamError, metadata, timeline, uiBlocks, startStream, cancelStream, reset: resetStream } = stream;
+  const { isStreaming, message: streamedText, error: streamError, metadata, timeline, uiBlocks, stopped, startStream, cancelStream, reset: resetStream } = stream;
+  const streamSessionId = stream.sessionId;
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -73,6 +75,17 @@ export default function ChatPage() {
     resetStream();
   }, [isStreaming, streamedText, metadata, timeline, uiBlocks, setActiveSessionId, refresh, resetStream, adoptDraft]);
 
+  // Stopped by the user -> keep whatever arrived (text, cards, interrupted timeline), marked as stopped
+  useEffect(() => {
+    if (isStreaming || !stopped) return;
+    setMessages((prev) => [...prev, { role: 'assistant', content: streamedText, timeline, uiBlocks, stopped: true, created_at: new Date().toISOString() }]);
+    if (streamSessionId) {
+      setActiveSessionId(streamSessionId);
+      refresh();
+    }
+    resetStream();
+  }, [isStreaming, stopped, streamedText, timeline, uiBlocks, streamSessionId, setActiveSessionId, refresh, resetStream]);
+
   useEffect(() => {
     if (!streamError) return;
     if (isStreaming) return; // wait for the stream to close so the timeline is finalized
@@ -100,13 +113,26 @@ export default function ChatPage() {
     if (wasActive) newChat();
   };
 
-  const ask = (text) => startStream(text, { sessionId: activeSessionId, slateId, maxIterations, mode });
+  const ask = (text, mentions = []) =>
+    startStream(text, {
+      sessionId: activeSessionId,
+      slateId,
+      maxIterations,
+      mode,
+      mentions: mentions.map(({ name, team, player_key }) => ({ name, team, player_key })),
+    });
 
-  const send = async (text) => {
+  const send = async (text, mentions = []) => {
     if (!text.trim() || isStreaming) return;
     setMessages((prev) => [...prev, { role: 'user', content: text, created_at: new Date().toISOString() }]);
-    setInput('');
-    await ask(text);
+    setDraft({ text: '', mentions: [] });
+    await ask(text, mentions);
+  };
+
+  // Up arrow on an empty composer pulls the last message back in for editing
+  const editLastMessage = () => {
+    const last = [...messages].reverse().find((m) => m.role === 'user');
+    if (last) setDraft({ text: last.content });
   };
 
   // Drop the last answer and ask the previous prompt again (the server logs the prompt a second time)
@@ -190,12 +216,17 @@ export default function ChatPage() {
           composer={
             <Composer
               ref={inputRef}
-              value={input}
-              onChange={setInput}
+              value={draft.text}
+              mentions={draft.mentions}
+              onChange={setDraft}
               onSubmit={send}
               onCancel={cancelStream}
+              onEditLast={editLastMessage}
               isStreaming={isStreaming}
               maxIterations={maxIterations}
+              mode={mode}
+              siteName={siteConfig?.name}
+              players={slateSummary.players}
             />
           }
           renderDrawer={({ onClose }) => <ContextDrawer onClose={onClose} lineup={latestLineup} />}
@@ -214,7 +245,7 @@ export default function ChatPage() {
             onRegenerate={regenerate}
             onFeedback={sendFeedback}
             onPickPrompt={(text) => {
-              setInput(text);
+              setDraft({ text });
               inputRef.current?.focus();
             }}
           />
