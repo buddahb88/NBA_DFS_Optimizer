@@ -864,6 +864,33 @@ tables:
       - name: matchup_adjusted_edge
         type: mixed
         description: "Opponent defense cell (fp_over_expectation) vs the player's archetype or G/F/C as known before lock"
+      - name: floor_model
+        type: REAL
+        description: "Outcome-model floor recomputed after the fact (scripts/recompute-snapshot-ranges.js, games before game_date only); rebuilds use it by default"
+      - name: ceiling_model
+        type: REAL
+        description: "Outcome-model ceiling (as floor_model)"
+      - name: std_dev_model
+        type: REAL
+        description: "Outcome-model standard deviation (as floor_model)"
+      - name: volatility_model
+        type: REAL
+        description: "Outcome-model volatility (as floor_model)"
+      - name: boom_model
+        type: REAL
+        description: "Outcome-model boom probability, percent (as floor_model)"
+      - name: bust_model
+        type: REAL
+        description: "Outcome-model bust probability, percent (as floor_model)"
+      - name: leverage_model
+        type: REAL
+        description: "boom_model / (rostership + 1)"
+      - name: range_model_version
+        type: TEXT
+        description: "Model settings the *_model columns were computed with"
+      - name: range_model_at
+        type: TEXT
+        description: "When the *_model columns were computed (ISO UTC)"
 
     example_queries:
       - description: "Projection vs actual DK points for past slates"

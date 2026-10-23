@@ -110,6 +110,15 @@ describe('optimizer on a snapshot slate', () => {
     assert.equal(body.lineups[0].actualPoints, undefined);
   });
 
+  test('ranges toggle: model by default, original on request, anything else is a 400', async () => {
+    const byDefault = await post('/optimizer/generate', { slateDate: PAST, minSalary: 0 });
+    assert.equal(byDefault.body.ranges, 'model');
+    const original = await post('/optimizer/generate', { slateDate: PAST, minSalary: 0, ranges: 'original' });
+    assert.equal(original.body.ranges, 'original');
+    assert.ok(original.body.lineups[0].players.every(s => s.player.range_source === 'original'));
+    assert.equal((await post('/optimizer/generate', { slateDate: PAST, ranges: 'nope' })).status, 400);
+  });
+
   test('locks by snapshot player id work and an unknown date is a 404', async () => {
     const lock = pastPlayers.find(p => p.name === 'Player 12');
     const { body } = await post('/optimizer/generate', { slateDate: PAST, lockedPlayers: [lock.id], minSalary: 0 });

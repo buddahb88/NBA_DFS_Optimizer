@@ -84,7 +84,7 @@ async function run(job) {
   try {
     const source = await resolveSlate({ slateId: job.slateId, slateDate: job.slateDate });
     if (source) Object.assign(job, { slateId: source.slateId, slateDate: source.slateDate, isBacktest: source.isBacktest });
-    const rows = await loadSlatePlayers(source);
+    const rows = await loadSlatePlayers(source, { ranges: job.ranges });
     if (!rows || rows.length === 0) throw new Error('No players found for this slate');
     const players = rows.map(pick);
     // Pending results stay null until the box scores land
@@ -139,7 +139,8 @@ function pump() {
 /**
  * Validate options and enqueue a build. Throws (-> HTTP 400) on invalid options.
  */
-export function createJob(slateId, { slateDate = null, ...options } = {}) {
+export function createJob(slateId, { slateDate = null, ranges = 'model', ...options } = {}) {
+  if (!['model', 'original'].includes(ranges)) throw new Error('ranges must be model or original');
   normalizeOptions(options);
   prune();
   if (queue.length >= MAX_QUEUED) {
@@ -152,6 +153,8 @@ export function createJob(slateId, { slateDate = null, ...options } = {}) {
     slateId: slateId === undefined || slateId === null || slateId === '' ? null : String(slateId),
     // Past date: rebuild that night's saved slate and score the result (services/slateSource.js)
     slateDate,
+    // Backtest ranges: outcome-model (default) or the slate's pre-lock ones
+    ranges,
     isBacktest: false,
     options,
     status: 'queued',
@@ -198,6 +201,7 @@ export function jobView(job, { includeResult = true, candidates = 100 } = {}) {
     slateId: job.slateId,
     slateDate: job.slateDate,
     isBacktest: job.isBacktest,
+    ranges: job.ranges,
     status: job.status,
     stage: job.stage,
     progress: Math.round(job.progress * 1000) / 1000,

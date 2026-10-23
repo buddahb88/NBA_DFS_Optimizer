@@ -124,8 +124,38 @@ export async function resolveSlate({ slateId = null, slateDate = null, site = nu
   return current ? liveSource(current, await getSlateDate(current)) : null;
 }
 
-/** players-table row for one snapshot row (plus player_key, game_date, game_start_time, archetype). */
-export function snapshotToPlayer(row) {
+// players range column -> snapshot model column (scripts/recompute-snapshot-ranges.js)
+const MODEL_RANGES = [
+  ['floor', 'floor_model'], ['ceiling', 'ceiling_model'], ['std_dev', 'std_dev_model'],
+  ['volatility', 'volatility_model'], ['boom_probability', 'boom_model'], ['bust_probability', 'bust_model'],
+  ['leverage_score', 'leverage_model']
+];
+export const RANGE_OPTIONS = ['model', 'original'];
+
+/**
+ * Range columns for a snapshot player. ranges 'model' (default) uses the
+ * outcome-model ranges when the row has them, 'original' the pre-lock ones.
+ * Both sets stay on the row as <col>_original / <col>_model; range_source
+ * says which one the plain columns hold.
+ */
+function rangeFields(row, ranges) {
+  const out = {};
+  const hasModel = row.floor_model !== null && row.floor_model !== undefined;
+  const useModel = ranges !== 'original' && hasModel;
+  for (const [col, modelCol] of MODEL_RANGES) {
+    const original = row[col] ?? null;
+    const model = row[modelCol] ?? null;
+    out[col] = useModel ? model : original;
+    out[`${col}_original`] = original;
+    out[`${col}_model`] = model;
+  }
+  out.range_source = useModel ? 'model' : 'original';
+  out.range_model_version = row.range_model_version ?? null;
+  return out;
+}
+
+/** players-table row for one snapshot row (plus player_key, game_date, game_start_time, archetype, range fields). */
+export function snapshotToPlayer(row, { ranges = 'model' } = {}) {
   return {
     id: row.id,
     slate_id: String(row.slate_id),
@@ -175,7 +205,8 @@ export function snapshotToPlayer(row) {
     player_key: row.player_key,
     game_date: toDateStr(row.game_date),
     game_start_time: row.game_start_time ?? null,
-    archetype: row.archetype ?? null
+    archetype: row.archetype ?? null,
+    ...rangeFields(row, ranges)
   };
 }
 
@@ -190,8 +221,10 @@ const matchesFilters = (p, filters) =>
  * players only, best value first (as playerModel.getBySlateId).
  * filters: { position, minSalary, maxSalary, team } (as getBySlateId).
  * includeZero: also players projected 0 (ruled out).
+ * ranges: 'model' (default) | 'original' - which floor / ceiling / std_dev /
+ * boom / bust a backtest uses (see rangeFields); live slates ignore it.
  */
-export async function loadSlatePlayers(source, { filters = {}, includeZero = false } = {}) {
+export async function loadSlatePlayers(source, { filters = {}, includeZero = false, ranges = 'model' } = {}) {
   if (!source) return [];
   if (!source.isBacktest) {
     const rows = includeZero
@@ -204,7 +237,7 @@ export async function loadSlatePlayers(source, { filters = {}, includeZero = fal
     `SELECT * FROM slate_player_snapshots WHERE game_date = ? AND slate_id = ? AND site = ? ORDER BY id`,
     source.slateDate, source.slateId, source.site);
   return rows
-    .map(snapshotToPlayer)
+    .map(row => snapshotToPlayer(row, { ranges }))
     .filter(p => (includeZero || Number(p.projected_points) > 0) && matchesFilters(p, filters))
     .sort((a, b) => (Number(b.value) || 0) - (Number(a.value) || 0)
       || (Number(b.projected_points) || 0) - (Number(a.projected_points) || 0));
@@ -285,7 +318,8 @@ export const sourceFields = (source) => (source ? {
   slateDate: source.slateDate,
   site: source.site,
   settingsKey: source.settingsKey,
-  label: source.label
+  label: source.label,
+  ...(source.ranges ? { ranges: source.ranges } : {})
 } : {});
 
 /**

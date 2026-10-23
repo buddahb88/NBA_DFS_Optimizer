@@ -48,6 +48,24 @@ export const SNAPSHOT_DETAIL_COLUMNS = [
 ];
 
 /**
+ * Ranges recomputed after the fact with the current outcome model
+ * (scripts/recompute-snapshot-ranges.js, only games before the slate date).
+ * Kept apart from the pre-lock floor / ceiling / std_dev / boom / bust, which
+ * stay as they were when the slate was live. Never written by a slate sync.
+ */
+export const RANGE_MODEL_COLUMNS = [
+  { name: 'floor_model', sqlite: 'REAL', azure: 'FLOAT' },
+  { name: 'ceiling_model', sqlite: 'REAL', azure: 'FLOAT' },
+  { name: 'std_dev_model', sqlite: 'REAL', azure: 'FLOAT' },
+  { name: 'volatility_model', sqlite: 'REAL', azure: 'FLOAT' },
+  { name: 'boom_model', sqlite: 'REAL', azure: 'FLOAT' },
+  { name: 'bust_model', sqlite: 'REAL', azure: 'FLOAT' },
+  { name: 'leverage_model', sqlite: 'REAL', azure: 'FLOAT' },
+  { name: 'range_model_version', sqlite: 'TEXT', azure: 'NVARCHAR(40)' },
+  { name: 'range_model_at', sqlite: 'TEXT', azure: 'NVARCHAR(40)' },
+];
+
+/**
  * slate_player_snapshots migration (idempotent, runs on every startup)
  *
  * A slate sync wipes players and slates, so every sync / salary import first
@@ -90,7 +108,7 @@ export async function migrateSlatePlayerSnapshots(db) {
       IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_snapshots_player_key_date')
         CREATE INDEX idx_snapshots_player_key_date ON slate_player_snapshots(player_key, game_date);
     `);
-    for (const { name, azure } of SNAPSHOT_DETAIL_COLUMNS) {
+    for (const { name, azure } of [...SNAPSHOT_DETAIL_COLUMNS, ...RANGE_MODEL_COLUMNS]) {
       await db.exec(`
         IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('slate_player_snapshots') AND name = '${name}')
           ALTER TABLE slate_player_snapshots ADD [${name}] ${azure};
@@ -130,7 +148,7 @@ export async function migrateSlatePlayerSnapshots(db) {
       CREATE INDEX IF NOT EXISTS idx_snapshots_player_key_date ON slate_player_snapshots(player_key, game_date);
     `);
     const existing = new Set((await db.all(`PRAGMA table_info(slate_player_snapshots)`)).map(c => c.name));
-    for (const { name, sqlite } of SNAPSHOT_DETAIL_COLUMNS) {
+    for (const { name, sqlite } of [...SNAPSHOT_DETAIL_COLUMNS, ...RANGE_MODEL_COLUMNS]) {
       if (!existing.has(name)) await db.exec(`ALTER TABLE slate_player_snapshots ADD COLUMN ${name} ${sqlite}`);
     }
     await db.exec(`CREATE INDEX IF NOT EXISTS idx_snapshots_slate ON slate_player_snapshots(slate_id, game_date)`);

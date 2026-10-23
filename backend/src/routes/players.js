@@ -29,11 +29,12 @@ async function withMatchups(slateId, players, query) {
 // (opponent's archetype defense cell: grade, rank, delta; see getSlateMatchups).
 // Optional season / site pin the matchup data. slateDate (YYYY-MM-DD, before
 // today) returns that night's saved slate read-only (services/slateSource.js),
-// each player with actualPoints / actualMinutes / resultStatus.
+// each player with actualPoints / actualMinutes / resultStatus; ranges=original
+// shows its pre-lock floor / ceiling instead of the outcome-model ones.
 router.get('/:slateId', async (req, res) => {
   try {
     const { slateId } = req.params;
-    const { position, minSalary, maxSalary, team, slateDate } = req.query;
+    const { position, minSalary, maxSalary, team, slateDate, ranges = 'model' } = req.query;
 
     const filters = {};
     if (position) filters.position = position;
@@ -43,7 +44,9 @@ router.get('/:slateId', async (req, res) => {
 
     if (slateDate) {
       const source = await resolveSlate({ slateId, slateDate });
-      const players = await withActuals(source, await loadSlatePlayers(source, { filters }));
+      const players = await withActuals(source, await loadSlatePlayers(source, {
+        filters, ranges: ranges === 'original' ? 'original' : 'model'
+      }));
       return res.json(await withMatchups(source.slateId, players, req.query));
     }
 

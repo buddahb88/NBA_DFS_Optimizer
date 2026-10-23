@@ -5,19 +5,21 @@ import { generateSlateBreakdown } from '../utils/slateAnalyzer.js';
 import { resolveSite } from '../utils/resolveSite.js';
 import { validateStackRules, STACK_PRESETS } from '../services/optimizer/constraints/stacking.js';
 import {
-  SlateSourceError, loadSlatePlayers, resolveSlate, scoreLineups, sourceFields, withActuals
+  RANGE_OPTIONS, SlateSourceError, loadSlatePlayers, resolveSlate, scoreLineups, sourceFields, withActuals
 } from '../services/slateSource.js';
 
 const router = express.Router();
 
 /**
- * Slate players for a request body: { slateId, slateDate?, site? }.
- * slateDate before today rebuilds that saved slate (services/slateSource.js);
+ * Slate players for a request body: { slateId, slateDate?, site?, ranges? }.
+ * slateDate before today rebuilds that saved slate (services/slateSource.js)
+ * with the outcome-model ranges, or the pre-lock ones with ranges: 'original';
  * site defaults to the slate's. Returns { source, site, players } or { status, error }.
  */
 async function requestSlate(body = {}) {
-  const { slateId, slateDate } = body;
+  const { slateId, slateDate, ranges = 'model' } = body;
   if (!slateId && !slateDate) return { status: 400, error: 'slateId is required' };
+  if (!RANGE_OPTIONS.includes(ranges)) return { status: 400, error: `ranges must be one of: ${RANGE_OPTIONS.join(', ')}` };
   let source;
   try {
     source = await resolveSlate({ slateId, slateDate });
@@ -29,9 +31,9 @@ async function requestSlate(body = {}) {
     ? { site: source.site }
     : await resolveSite(body.site, source?.slateId ?? slateId);
   if (siteError) return { status: 400, error: siteError };
-  const players = await loadSlatePlayers(source);
+  const players = await loadSlatePlayers(source, { ranges });
   if (!players.length) return { status: 404, error: 'No players found for this slate' };
-  return { source, site, players };
+  return { source: source.isBacktest ? { ...source, ranges } : source, site, players };
 }
 
 /**
