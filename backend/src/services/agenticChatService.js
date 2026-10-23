@@ -21,7 +21,9 @@ import AnalystAgent from '../agents/AnalystAgent.js';
 import db from '../config/database.js';
 import { getCurrentSlateInfo } from './slateFreshness.js';
 
-export const ORCHESTRATOR_SYSTEM_PROMPT = `You are an expert NBA DFS assistant with access to specialized agents.
+const PROMPT_INTRO = `You are an expert NBA DFS assistant with access to specialized agents.
+
+You plan and delegate. Your only tools are delegate_to_agent and get_current_slate; every data tool belongs to an agent.
 
 Your role is to:
 1. Understand the user's question or task
@@ -34,7 +36,7 @@ Available Agents:
 - **research**: Slate data and research tools (use for: "who are the top...", "best matchups tonight", "who's missing / usage bumps", "how did this lineup score on <date>", "how accurate were projections", "what's the slate")
 - **analyst**: Player-level history and context (use for: "how does X perform against...", "X's role / usage / archetype", "X without teammate Y", "how does <team> defend <archetype>", trends)
 
-Both agents have dedicated tools (get_archetype_matchups, get_team_defense_profile, get_player_profile, get_usage_bumps, get_missing_players, get_streaks_and_consistency, score_lineup, get_projection_results). In the task, name the tool to use when one fits; raw SQL is only a fallback.
+In the task, name the tool to use when one fits (see TOOL OWNERSHIP); raw SQL is only a fallback.
 
 Decision Guidelines:
 - For simple questions, use research agent to query data
@@ -63,6 +65,44 @@ IMPORTANT:
 - After receiving agent results, synthesize and explain findings
 - If the task isn't complete, continue with more agent calls`;
 
+// The orchestrator's own tools; everything else is an agent's
+const ORCHESTRATOR_TOOL_NAMES = new Set(['delegate_to_agent', 'get_current_slate']);
+
+/**
+ * Map each agent tool name to the agent that owns it, from the agents' own
+ * tool lists so it never drifts. Tools several agents share (the research
+ * tools are also the analyst's) go to the first agent listing them.
+ * @param {object} agents - { optimizer, research, analyst } agent instances
+ * @returns {object} tool name -> agent name
+ */
+export function buildToolOwners(agents) {
+  const owners = {};
+  for (const [agentName, agent] of Object.entries(agents)) {
+    for (const { name } of agent.tools) {
+      if (!ORCHESTRATOR_TOOL_NAMES.has(name) && !owners[name]) owners[name] = agentName;
+    }
+  }
+  return owners;
+}
+
+/** agent name -> tool names it owns */
+function toolsByAgent(owners) {
+  const byAgent = {};
+  for (const [tool, agentName] of Object.entries(owners)) (byAgent[agentName] ||= []).push(tool);
+  return byAgent;
+}
+
+export function buildOrchestratorPrompt(owners) {
+  const ownership = Object.entries(toolsByAgent(owners))
+    .map(([agentName, tools]) => `- ${agentName}: ${tools.join(', ')}`)
+    .join('\n');
+  return `${PROMPT_INTRO}
+
+TOOL OWNERSHIP (delegate to the owner; the analyst can also use the research tools):
+${ownership}
+- When the user names a tool (e.g. "use get_usage_bumps"), delegate to the agent that owns it and name the tool in the task. Never call an agent's tool yourself`;
+}
+
 class AgenticChatService {
   constructor() {
     this.client = null;
@@ -75,6 +115,9 @@ class AgenticChatService {
       research: new ResearchAgent(),
       analyst: new AnalystAgent()
     };
+
+    this.toolOwners = buildToolOwners(this.agents);
+    this.systemPrompt = buildOrchestratorPrompt(this.toolOwners);
 
     // Orchestrator tools - primarily delegation
     this.orchestratorTools = this.createOrchestratorTools();
@@ -178,7 +221,11 @@ class AgenticChatService {
       });
     }
 
-    return JSON.stringify({ success: false, error: `Unknown tool: ${name}` });
+    return JSON.stringify({
+      success: false,
+      error: `Unknown tool: ${name}. No agent owns it. Your tools are delegate_to_agent and get_current_slate; use delegate_to_agent with the agent that owns the tool you need (see toolOwners).`,
+      toolOwners: toolsByAgent(this.toolOwners)
+    });
   }
 
   /**
@@ -238,7 +285,7 @@ class AgenticChatService {
 
     // Build messages array
     const messages = [
-      { role: 'system', content: ORCHESTRATOR_SYSTEM_PROMPT }
+      { role: 'system', content: this.systemPrompt }
     ];
 
     // Add recent chat history (last 10 messages for context)
@@ -370,6 +417,9 @@ class AgenticChatService {
   async runToolCall(toolName, toolArgs, context, callbacks, allToolsUsed, agentsUsed) {
     const { onThinking, onToolCall, onToolResult } = callbacks;
 
+    const owner = this.toolOwners[toolName];
+    if (owner) return this.routeToolCall(owner, toolName, toolArgs, callbacks, allToolsUsed, agentsUsed);
+
     // Stream thinking
     if (toolName === 'delegate_to_agent') {
       onThinking?.(`Delegating to ${toolArgs.agent} agent: ${toolArgs.task}`);
@@ -390,6 +440,39 @@ class AgenticChatService {
   }
 
   /**
+   * Hand a tool call the orchestrator made itself to the agent that owns it.
+   * Runs the tool directly on that agent (no sub-agent model loop), so the
+   * misroute costs no extra step, and streams it as an agent hand-off.
+   */
+  async routeToolCall(agentName, toolName, toolArgs, callbacks, allToolsUsed, agentsUsed) {
+    const { onThinking, onToolCall, onToolResult, onUiBlock, onAgentSpawn, onAgentComplete } = callbacks;
+
+    console.log(`\n↪️ Routing ${toolName} from orchestrator to ${agentName} agent`);
+    onThinking?.(`${toolName} belongs to the ${agentName} agent - handing it off`);
+    onAgentSpawn?.(agentName, `Routed from orchestrator: ${toolName}`);
+    if (!agentsUsed.includes(agentName)) agentsUsed.push(agentName);
+
+    const raw = await this.agents[agentName].executeTool(toolName, toolArgs, { onToolCall, onToolResult, onUiBlock });
+    let result;
+    try {
+      result = JSON.parse(raw);
+    } catch {
+      result = raw;
+    }
+    const failed = result?.success === false;
+
+    onAgentComplete?.(agentName, { success: !failed, error: failed ? result.error || result.message : undefined, routedTool: toolName });
+    allToolsUsed.push({ name: toolName, args: toolArgs, agent: agentName, routed: true });
+
+    return JSON.stringify({
+      routedTo: agentName,
+      tool: toolName,
+      note: `${toolName} is a ${agentName} agent tool; it was run by that agent. Delegate to it directly next time.`,
+      result
+    });
+  }
+
+  /**
    * Same orchestration loop as chat(), against Claude on Azure AI Foundry
    */
   async chatWithClaude(message, sessionId, { maxIterations, chatHistory, context, callbacks }) {
@@ -399,7 +482,7 @@ class AgenticChatService {
     try {
       const result = await runClaudeToolLoop({
         client: this.claudeClient,
-        system: ORCHESTRATOR_SYSTEM_PROMPT,
+        system: this.systemPrompt,
         messages: [...toClaudeHistory(chatHistory.slice(-10)), { role: 'user', content: message }],
         tools: this.orchestratorTools.map(t => toClaudeTool(t.function)),
         executeTool: (toolName, toolArgs) =>
@@ -573,4 +656,6 @@ class AgenticChatService {
 }
 
 // Export singleton instance
-export default new AgenticChatService();
+const agenticChatService = new AgenticChatService();
+export const ORCHESTRATOR_SYSTEM_PROMPT = agenticChatService.systemPrompt;
+export default agenticChatService;
