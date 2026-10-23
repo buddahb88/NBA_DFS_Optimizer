@@ -511,7 +511,8 @@ export function weakTiers(rows, stat = 'fp') {
 }
 
 const SLATE_SQL = 'SELECT slate_id FROM slates WHERE slate_id = ?';
-const SLATE_PLAYER_FIELDS = ['player_id', 'name', 'team', 'opponent', 'position', 'salary', 'projected_points',
+// player_key: backtest actuals are looked up by it (loadActuals)
+const SLATE_PLAYER_FIELDS = ['player_id', 'player_key', 'name', 'team', 'opponent', 'position', 'salary', 'projected_points',
   'projected_minutes', 'injury_status'];
 
 const dayBefore = (date) => new Date(Date.parse(`${date}T00:00:00Z`) - 86400000).toISOString().slice(0, 10);

@@ -38,3 +38,18 @@ export function lineupActual(entries = []) {
 }
 
 export const formatActual = (v) => (v === null || v === undefined || Number.isNaN(Number(v)) ? '—' : Number(v).toFixed(1))
+
+const RESULTS = {
+  PLAYED: { label: 'Played', tone: 'positive' },
+  DNP: { label: 'DNP', tone: 'negative' },
+  INACTIVE: { label: 'Inactive', tone: 'negative' },
+  PENDING: { label: 'Pending', tone: 'neutral' },
+}
+
+/** Backtest result for a player ({ resultStatus, actualMinutes }): { label, tone }, minutes when played; null without one. */
+export function resultLabel({ resultStatus, actualMinutes } = {}) {
+  const result = RESULTS[resultStatus]
+  if (!result) return null
+  if (resultStatus !== 'PLAYED' || actualMinutes === null || actualMinutes === undefined) return { ...result }
+  return { label: `${result.label} · ${Math.round(Number(actualMinutes))} min`, tone: result.tone }
+}

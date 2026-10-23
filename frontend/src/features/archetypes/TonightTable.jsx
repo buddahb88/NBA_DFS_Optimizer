@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Badge, DataTable, Tabs, Tooltip } from '../../components/ui';
 import { TONIGHT_SORTS, edgeBadges, edgeExplanation, formatDelta, statFor, tonightSorting } from './archetypes';
 import { formatActual } from '../slate/backtest';
+import ResultBadge from '../slate/ResultBadge';
 
 // Backtest only: what the player actually scored that night
 const ACTUAL_COLUMN = {
@@ -11,6 +12,16 @@ const ACTUAL_COLUMN = {
   meta: { numeric: true, label: 'Actual DK points' },
   sortUndefined: 'last',
   cell: ({ getValue }) => <span className="font-semibold">{formatActual(getValue())}</span>,
+};
+
+// Backtest only: played (with actual minutes) / DNP / inactive / pending
+const RESULT_COLUMN = {
+  id: 'result',
+  accessorFn: (p) => p.resultStatus ?? null,
+  header: 'Result',
+  meta: { label: 'Result that night' },
+  sortUndefined: 'last',
+  cell: ({ row }) => <ResultBadge player={row.original} />,
 };
 
 function columnsFor(stat, edgeConfig, isBacktest) {
@@ -91,12 +102,14 @@ function columnsFor(stat, edgeConfig, isBacktest) {
     },
     {
       accessorKey: 'injury_status',
-      header: 'Status',
+      // A backtest shows what was known before lock; Result says what happened
+      header: isBacktest ? 'Pre-lock status' : 'Status',
+      meta: { label: isBacktest ? 'Injury status before lock' : 'Injury status' },
       cell: ({ getValue }) => (getValue() ? <Badge tone="caution" size="sm">{getValue()}</Badge> : null),
     },
   ];
-  // Actual next to the projection
-  if (isBacktest) columns.splice(columns.findIndex((c) => c.accessorKey === 'projected_points') + 1, 0, ACTUAL_COLUMN);
+  // Actual and Result next to the projection
+  if (isBacktest) columns.splice(columns.findIndex((c) => c.accessorKey === 'projected_points') + 1, 0, ACTUAL_COLUMN, RESULT_COLUMN);
   return columns;
 }
 

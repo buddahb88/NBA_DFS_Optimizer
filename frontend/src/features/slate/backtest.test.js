@@ -6,6 +6,7 @@ import {
   findBacktest,
   formatActual,
   lineupActual,
+  resultLabel,
   settingsKeyFor,
   slateRequestParams,
 } from './backtest'
@@ -49,5 +50,13 @@ describe('backtest helpers', () => {
 
   it('names why live-only actions are off in a backtest', () => {
     expect(BACKTEST_DISABLED).toMatch(/Live/)
+  })
+
+  it('result label: status with actual minutes, Pending without a box score', () => {
+    expect(resultLabel({ resultStatus: 'PLAYED', actualMinutes: 35.6 })).toEqual({ label: 'Played · 36 min', tone: 'positive' })
+    expect(resultLabel({ resultStatus: 'DNP', actualMinutes: 0 })).toEqual({ label: 'DNP', tone: 'negative' })
+    expect(resultLabel({ resultStatus: 'INACTIVE', actualMinutes: 0 })).toEqual({ label: 'Inactive', tone: 'negative' })
+    expect(resultLabel({ resultStatus: 'PENDING' })).toEqual({ label: 'Pending', tone: 'neutral' })
+    expect(resultLabel({})).toBeNull()
   })
 })

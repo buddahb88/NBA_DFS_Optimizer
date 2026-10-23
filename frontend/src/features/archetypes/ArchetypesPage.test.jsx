@@ -144,6 +144,8 @@ describe('ArchetypesPage', () => {
     renderPage()
     fireEvent.click(screen.getByRole('tab', { name: 'Tonight' }))
     const row = (await screen.findByText('Guard One')).closest('tr')
+    expect(screen.queryByRole('columnheader', { name: /Result/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('columnheader', { name: /Actual/ })).not.toBeInTheDocument()
     expect(within(row).getByText('New team')).toBeInTheDocument()
     expect(within(row).getByText('Role ↓')).toBeInTheDocument()
     const crowded = within(row).getByText('Crowded')
@@ -217,7 +219,10 @@ describe('ArchetypesPage', () => {
     archetypesAPI.getTonight.mockResolvedValue({
       data: {
         ...TONIGHT, isBacktest: true, slateDate: '2026-10-21', endDate: '2026-10-20',
-        players: TONIGHT.players.map((p, i) => ({ ...p, actualPoints: [52.5, 12][i], resultStatus: 'PLAYED' })),
+        players: TONIGHT.players.map((p, i) => ({
+          ...p, actualPoints: [52.5, 0][i], actualMinutes: [36, 0][i], resultStatus: ['PLAYED', 'DNP'][i],
+          injury_status: [null, 'GTD'][i],
+        })),
       },
     })
     renderPage()
@@ -225,6 +230,13 @@ describe('ArchetypesPage', () => {
 
     expect(await screen.findByText('52.5')).toBeInTheDocument()
     expect(screen.getByRole('columnheader', { name: /Actual/ })).toBeInTheDocument()
+    // Result: what happened that night; the injury tag is pre-lock info
+    expect(screen.getByRole('columnheader', { name: /Result/ })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: /Pre-lock status/ })).toBeInTheDocument()
+    expect(within(screen.getByText('Guard One').closest('tr')).getByText('Played · 36 min')).toBeInTheDocument()
+    const dnp = screen.getByText('Wing Two').closest('tr')
+    expect(within(dnp).getByText('DNP')).toBeInTheDocument()
+    expect(within(dnp).getByText('GTD')).toBeInTheDocument()
     expect(screen.getByTestId('backtest-badge')).toHaveTextContent('Backtest 2026-10-21')
     expect(screen.getByText(/Defense through 2026-10-20/)).toBeInTheDocument()
     expect(archetypesAPI.getTonight).toHaveBeenLastCalledWith(expect.objectContaining({ slateId: '29805', slateDate: '2026-10-21' }))

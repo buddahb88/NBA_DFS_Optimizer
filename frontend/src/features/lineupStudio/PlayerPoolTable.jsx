@@ -2,8 +2,9 @@ import { useMemo, useState } from 'react';
 import { Badge, Button, DataTable, IconSearch, Input, cn } from '../../components/ui';
 import { formatSalary } from './lineupMath';
 import { formatActual } from '../slate/backtest';
+import ResultBadge from '../slate/ResultBadge';
 
-/** Optimizer pool with lock / exclude toggles; showActual (backtest) adds actual DK points. */
+/** Optimizer pool with lock / exclude toggles; showActual (backtest) adds actual DK points and the result. */
 export default function PlayerPoolTable({ players, locked, excluded, onToggleLock, onToggleExclude, onClear, showActual = false }) {
   const [search, setSearch] = useState('');
 
@@ -42,6 +43,11 @@ export default function PlayerPoolTable({ players, locked, excluded, onToggleLoc
             accessorFn: (p) => p.actualPoints ?? -1,
             cell: (c) => <span className="font-semibold">{formatActual(c.row.original.actualPoints)}</span>,
             meta: { numeric: true },
+          }, {
+            id: 'result',
+            header: 'Result',
+            accessorFn: (p) => p.resultStatus ?? '',
+            cell: (c) => <ResultBadge player={c.row.original} />,
           }]
         : []),
       {

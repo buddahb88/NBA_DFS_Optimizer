@@ -27,6 +27,7 @@ import playerModel from '../models/playerModel.js';
 import { easternDate, rosterPositionsFor } from './slateSnapshotService.js';
 import { getSlateDate, slateDateFields } from './slateFreshness.js';
 import { getPlayerResultsOnDate } from './resultsService.js';
+import { playerKey } from '../utils/playerKey.js';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -257,7 +258,8 @@ export async function getSlatePlayers(request = {}, options = {}) {
 export async function loadActuals(source, players) {
   const out = new Map();
   if (!source?.isBacktest || players.length === 0) return out;
-  const keyOf = (p) => p.player_key;
+  // Callers that trim player objects may drop player_key; the name still resolves
+  const keyOf = (p) => p.player_key ?? (p.name ? playerKey(p.name) : null);
   const results = await getPlayerResultsOnDate({
     playerKeys: players.map(keyOf).filter(Boolean), date: source.slateDate, site: source.site
   });

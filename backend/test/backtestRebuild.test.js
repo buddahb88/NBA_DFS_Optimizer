@@ -164,6 +164,36 @@ describe('Player Pool and Tonight on a snapshot slate', () => {
     assert.equal(body.endDate, '2026-10-20');
     assert.equal(body.slatePlayers, pastPlayers.length);
   });
+
+  test('Tonight for a past date carries actual points and result status per listed player', async () => {
+    // 2025-26 games before the slate: BBB allows far more than expected to every position
+    let gameId = 0;
+    for (const [i, pos] of ['G', 'F', 'C'].entries()) {
+      const name = `Hist ${pos}`;
+      const games = [['DDD', '2026-01-01', 40], ['DDD', '2026-01-02', 40], ['DDD', '2026-01-03', 40], ['BBB', '2026-01-04', 80]];
+      for (const [opp, date, fp] of games) {
+        gameId += 1;
+        await db.run(`INSERT INTO historical_games (game_id, player_name, player_key, team, opponent, position, game_date, minutes,
+            points, rebounds, assists, dk_fantasy_points, season, season_type) VALUES (?, ?, ?, 'ZZZ', ?, ?, ?, 30, 10, 5, 5, ?, '2025-26', 'regular')`,
+          `g${gameId}-${i}`, name, name.toLowerCase(), opp, pos, date, fp);
+      }
+    }
+    const res = await fetch(`${baseUrl}/archetypes/tonight?slateDate=${PAST}&season=2025-26&grouping=position`);
+    const body = await res.json();
+    assert.equal(res.status, 200, JSON.stringify(body));
+    assert.ok(body.players.length > 0, 'AAA players face the weak BBB defense');
+    for (const r of body.players) {
+      const p = pastPlayers.find(x => String(x.player_id) === String(r.player_id));
+      assert.equal(r.actualPoints, expectedActual(p), r.name);
+    }
+    const p1 = body.players.find(r => r.name === 'Player 1');
+    assert.equal(p1.actualPoints, 0);
+    assert.equal(p1.actualMinutes, 0);
+    assert.equal(p1.resultStatus, 'DNP');
+    const p2 = body.players.find(r => r.name === 'Player 2');
+    assert.equal(p2.resultStatus, 'PLAYED');
+    assert.equal(p2.actualMinutes, 30);
+  });
 });
 
 describe('portfolio builder on a snapshot slate', () => {

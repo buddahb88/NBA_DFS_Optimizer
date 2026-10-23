@@ -178,6 +178,16 @@ describe('actual results', () => {
     assert.equal(lineup.actualPoints, 41.5);
   });
 
+  test('players trimmed of player_key still get actuals (key falls back to the name)', async () => {
+    const s = await source.resolveSlate({ slateDate: PAST, now: NOW });
+    const [a] = await source.loadSlatePlayers(s);
+    await db.run(`INSERT INTO historical_games (player_name, player_key, team, opponent, game_date, minutes, points, dk_fantasy_points)
+      VALUES (?, ?, ?, ?, ?, 36, 30, 46.25)`, a.name, playerKey(a.name), a.team, a.opponent, PAST);
+    const { player_key, ...trimmed } = a;
+    const actuals = await source.loadActuals(s, [trimmed]);
+    assert.deepEqual(actuals.get(a.id), { actualPoints: 46.25, actualMinutes: 36, resultStatus: 'PLAYED' });
+  });
+
   test('live slates get no actuals', async () => {
     const s = await source.resolveSlate({ now: NOW });
     const players = await source.loadSlatePlayers(s);

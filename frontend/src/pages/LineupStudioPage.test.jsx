@@ -270,7 +270,11 @@ describe('LineupStudioPage', () => {
     }
 
     it('rebuilds the saved slate, shows actual points and turns off live-only actions', async () => {
-      playersAPI.getBySlateId.mockResolvedValue({ data: PLAYERS.map((p) => ({ ...p, actualPoints: 30 })) })
+      playersAPI.getBySlateId.mockResolvedValue({
+        data: PLAYERS.map((p, i) => (i === 0
+          ? { ...p, actualPoints: 0, actualMinutes: 0, resultStatus: 'INACTIVE' }
+          : { ...p, actualPoints: 30, actualMinutes: 31, resultStatus: 'PLAYED' })),
+      })
       optimizerAPI.generate.mockResolvedValue({
         data: { isBacktest: true, lineups: [scored([1, 2, 3, 4, 5, 6, 7, 8], [50, 40, 30, 20, 10, 5, 2.5, 0])] },
       })
@@ -298,6 +302,9 @@ describe('LineupStudioPage', () => {
 
       fireEvent.click(screen.getByRole('tab', { name: 'Player pool' }))
       expect(await screen.findByRole('columnheader', { name: /Actual/ })).toBeInTheDocument()
+      expect(screen.getByRole('columnheader', { name: /Result/ })).toBeInTheDocument()
+      expect(screen.getByText('Inactive')).toBeInTheDocument()
+      expect(screen.getAllByText('Played · 31 min').length).toBeGreaterThan(0)
     })
 
     it('builds a backtest portfolio with slateDate and shows actual points', async () => {
