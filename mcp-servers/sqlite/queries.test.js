@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
-import { archetypeMatchups, matchupSeason, playerHistory, playerProfile } from './queries.js';
+import { archetypeMatchups, gppPlays, matchupSeason, playerHistory, playerProfile, valuePlays } from './queries.js';
 
 function seed() {
   const db = new Database(':memory:');
@@ -98,4 +98,43 @@ test('playerHistory matches by player_key, skips DNPs and summarises the regular
   assert.deepEqual(recentGames.map(g => [g.game_date, g.season_type]), [['2026-04-20', 'playoffs'], ['2026-04-10', 'regular']]);
   assert.ok(!('usg_pct' in recentGames[0]));
   assert.deepEqual(seasonStats.map(s => [s.season, s.games, s.avg_dk]), [['2025-26', 1, 60]]);
+});
+
+function seedSlates() {
+  const db = new Database(':memory:');
+  db.exec(`
+    CREATE TABLE slates (slate_id TEXT, name TEXT, site TEXT, start_time TEXT, created_at TEXT);
+    CREATE TABLE players (id INTEGER PRIMARY KEY, slate_id TEXT, name TEXT, position TEXT, team TEXT, opponent TEXT,
+      salary INTEGER, projected_points REAL, floor REAL, ceiling REAL, rostership REAL, leverage_score REAL, boom_probability REAL);
+    CREATE TABLE slate_player_snapshots (id INTEGER PRIMARY KEY, game_date TEXT, slate_id TEXT, site TEXT, player_key TEXT,
+      player_name TEXT, position TEXT, team TEXT, opponent TEXT, salary INTEGER, projected_points REAL, floor REAL, ceiling REAL,
+      rostership REAL, leverage_score REAL, boom_probability REAL);
+    CREATE TABLE historical_games (player_key TEXT, game_date TEXT, minutes REAL, dk_fantasy_points REAL);
+  `);
+  db.prepare(`INSERT INTO slates VALUES ('live', 'Main', 'draftkings', NULL, '2026-10-23')`).run();
+  db.prepare(`INSERT INTO players (slate_id, name, position, team, opponent, salary, projected_points, ceiling, rostership, leverage_score)
+    VALUES ('live', 'Cheap Live', 'PG', 'LAL', 'MEM', 4000, 24, 45, 5, 3)`).run();
+  const snap = db.prepare(`INSERT INTO slate_player_snapshots (game_date, slate_id, site, player_key, player_name, position, team, opponent,
+    salary, projected_points, ceiling, rostership, leverage_score) VALUES ('2026-10-21', 'past', 'draftkings', ?, ?, 'SG', 'GSW', 'LAL', ?, ?, ?, ?, ?)`);
+  snap.run('cheap past', 'Cheap Past', 4000, 22, 44, 4, 5);
+  snap.run('pricey past', 'Pricey Past', 9000, 45, 60, 30, 1);
+  db.prepare(`INSERT INTO historical_games VALUES ('cheap past', '2026-10-21', 28, 31.5)`).run();
+  return db;
+}
+
+test('valuePlays reads the live slate, or a past date\'s saved slate with actual points', () => {
+  const db = seedSlates();
+  assert.deepEqual(valuePlays(db, {}).plays.map(p => p.name), ['Cheap Live']);
+  const past = valuePlays(db, { slateDate: '2026-10-21' });
+  assert.equal(past.backtest, true);
+  assert.equal(past.slateId, 'past');
+  assert.deepEqual(past.plays.map(p => [p.name, p.actual_points]), [['Cheap Past', 31.5]]);
+  assert.equal(valuePlays(db, { slateDate: '2020-01-01' }).plays.length, 0);
+});
+
+test('gppPlays reads the live slate, or a past date\'s saved slate with actual points', () => {
+  const db = seedSlates();
+  assert.deepEqual(gppPlays(db, {}).plays.map(p => p.name), ['Cheap Live']);
+  const past = gppPlays(db, { slateDate: '2026-10-21' });
+  assert.deepEqual(past.plays.map(p => [p.name, p.actual_points]), [['Cheap Past', 31.5]]);
 });

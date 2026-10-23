@@ -12,9 +12,10 @@ export const MIN_HIST_MINUTES = 10;
  * Load recent DK fantasy point history for the given player names.
  * Names are matched accent/suffix-insensitively ("Luka Doncic" -> "Luka Dončić").
  * Works on both sqlite and azuresql (positional ? params are converted by the db wrapper).
+ * beforeDate (YYYY-MM-DD): only games before it (a backtest must not see its own night).
  * @returns {Promise<Map<string, {n:number, mean:number, sd:number}>>} keyed by the requested name
  */
-export async function fetchHistoricalStats(playerNames, { window = HIST_GAMES_WINDOW } = {}) {
+export async function fetchHistoricalStats(playerNames, { window = HIST_GAMES_WINDOW, beforeDate = null } = {}) {
   const requested = [...new Set(playerNames.filter(Boolean))];
   const stats = new Map();
   if (requested.length === 0) return stats;
@@ -42,8 +43,9 @@ export async function fetchHistoricalStats(playerNames, { window = HIST_GAMES_WI
        WHERE player_name IN (${placeholders})
          AND dk_fantasy_points IS NOT NULL
          AND minutes >= ${MIN_HIST_MINUTES}
+         ${beforeDate ? 'AND game_date < ?' : ''}
        ORDER BY game_date DESC`,
-      ...chunk
+      ...chunk, ...(beforeDate ? [beforeDate] : [])
     );
     for (const row of rows) {
       let list = byName.get(row.player_name);

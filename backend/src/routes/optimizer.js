@@ -1,12 +1,38 @@
 import express from 'express';
-import playerModel from '../models/playerModel.js';
 import { generateLineupBatch, ExposureConfigError } from '../services/optimizer/constraints/exposure.js';
 import { reviewLineup } from '../utils/autoTuneSettings.js';
 import { generateSlateBreakdown } from '../utils/slateAnalyzer.js';
 import { resolveSite } from '../utils/resolveSite.js';
 import { validateStackRules, STACK_PRESETS } from '../services/optimizer/constraints/stacking.js';
+import {
+  SlateSourceError, loadSlatePlayers, resolveSlate, scoreLineups, sourceFields, withActuals
+} from '../services/slateSource.js';
 
 const router = express.Router();
+
+/**
+ * Slate players for a request body: { slateId, slateDate?, site? }.
+ * slateDate before today rebuilds that saved slate (services/slateSource.js);
+ * site defaults to the slate's. Returns { source, site, players } or { status, error }.
+ */
+async function requestSlate(body = {}) {
+  const { slateId, slateDate } = body;
+  if (!slateId && !slateDate) return { status: 400, error: 'slateId is required' };
+  let source;
+  try {
+    source = await resolveSlate({ slateId, slateDate });
+  } catch (error) {
+    if (error instanceof SlateSourceError) return { status: error.status, error: error.message };
+    throw error;
+  }
+  const { site, error: siteError } = source?.isBacktest && !body.site
+    ? { site: source.site }
+    : await resolveSite(body.site, source?.slateId ?? slateId);
+  if (siteError) return { status: 400, error: siteError };
+  const players = await loadSlatePlayers(source);
+  if (!players.length) return { status: 404, error: 'No players found for this slate' };
+  return { source, site, players };
+}
 
 /**
  * POST /api/optimizer/generate
@@ -16,26 +42,16 @@ const router = express.Router();
  * the slate's site), lockedPlayers, excludedPlayers, minUniqueness (min players
  * each lineup differs from every earlier lineup in the request), stackRules
  * (team/game stack rules and presets, see services/optimizer/constraints/stacking.js;
- * teamStacks is an alias)
+ * teamStacks is an alias), slateDate (YYYY-MM-DD: before today rebuilds that
+ * night's saved slate; lineups then carry actual points per player and in total)
  */
 router.post('/generate', async (req, res) => {
   try {
     const {
-      slateId,
       mode = 'cash',
       numLineups = 1,
-      lockedPlayers = [],
-      excludedPlayers = [],
-      minSalary,
-      maxExposure = 100,
-      teamStacks = [],
-      randomness = 0,
-      useProjections = true
+      teamStacks = []
     } = req.body;
-
-    if (!slateId) {
-      return res.status(400).json({ error: 'slateId is required' });
-    }
 
     const stackErrors = [
       ...validateStackRules(req.body.stackRules),
@@ -45,33 +61,28 @@ router.post('/generate', async (req, res) => {
       return res.status(400).json({ error: 'Invalid stack rules', details: stackErrors });
     }
 
-    const { site, error: siteError } = await resolveSite(req.body.site, slateId);
-    if (siteError) {
-      return res.status(400).json({ error: siteError });
+    const slate = await requestSlate(req.body);
+    if (slate.error) {
+      return res.status(slate.status).json({ error: slate.error });
     }
+    const { source, site, players } = slate;
 
-    console.log(`🎯 Optimizing ${numLineups} lineup(s) for slate ${slateId} (${site}, ${mode} mode)`);
-
-    // Get all players for the slate
-    const players = await playerModel.getBySlateId(slateId);
-
-    if (!players || players.length === 0) {
-      return res.status(404).json({ error: 'No players found for this slate' });
-    }
-
+    console.log(`🎯 Optimizing ${numLineups} lineup(s) for slate ${source.slateId} (${site}, ${mode} mode, ${source.label})`);
     console.log(`📊 Found ${players.length} active players`);
 
     // Exposure / uniqueness / randomness are hard constraints across the batch
     // (request contract documented in services/optimizer/constraints/exposure.js);
     // each solve runs the site-aware constraint pipeline, so stacking applies too
     const result = generateLineupBatch(players, { ...req.body, site });
+    const lineups = await scoreLineups(source, result.lineups || [], players);
 
-    console.log(`✅ Generated ${result.lineups?.length || 0} valid lineup(s)`);
+    console.log(`✅ Generated ${lineups.length} valid lineup(s)`);
 
     res.json({
       success: true,
-      lineups: result.lineups || [],
-      count: result.lineups?.length || 0,
+      ...sourceFields(source),
+      lineups,
+      count: lineups.length,
       exposureStats: result.exposureStats,
       exposureSummary: result.exposureSummary,
       warnings: result.warnings,
@@ -104,30 +115,32 @@ router.get('/stack-presets', (req, res) => {
  */
 router.post('/slate-breakdown', async (req, res) => {
   try {
-    const { slateId, mode = 'gpp' } = req.body;
+    const { mode = 'gpp' } = req.body;
 
-    if (!slateId) {
-      return res.status(400).json({ error: 'slateId is required' });
+    const slate = await requestSlate(req.body);
+    if (slate.error) {
+      return res.status(slate.status).json({ error: slate.error });
     }
+    const { source, players } = slate;
 
-    console.log(`🤖 Generating AI slate breakdown for slate ${slateId} (${mode} mode)`);
+    console.log(`🤖 Generating AI slate breakdown for slate ${source.slateId} (${mode} mode, ${source.label})`);
 
-    // Get all players for the slate
-    const players = await playerModel.getBySlateId(slateId);
-
-    if (!players || players.length === 0) {
-      return res.status(404).json({ error: 'No players found for this slate' });
-    }
-
-    // Generate comprehensive breakdown
+    // Generate comprehensive breakdown (pre-lock data only; actuals ride along for a backtest)
     const breakdown = await generateSlateBreakdown(players, mode);
 
     console.log(`✅ Slate breakdown complete`);
 
-    res.json({
-      success: true,
-      ...breakdown
-    });
+    const response = { success: true, ...sourceFields(source), ...breakdown };
+    if (source.isBacktest) {
+      const scored = await withActuals(source, players);
+      response.actualResults = scored
+        .filter(p => p.actualPoints !== null && p.actualPoints !== undefined)
+        .sort((a, b) => b.actualPoints - a.actualPoints)
+        .slice(0, 15)
+        .map(p => ({ id: p.id, name: p.name, team: p.team, salary: p.salary, projected: p.projected_points,
+          actualPoints: p.actualPoints, resultStatus: p.resultStatus }));
+    }
+    res.json(response);
   } catch (error) {
     console.error('Slate breakdown error:', error);
     res.status(500).json({
@@ -143,32 +156,36 @@ router.post('/slate-breakdown', async (req, res) => {
  */
 router.post('/review-lineup', async (req, res) => {
   try {
-    const { slateId, lineup, mode = 'gpp' } = req.body;
+    const { lineup, mode = 'gpp' } = req.body;
 
-    if (!slateId || !lineup) {
+    if ((!req.body.slateId && !req.body.slateDate) || !lineup) {
       return res.status(400).json({ error: 'slateId and lineup are required' });
     }
 
-    const { site, error: siteError } = await resolveSite(req.body.site, slateId);
-    if (siteError) {
-      return res.status(400).json({ error: siteError });
+    const slate = await requestSlate(req.body);
+    if (slate.error) {
+      return res.status(slate.status).json({ error: slate.error });
     }
+    const { source, site, players } = slate;
 
-    console.log(`🤖 AI reviewing lineup for slate ${slateId} (${site}, ${mode} mode)`);
-
-    // Get all players for context
-    const players = await playerModel.getBySlateId(slateId);
-
-    if (!players || players.length === 0) {
-      return res.status(404).json({ error: 'No players found for this slate' });
-    }
+    console.log(`🤖 AI reviewing lineup for slate ${source.slateId} (${site}, ${mode} mode, ${source.label})`);
 
     // Get AI review
     const result = await reviewLineup(lineup, players, mode, site);
 
     console.log(`✅ Lineup review complete`);
 
-    res.json(result);
+    const response = { ...result, ...sourceFields(source) };
+    if (source.isBacktest && Array.isArray(lineup.players)) {
+      const slots = lineup.players.map(slot => (slot?.player ? slot : { position: slot?.position, player: slot }));
+      const [scored] = await scoreLineups(source, [{ players: slots }], players);
+      response.actualPoints = scored.actualPoints;
+      response.playerActuals = scored.players
+        .filter(s => s.player)
+        .map(s => ({ id: s.player.id, name: s.player.name, actualPoints: s.player.actualPoints ?? null,
+          resultStatus: s.player.resultStatus ?? null }));
+    }
+    res.json(response);
   } catch (error) {
     console.error('Lineup review error:', error);
     res.status(500).json({

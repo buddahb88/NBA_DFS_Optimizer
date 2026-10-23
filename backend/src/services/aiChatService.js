@@ -12,7 +12,8 @@ import { createResearchTools } from './chatTools/researchTools.js';
 import { SITE_KEYS } from '../config/sites.js';
 import { resolveSite } from '../utils/resolveSite.js';
 import { getCurrentSeason } from '../utils/season.js';
-import { getCurrentSlateInfo, slateDateFields } from './slateFreshness.js';
+import { getCurrentSlateInfo } from './slateFreshness.js';
+import { chatSlate, loadSlatePlayers, scoreLineups } from './slateSource.js';
 import { createClaudeClient, isClaudeEndpoint, runClaudeToolLoop, toClaudeHistory, toClaudeTool } from './llm/claude.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -244,7 +245,8 @@ ${schemaDoc}
 **Stale Slate Guard:**
 - Call get_current_slate before any "tonight" request; it returns slateDate (the night the slate covers), today (ET) and isStale
 - If isStale is true, do not present the slate as tonight's: report the warning, do not recommend plays or build lineups for tonight, and tell the user to sync tonight's slate (Home or Data Status page). Only use it when the user explicitly asks about that past date
-- State the slate date your answer covers (slate tools and build_lineup return slateDate)`;
+- State the slate date your answer covers (slate tools and build_lineup return slateDate)
+- Explicit backtests ("rebuild 10/21", "backtest last night"): pass slateDate (YYYY-MM-DD) to build_lineup. It rebuilds that night's saved pre-lock slate and returns backtest: true, a label and actual points; lead with the label (e.g. "Backtest 2026-10-21") and compare projected vs actual`;
   }
 
   /**
@@ -344,7 +346,8 @@ ${schemaDoc}
         name: 'build_lineup',
         description: 'Build optimal DFS lineups using Linear Programming optimization. Can lock specific players and generate multiple lineups. This is the PRIMARY tool for lineup construction requests.',
         schema: z.object({
-          slateId: z.string().describe('Slate ID to build lineup for'),
+          slateId: z.string().optional().describe('Slate ID to build lineup for (default: latest, or the saved slate of slateDate)'),
+          slateDate: z.string().optional().describe('YYYY-MM-DD, only for an explicit backtest of a past night: rebuilds that night\'s saved slate and returns actual points'),
           lockedPlayerIds: z.array(z.number()).optional().describe('Array of player IDs to lock/force into lineup'),
           excludedPlayerIds: z.array(z.number()).optional().describe('Array of player IDs to exclude from consideration'),
           mode: z.enum(['cash', 'gpp']).default('cash').describe('Optimization mode: cash for safe plays, gpp for tournaments'),
@@ -354,32 +357,39 @@ ${schemaDoc}
           site: z.enum(SITE_KEYS).optional().describe('DFS site (default: the slate\'s site, usually draftkings)'),
           minUniqueness: z.number().optional().describe('Min players each lineup must differ from every earlier lineup (default 0)'),
         }),
-        func: async ({ slateId, lockedPlayerIds = [], excludedPlayerIds = [], mode = 'cash', numLineups = 1, minSalary, randomness = 0, site: requestedSite, minUniqueness = 0 }) => {
+        func: async ({ slateId, slateDate, lockedPlayerIds = [], excludedPlayerIds = [], mode = 'cash', numLineups = 1, minSalary, randomness = 0, site: requestedSite, minUniqueness = 0 }) => {
           try {
-            const { site, error: siteError } = await resolveSite(requestedSite, slateId);
+            const slate = await chatSlate({ slateId, slateDate });
+            if (slate.error) {
+              return JSON.stringify({ success: false, error: slate.error });
+            }
+            const { source, dateFields } = slate;
+            const { site, error: siteError } = source.isBacktest && !requestedSite
+              ? { site: source.site }
+              : await resolveSite(requestedSite, source.slateId);
             if (siteError) {
               return JSON.stringify({ success: false, error: siteError });
             }
 
-            console.log(`\n🏀 Building ${numLineups} ${site} ${mode.toUpperCase()} lineup(s) for slate ${slateId}`);
+            console.log(`\n🏀 Building ${numLineups} ${site} ${mode.toUpperCase()} lineup(s) for slate ${source.slateId} (${source.label})`);
             if (lockedPlayerIds.length > 0) {
               console.log(`🔒 Locked players: ${lockedPlayerIds.join(', ')}`);
             }
 
-            // Get all players for this slate
-            const players = await db.all('SELECT * FROM players WHERE slate_id = ?', slateId);
+            // Get all players for this slate (live table, or the saved slate for a backtest)
+            const players = await loadSlatePlayers(source, { includeZero: true });
 
             if (players.length === 0) {
               return JSON.stringify({
                 success: false,
-                error: `No players found for slate ${slateId}`,
+                error: `No players found for slate ${source.slateId}`,
               });
             }
 
             console.log(`✅ Found ${players.length} players for slate`);
 
             // Use optimizer service
-            const { lineups } = optimizerService.optimize(players, {
+            const { lineups: built } = optimizerService.optimize(players, {
               site,
               mode,
               numLineups,
@@ -390,12 +400,13 @@ ${schemaDoc}
               minUniqueness,
             });
 
-            if (lineups.length === 0) {
+            if (built.length === 0) {
               return JSON.stringify({
                 success: false,
                 error: 'Could not generate valid lineups with given constraints',
               });
             }
+            const lineups = await scoreLineups(source, built, players);
 
             // Format results
             const formattedLineups = lineups.map(lineup => ({
@@ -408,11 +419,13 @@ ${schemaDoc}
                   salary: slot.player.salary,
                   projectedPoints: slot.player.projected_points,
                   ownership: slot.player.rostership,
+                  ...(source.isBacktest ? { actualPoints: slot.player.actualPoints ?? null } : {}),
                 } : null,
               })),
               totalSalary: lineup.totalSalary,
               projectedPoints: lineup.projectedPoints,
               remainingSalary: lineup.remainingSalary,
+              ...(source.isBacktest ? { actualPoints: lineup.actualPoints } : {}),
             }));
 
             return JSON.stringify({
@@ -421,8 +434,8 @@ ${schemaDoc}
               count: formattedLineups.length,
               site,
               mode,
-              slateId,
-              ...(await slateDateFields(slateId)),
+              slateId: source.slateId,
+              ...dateFields,
             }, null, 2);
           } catch (error) {
             console.error('❌ Lineup Builder Error:', error);

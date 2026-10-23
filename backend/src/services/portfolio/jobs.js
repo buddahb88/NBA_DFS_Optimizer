@@ -9,8 +9,8 @@
 import { Worker } from 'worker_threads';
 import { randomUUID } from 'crypto';
 import { EventEmitter } from 'events';
-import playerModel from '../../models/playerModel.js';
 import { fetchHistoricalStats } from '../simulation/historyRepository.js';
+import { loadActuals, loadSlatePlayers, lineupActualTotal, resolveSlate } from '../slateSource.js';
 import { normalizeOptions } from './index.js';
 
 const MAX_RUNNING = Math.max(1, Number(process.env.PORTFOLIO_MAX_CONCURRENT_JOBS) || 2);
@@ -49,16 +49,51 @@ function finish(job, patch) {
   job.events.removeAllListeners('update');
 }
 
+/**
+ * Backtest result with actual points: on each portfolio lineup (per player and
+ * actualPoints total), each candidate (actualPoints) and each player row.
+ */
+export function withBacktestActuals(result, actuals) {
+  const actualOf = (id) => actuals.get(id)?.actualPoints ?? null;
+  const total = (ids) => lineupActualTotal(ids.map((id) => ({ actualPoints: actualOf(id) })));
+  const lineups = result.portfolio.lineups.map((l) => {
+    const players = l.players.map((s) => ({
+      ...s,
+      player: { ...s.player, actualPoints: actualOf(s.player.id), resultStatus: actuals.get(s.player.id)?.resultStatus ?? null }
+    }));
+    return { ...l, players, actualPoints: total(l.players.map((s) => s.player.id)) };
+  });
+  const scored = lineups.map((l) => l.actualPoints).filter((x) => x !== null);
+  return {
+    ...result,
+    portfolio: {
+      ...result.portfolio,
+      lineups,
+      actual: {
+        best: scored.length ? Math.max(...scored) : null,
+        mean: scored.length ? Math.round((scored.reduce((s, x) => s + x, 0) / scored.length) * 10) / 10 : null
+      }
+    },
+    candidates: result.candidates.map((c) => ({ ...c, actualPoints: total(c.playerIds) })),
+    players: result.players.map((p) => ({ ...p, actualPoints: actualOf(p.id) }))
+  };
+}
+
 async function run(job) {
   update(job, { status: 'running', stage: 'loading', message: 'Loading slate', startedAt: Date.now() });
   try {
-    const rows = await playerModel.getBySlateId(job.slateId);
+    const source = await resolveSlate({ slateId: job.slateId, slateDate: job.slateDate });
+    if (source) Object.assign(job, { slateId: source.slateId, slateDate: source.slateDate, isBacktest: source.isBacktest });
+    const rows = await loadSlatePlayers(source);
     if (!rows || rows.length === 0) throw new Error('No players found for this slate');
     const players = rows.map(pick);
+    // Pending results stay null until the box scores land
+    const actuals = source.isBacktest ? await loadActuals(source, rows) : null;
 
     let historicalStats = new Map();
     try {
-      historicalStats = await fetchHistoricalStats(players.map((p) => p.name));
+      historicalStats = await fetchHistoricalStats(players.map((p) => p.name),
+        source.isBacktest ? { beforeDate: source.slateDate } : {});
     } catch (err) {
       console.warn('⚠️  Portfolio: historical variance unavailable, using fallbacks:', err.message);
     }
@@ -73,7 +108,8 @@ async function run(job) {
         if (msg.type === 'progress') {
           update(job, { stage: msg.stage, progress: msg.progress, message: msg.message });
         } else if (msg.type === 'result') {
-          finish(job, { status: 'completed', stage: 'done', progress: 1, message: 'Completed', result: msg.result });
+          const result = actuals ? withBacktestActuals(msg.result, actuals) : msg.result;
+          finish(job, { status: 'completed', stage: 'done', progress: 1, message: 'Completed', result });
         } else if (msg.type === 'error') {
           finish(job, { status: 'failed', message: 'Failed', error: msg.error });
         }
@@ -103,7 +139,7 @@ function pump() {
 /**
  * Validate options and enqueue a build. Throws (-> HTTP 400) on invalid options.
  */
-export function createJob(slateId, options = {}) {
+export function createJob(slateId, { slateDate = null, ...options } = {}) {
   normalizeOptions(options);
   prune();
   if (queue.length >= MAX_QUEUED) {
@@ -113,7 +149,10 @@ export function createJob(slateId, options = {}) {
   }
   const job = {
     id: randomUUID(),
-    slateId: String(slateId),
+    slateId: slateId === undefined || slateId === null || slateId === '' ? null : String(slateId),
+    // Past date: rebuild that night's saved slate and score the result (services/slateSource.js)
+    slateDate,
+    isBacktest: false,
     options,
     status: 'queued',
     stage: 'queued',
@@ -157,6 +196,8 @@ export function jobView(job, { includeResult = true, candidates = 100 } = {}) {
   const view = {
     jobId: job.id,
     slateId: job.slateId,
+    slateDate: job.slateDate,
+    isBacktest: job.isBacktest,
     status: job.status,
     stage: job.stage,
     progress: Math.round(job.progress * 1000) / 1000,

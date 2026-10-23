@@ -29,10 +29,12 @@ router.get('/presets', (req, res) => {
  *         maxExposure, playerExposure: {id: maxPct}, minUnique, poolMaxExposure,
  *         field: {optimizedShare, optimizerNoise, meanLeftover, maxLeftover, calibrationRounds}, simConfig }
  * Starts a background build; poll GET /api/portfolio/:jobId or stream GET /api/portfolio/:jobId/events.
+ * slateDate (YYYY-MM-DD, before today) rebuilds that night's saved slate; the result then carries
+ * actualPoints per lineup, candidate and player.
  */
 router.post('/build', (req, res) => {
   const { slateId, ...options } = req.body || {};
-  if (slateId === undefined || slateId === null || slateId === '') {
+  if ((slateId === undefined || slateId === null || slateId === '') && !options.slateDate) {
     return res.status(400).json({ error: 'slateId is required' });
   }
   try {

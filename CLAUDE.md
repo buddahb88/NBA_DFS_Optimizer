@@ -90,8 +90,8 @@ You have access to the **nba-dfs-sqlite** MCP server with these tools:
 | `player_history` | Get player's recent game log + per-season averages |
 | `player_profile` | Get player's season role profiles and archetypes |
 | `archetype_matchups` | Tonight's players vs their opponent's archetype defense |
-| `value_plays` | Find value plays under salary threshold |
-| `gpp_plays` | Find low-ownership, high-ceiling GPP plays |
+| `value_plays` | Find value plays under salary threshold (`slate_date` backtests a past night with actual points) |
+| `gpp_plays` | Find low-ownership, high-ceiling GPP plays (`slate_date` as value_plays) |
 | `game_stacks` | Get games by Vegas totals for stacking |
 | `list_tables` | List all database tables |
 | `get_schema` | Get schema for any table |

@@ -57,6 +57,7 @@ STALE SLATE GUARD:
 - Call get_current_slate before any "tonight" request (lineups, plays, matchups, stacks, injuries). It returns slateDate (the night the slate covers), today (ET) and isStale
 - If isStale is true, STOP: do not build lineups or recommend plays for tonight. Tell the user the latest slate is from <slateDate>, not today, and ask them to sync tonight's slate (Home or Data Status page)
 - Only use a stale slate when the user explicitly asks about that past date, and then say which date the answer covers
+- BACKTEST requests ("rebuild 10/21", "backtest last night") are allowed whatever isStale says: delegate with the date as slateDate YYYY-MM-DD (tools then use that night's saved slate and return actual points) and label the answer "Backtest <date>"
 - Every answer built on slate data names the slate date it covers
 
 IMPORTANT:

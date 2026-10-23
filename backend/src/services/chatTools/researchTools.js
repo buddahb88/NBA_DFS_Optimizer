@@ -31,6 +31,7 @@ import { getCurrentSeason } from '../../utils/season.js';
 import { resolveSite } from '../../utils/resolveSite.js';
 import { withUiBlocks } from './uiBlockBuilders.js';
 import { slateDateFields } from '../slateFreshness.js';
+import { chatSlate } from '../slateSource.js';
 
 export const RESEARCH_TOOL_NAMES = Object.freeze([
   'get_archetype_matchups',
@@ -78,16 +79,19 @@ const fallbackNote = (fallback, season) => (fallback
 
 // ── Handlers ─────────────────────────────────────────────────────────
 
-async function getArchetypeMatchups({ slateId, site, minEdge, limit = 15 }) {
-  const id = await currentSlateId(slateId);
+async function getArchetypeMatchups({ slateId, slateDate, site, minEdge, limit = 15 }) {
+  // An explicit past slateDate is a backtest of that night's saved slate (no lookahead, actual points)
+  const backtest = slateDate ? await chatSlate({ slateId, slateDate }) : null;
+  if (backtest?.error) return { success: false, message: backtest.error };
+  const id = backtest ? backtest.source.slateId : await currentSlateId(slateId);
   if (!id) return { success: false, message: 'No slates found. Import a slate first.' };
-  const tonight = await getTonight({ slateId: id, site: site || undefined });
+  const tonight = await getTonight({ slateId: id, slateDate: backtest?.source.slateDate, site: site || undefined });
   const min = minEdge === undefined || minEdge === null ? null : Number(minEdge);
   const matches = tonight.players.filter(p => min === null || (p.adjusted_edge ?? -Infinity) >= min);
   return {
     success: true,
     slateId: id,
-    ...(await slateDateFields(id)),
+    ...(backtest ? backtest.dateFields : await slateDateFields(id)),
     season: tonight.season,
     site: tonight.site,
     fallback: tonight.fallback,
@@ -115,6 +119,7 @@ async function getArchetypeMatchups({ slateId, site, minEdge, limit = 15 }) {
       crowding: p.crowding,
       flags: p.flags,
       components: p.components,
+      ...(p.actualPoints === undefined ? {} : { actualPoints: p.actualPoints, resultStatus: p.resultStatus }),
     })),
     howToRead: 'matchupEdge = FP per player-game the opponent allows to this archetype above expectation (rank 1 = allows the most). adjustedEdge = matchupEdge x minutes confidence x crowding; flags explain the discounts.',
   };
@@ -408,6 +413,7 @@ const DEFINITIONS = [
       type: 'object',
       properties: {
         slateId: SLATE_PROP,
+        slateDate: { type: 'string', description: 'YYYY-MM-DD, only for an explicit backtest of a past night: that night\'s saved slate, defense through the day before, plus actual points' },
         site: SITE_PROP,
         minEdge: { type: 'number', description: 'Minimum adjusted edge in fantasy points (e.g. 1.5)' },
         limit: { type: 'number', description: 'Max players (default 15, max 50)' },

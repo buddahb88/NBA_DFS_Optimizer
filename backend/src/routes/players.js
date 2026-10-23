@@ -8,6 +8,7 @@ import projectionService from '../services/projectionService.js';
 import { snapshotAllSlates, snapshotSlate } from '../services/slateSnapshotService.js';
 import { recomputeSlateRanges } from '../services/variance/outcomeRangeService.js';
 import { getSlateMatchups } from '../services/archetypeDefenseService.js';
+import { loadSlatePlayers, resolveSlate, withActuals } from '../services/slateSource.js';
 import { DEFAULT_SITE, isValidSite } from '../config/sites.js';
 
 const router = express.Router();
@@ -16,7 +17,7 @@ const router = express.Router();
 async function withMatchups(slateId, players, query) {
   let matchups = new Map();
   try {
-    matchups = await getSlateMatchups(slateId, { season: query.season, site: query.site });
+    matchups = await getSlateMatchups(slateId, { season: query.season, site: query.site, slateDate: query.slateDate });
   } catch (error) {
     console.error('Archetype matchups error:', error.message);
   }
@@ -26,11 +27,13 @@ async function withMatchups(slateId, players, query) {
 
 // Get players for a slate, each with archetype, archetype_label and matchup
 // (opponent's archetype defense cell: grade, rank, delta; see getSlateMatchups).
-// Optional season / site pin the matchup data.
+// Optional season / site pin the matchup data. slateDate (YYYY-MM-DD, before
+// today) returns that night's saved slate read-only (services/slateSource.js),
+// each player with actualPoints / actualMinutes / resultStatus.
 router.get('/:slateId', async (req, res) => {
   try {
     const { slateId } = req.params;
-    const { position, minSalary, maxSalary, team } = req.query;
+    const { position, minSalary, maxSalary, team, slateDate } = req.query;
 
     const filters = {};
     if (position) filters.position = position;
@@ -38,10 +41,16 @@ router.get('/:slateId', async (req, res) => {
     if (maxSalary) filters.maxSalary = parseInt(maxSalary);
     if (team) filters.team = team;
 
+    if (slateDate) {
+      const source = await resolveSlate({ slateId, slateDate });
+      const players = await withActuals(source, await loadSlatePlayers(source, { filters }));
+      return res.json(await withMatchups(source.slateId, players, req.query));
+    }
+
     const players = await playerModel.getBySlateId(slateId, filters);
     res.json(await withMatchups(slateId, players, req.query));
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(error.status || 500).json({ error: error.message });
   }
 });
 

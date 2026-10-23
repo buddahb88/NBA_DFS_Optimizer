@@ -25,7 +25,7 @@ import { DEFAULT_SITE, isValidSite } from '../config/sites.js';
 import slateModel from '../models/slateModel.js';
 import playerModel from '../models/playerModel.js';
 import { easternDate, rosterPositionsFor } from './slateSnapshotService.js';
-import { getSlateDate } from './slateFreshness.js';
+import { getSlateDate, slateDateFields } from './slateFreshness.js';
 import { getPlayerResultsOnDate } from './resultsService.js';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -289,6 +289,42 @@ export const sourceFields = (source) => (source ? {
 } : {});
 
 /**
+ * Date fields for a chat tool answer about an explicit backtest: not stale
+ * (the user asked for that night), labelled so the answer says which date
+ * it covers.
+ */
+export function backtestDateFields(source, now = new Date()) {
+  return {
+    slateDate: source.slateDate,
+    today: easternDate(now),
+    isStale: false,
+    backtest: true,
+    label: source.label,
+    backtestNote: `BACKTEST: rebuilt from the saved ${source.slateDate} slate (pre-lock salaries, projections, `
+      + `ownership). Not tonight's slate - label the answer "${source.label}". Actual results are included.`
+  };
+}
+
+/**
+ * Chat tools: resolve { slateId, slateDate } and the date fields to return.
+ * Live slates keep the stale-slate fields (slateDateFields); an explicit
+ * slateDate before today is a backtest (backtestDateFields).
+ * Returns { source, dateFields } or { error }.
+ */
+export async function chatSlate({ slateId = null, slateDate = null } = {}) {
+  let source;
+  try {
+    source = await resolveSlate({ slateId, slateDate });
+  } catch (error) {
+    if (error instanceof SlateSourceError) return { error: error.message };
+    throw error;
+  }
+  if (!source) return { error: 'No slates found in database' };
+  const dateFields = source.isBacktest ? backtestDateFields(source) : await slateDateFields(source.slateId);
+  return { source, dateFields };
+}
+
+/**
  * Saved past slates for the backtest picker, newest first:
  * [{ slateDate, slateId, site, players, label }].
  */
@@ -306,5 +342,5 @@ export async function listBacktestSlates({ site = null, now = new Date(), limit 
 
 export default {
   resolveSlate, loadSlatePlayers, getSlatePlayers, loadActuals, withActuals, scoreLineups,
-  lineupActualTotal, listBacktestSlates, sourceFields, backtestSettingsKey
+  lineupActualTotal, listBacktestSlates, sourceFields, backtestSettingsKey, backtestDateFields, chatSlate
 };

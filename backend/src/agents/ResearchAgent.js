@@ -12,6 +12,17 @@ import BaseAgent from './BaseAgent.js';
 import db from '../config/database.js';
 import { createResearchTools } from '../services/chatTools/researchTools.js';
 import { getCurrentSlateInfo } from '../services/slateFreshness.js';
+import { chatSlate, loadSlatePlayers, withActuals } from '../services/slateSource.js';
+
+const SLATE_DATE_PROP = {
+  type: 'string',
+  description: 'YYYY-MM-DD. Only for an explicit backtest of a past night: reads that night\'s saved slate and adds actual points. Omit for tonight.'
+};
+const round = (x, d = 1) => Math.round(x * 10 ** d) / 10 ** d;
+const avg = (list, f) => (list.length ? list.reduce((s, p) => s + (Number(f(p)) || 0), 0) / list.length : 0);
+const salaryTier = (salary) => (salary >= 9000 ? 'Premium ($9k+)' : salary >= 7000 ? 'Mid ($7-9k)'
+  : salary >= 5000 ? 'Value ($5-7k)' : 'Punt (<$5k)');
+const actualOf = (p) => (p.actualPoints === undefined ? {} : { actualPoints: p.actualPoints });
 
 const SYSTEM_PROMPT = `You are a DFS research specialist with expertise in database queries and data retrieval.
 
@@ -73,6 +84,7 @@ STALE SLATE GUARD:
 - get_current_slate returns slateDate (the night the slate covers), today (ET) and isStale
 - If isStale is true, do not present the slate as tonight's: report the warning, do not recommend plays or build lineups for tonight, and tell the user to sync tonight's slate (Home or Data Status page). Only use it when the user explicitly asks about that past date
 - State the slate date your answer covers (slate tools return slateDate)
+- Explicit backtests ("rebuild 10/21", "how did the value plays do last night"): pass slateDate (YYYY-MM-DD) to get_slate_summary, get_game_environment and get_archetype_matchups. They read that night's saved pre-lock slate, return backtest: true, a label and actual points; lead with the label (e.g. "Backtest 2026-10-21")
 - DO NOT use your general NBA knowledge to fill gaps - only use actual query results
 
 Always show your SQL queries and explain what data you retrieved.`;
@@ -244,99 +256,80 @@ class ResearchAgent extends BaseAgent {
 
       {
         name: 'get_slate_summary',
-        description: 'Get a summary of all players on a slate including position breakdown, salary distribution, and top plays.',
+        description: 'Get a summary of all players on a slate including position breakdown, salary distribution, top projected, best value and top leverage plays. With slateDate (past night) it summarizes that saved slate and adds actual points.',
         parameters: {
           type: 'object',
           properties: {
             slateId: {
               type: 'string',
-              description: 'Slate ID to summarize'
-            }
+              description: 'Slate ID to summarize (default: the latest slate)'
+            },
+            slateDate: SLATE_DATE_PROP
           },
-          required: ['slateId']
+          required: []
         },
-        execute: async ({ slateId }) => {
-          console.log(`\n📈 [ResearchAgent] Getting slate summary for ${slateId}`);
+        execute: async ({ slateId, slateDate }) => {
+          console.log(`\n📈 [ResearchAgent] Getting slate summary for ${slateId ?? slateDate ?? 'latest'}`);
 
-          // Get position breakdown
-          const positionBreakdown = await db.all(`
-            SELECT position, COUNT(*) as count, AVG(salary) as avg_salary, AVG(projected_points) as avg_projection
-            FROM players WHERE slate_id = ?
-            GROUP BY position
-          `, slateId);
+          const slate = await chatSlate({ slateId, slateDate });
+          if (slate.error) return { success: false, error: slate.error };
+          const { source, dateFields } = slate;
+          const players = await withActuals(source, await loadSlatePlayers(source, { includeZero: true }));
 
-          // Get salary tiers
-          const salaryTiers = await db.all(`
-            SELECT
-              CASE
-                WHEN salary >= 9000 THEN 'Premium ($9k+)'
-                WHEN salary >= 7000 THEN 'Mid ($7-9k)'
-                WHEN salary >= 5000 THEN 'Value ($5-7k)'
-                ELSE 'Punt (<$5k)'
-              END as tier,
-              COUNT(*) as count,
-              AVG(projected_points) as avg_projection
-            FROM players WHERE slate_id = ?
-            GROUP BY tier
-          `, slateId);
-
-          // Get top projected players
-          const topProjected = await db.all(`
-            SELECT name, position, team, salary, projected_points, ownership, leverage_score
-            FROM players WHERE slate_id = ?
-            ORDER BY projected_points DESC LIMIT 10
-          `, slateId);
-
-          // Get best value plays
-          const bestValue = await db.all(`
-            SELECT name, position, team, salary, projected_points,
-                   (projected_points / salary * 1000) as value_score
-            FROM players WHERE slate_id = ? AND salary > 0
-            ORDER BY value_score DESC LIMIT 10
-          `, slateId);
-
-          // Get top leverage plays (GPP)
-          const topLeverage = await db.all(`
-            SELECT name, position, team, salary, projected_points, ownership, leverage_score, ceiling
-            FROM players WHERE slate_id = ? AND leverage_score IS NOT NULL
-            ORDER BY leverage_score DESC LIMIT 10
-          `, slateId);
+          const groupBy = (key) => {
+            const groups = new Map();
+            for (const p of players) {
+              const k = key(p);
+              if (!groups.has(k)) groups.set(k, []);
+              groups.get(k).push(p);
+            }
+            return [...groups];
+          };
+          const top = (list, score, n = 10) => [...list].sort((a, b) => score(b) - score(a)).slice(0, n);
+          const proj = (p) => Number(p.projected_points) || 0;
+          const valueScore = (p) => (p.salary > 0 ? (proj(p) / p.salary) * 1000 : 0);
 
           return {
             success: true,
-            slateId,
-            positionBreakdown: positionBreakdown.map(p => ({
-              position: p.position,
-              count: p.count,
-              avgSalary: Math.round(p.avg_salary),
-              avgProjection: Math.round(p.avg_projection * 10) / 10
+            slateId: source.slateId,
+            ...dateFields,
+            positionBreakdown: groupBy(p => p.position).map(([position, list]) => ({
+              position,
+              count: list.length,
+              avgSalary: Math.round(avg(list, p => p.salary)),
+              avgProjection: round(avg(list, proj))
             })),
-            salaryTiers,
-            topProjected: topProjected.map(p => ({
+            salaryTiers: groupBy(p => salaryTier(p.salary)).map(([tier, list]) => ({
+              tier, count: list.length, avg_projection: avg(list, proj)
+            })),
+            topProjected: top(players, proj).map(p => ({
               name: p.name,
               position: p.position,
               team: p.team,
               salary: p.salary,
               projection: p.projected_points,
-              ownership: p.ownership
+              ownership: p.rostership,
+              ...actualOf(p)
             })),
-            bestValue: bestValue.map(p => ({
+            bestValue: top(players.filter(p => p.salary > 0), valueScore).map(p => ({
               name: p.name,
               position: p.position,
               team: p.team,
               salary: p.salary,
               projection: p.projected_points,
-              valueScore: Math.round(p.value_score * 100) / 100
+              valueScore: round(valueScore(p), 2),
+              ...actualOf(p)
             })),
-            topLeverage: topLeverage.map(p => ({
+            topLeverage: top(players.filter(p => p.leverage_score != null), p => Number(p.leverage_score)).map(p => ({
               name: p.name,
               position: p.position,
               team: p.team,
               salary: p.salary,
               projection: p.projected_points,
-              ownership: p.ownership,
+              ownership: p.rostership,
               leverage: p.leverage_score,
-              ceiling: p.ceiling
+              ceiling: p.ceiling,
+              ...actualOf(p)
             }))
           };
         }
@@ -344,36 +337,39 @@ class ResearchAgent extends BaseAgent {
 
       {
         name: 'get_game_environment',
-        description: 'Get Vegas lines and game environment data for all games on a slate.',
+        description: 'Get Vegas lines and game environment data for all games on a slate (slateDate for a past night\'s saved slate).',
         parameters: {
           type: 'object',
           properties: {
             slateId: {
               type: 'string',
-              description: 'Slate ID'
-            }
+              description: 'Slate ID (default: the latest slate)'
+            },
+            slateDate: SLATE_DATE_PROP
           },
-          required: ['slateId']
+          required: []
         },
-        execute: async ({ slateId }) => {
-          console.log(`\n🎰 [ResearchAgent] Getting game environment for slate ${slateId}`);
+        execute: async ({ slateId, slateDate }) => {
+          console.log(`\n🎰 [ResearchAgent] Getting game environment for slate ${slateId ?? slateDate ?? 'latest'}`);
 
-          const games = await db.all(`
-            SELECT DISTINCT
-              team, opponent,
-              vegas_implied_total, vegas_spread, vegas_over_under, vegas_win_prob,
-              game_info
-            FROM players
-            WHERE slate_id = ?
-            GROUP BY team, opponent
-          `, slateId);
+          const slate = await chatSlate({ slateId, slateDate });
+          if (slate.error) return { success: false, error: slate.error };
+          const { source, dateFields } = slate;
+
+          // One row per team
+          const byTeam = new Map();
+          for (const p of await loadSlatePlayers(source, { includeZero: true })) {
+            if (!byTeam.has(p.team)) byTeam.set(p.team, p);
+          }
+          const games = [...byTeam.values()];
 
           // Sort by implied total (highest scoring games first)
           games.sort((a, b) => (b.vegas_implied_total || 0) - (a.vegas_implied_total || 0));
 
           return {
             success: true,
-            slateId,
+            slateId: source.slateId,
+            ...dateFields,
             gameCount: games.length / 2, // Each game has 2 teams
             games: games.map(g => ({
               team: g.team,

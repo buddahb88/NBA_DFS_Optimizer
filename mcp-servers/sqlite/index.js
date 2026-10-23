@@ -16,7 +16,7 @@ import {
 import Database from 'better-sqlite3';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { archetypeMatchups, playerHistory, playerProfile } from './queries.js';
+import { archetypeMatchups, gppPlays, playerHistory, playerProfile, valuePlays } from './queries.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -171,10 +171,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'value_plays',
-        description: 'Find value plays on current slate (high projection per dollar)',
+        description: 'Find value plays on current slate (high projection per dollar). slate_date (YYYY-MM-DD) backtests a past night\'s saved slate and adds actual DK points',
         inputSchema: {
           type: 'object',
           properties: {
+            slate_date: {
+              type: 'string',
+              description: 'Past night YYYY-MM-DD to backtest (saved slate + actual points); omit for the current slate',
+            },
             max_salary: {
               type: 'number',
               description: 'Maximum salary threshold (default 5500)',
@@ -190,10 +194,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'gpp_plays',
-        description: 'Find GPP leverage plays (low ownership, high ceiling)',
+        description: 'Find GPP leverage plays (low ownership, high ceiling). slate_date (YYYY-MM-DD) backtests a past night\'s saved slate and adds actual DK points',
         inputSchema: {
           type: 'object',
           properties: {
+            slate_date: {
+              type: 'string',
+              description: 'Past night YYYY-MM-DD to backtest (saved slate + actual points); omit for the current slate',
+            },
             max_rostership: {
               type: 'number',
               description: 'Maximum rostership % (default 12)',
@@ -370,22 +378,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case 'value_plays': {
-        const maxSalary = args.max_salary || 5500;
-        const limit = args.limit || 15;
-
-        const values = db
-          .prepare(
-            `SELECT name, position, team, opponent, salary, projected_points,
-                    ROUND(projected_points / salary * 1000, 2) as value,
-                    floor, ceiling
-             FROM players
-             WHERE slate_id = (SELECT slate_id FROM slates ORDER BY created_at DESC LIMIT 1)
-               AND salary < ?
-               AND salary > 0
-             ORDER BY value DESC
-             LIMIT ?`
-          )
-          .all(maxSalary, limit);
+        const values = valuePlays(db, {
+          maxSalary: args.max_salary || 5500,
+          limit: args.limit || 15,
+          slateDate: args.slate_date || null,
+        });
 
         return {
           content: [
@@ -398,22 +395,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case 'gpp_plays': {
-        const maxRostership = args.max_rostership || 12;
-        const minCeiling = args.min_ceiling || 40;
-        const limit = args.limit || 15;
-
-        const plays = db
-          .prepare(
-            `SELECT name, position, team, opponent, salary, projected_points,
-                    rostership, ceiling, leverage_score, boom_probability
-             FROM players
-             WHERE slate_id = (SELECT slate_id FROM slates ORDER BY created_at DESC LIMIT 1)
-               AND rostership < ?
-               AND ceiling > ?
-             ORDER BY leverage_score DESC
-             LIMIT ?`
-          )
-          .all(maxRostership, minCeiling, limit);
+        const plays = gppPlays(db, {
+          maxRostership: args.max_rostership || 12,
+          minCeiling: args.min_ceiling || 40,
+          limit: args.limit || 15,
+          slateDate: args.slate_date || null,
+        });
 
         return {
           content: [

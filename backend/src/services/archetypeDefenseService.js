@@ -33,10 +33,11 @@ import db, { DATABASE_TYPE } from '../config/database.js';
 import { DEFENSE_COLUMNS } from '../config/archetypeDefenseMigrations.js';
 import { ALL_ARCHETYPES } from '../config/archetypes.js';
 import { SITE_KEYS, isValidSite } from '../config/sites.js';
-import { getCurrentSeason } from '../utils/season.js';
+import { getCurrentSeason, seasonForDate } from '../utils/season.js';
 import { canonicalTeam, playerKey } from '../utils/playerKey.js';
 import { resolveSite } from '../utils/resolveSite.js';
 import { MATCHUP_EDGE_CONFIG, loadEdgeContext, scoreMatchupEdges } from './archetypeMatchupService.js';
+import { SlateSourceError, loadActuals, loadSlatePlayers, resolveSlate } from './slateSource.js';
 
 export const DEFAULT_DEFENSE_CONFIG = {
   baselinePriorMinutes: 100,
@@ -348,7 +349,8 @@ function checkDate(value, name) {
 
 /** Validate and default request filters. */
 export function normalizeFilters(query = {}) {
-  const season = query.season || getCurrentSeason();
+  // defaultSeason: the season without an explicit one (a backtest's); still eligible for fallback
+  const season = query.season || query.defaultSeason || getCurrentSeason();
   if (!SEASON_RE.test(season)) throw new DefenseError('season must look like 2025-26');
 
   const rawSite = String(query.site || 'draftkings').toLowerCase();
@@ -509,8 +511,57 @@ export function weakTiers(rows, stat = 'fp') {
 }
 
 const SLATE_SQL = 'SELECT slate_id FROM slates WHERE slate_id = ?';
-const SLATE_PLAYERS_SQL = `SELECT player_id, name, team, opponent, position, salary, projected_points, projected_minutes, injury_status
-  FROM players WHERE slate_id = ?`;
+const SLATE_PLAYER_FIELDS = ['player_id', 'name', 'team', 'opponent', 'position', 'salary', 'projected_points',
+  'projected_minutes', 'injury_status'];
+
+const dayBefore = (date) => new Date(Date.parse(`${date}T00:00:00Z`) - 86400000).toISOString().slice(0, 10);
+
+/**
+ * Slate players and as-of context for a Tonight / Player Pool request. A
+ * backtest (slateDate in the past, or a slate only in snapshots; see
+ * slateSource.js) reads the saved slate and sees nothing from its own night
+ * or later: the defense grid runs through the day before (endDate), minutes
+ * are as of the slate date, and the archetype captured with the snapshot wins.
+ * Returns { source, players, defenseQuery, asOfDate, archetypeFor }.
+ */
+async function slateContext(slateId, query = {}) {
+  let source;
+  try {
+    source = await resolveSlate({ slateId, slateDate: query.slateDate || null });
+  } catch (error) {
+    if (error instanceof SlateSourceError) throw new DefenseError(error.message, error.status);
+    throw error;
+  }
+  if (!source || (!source.isBacktest && !(await db.get(SLATE_SQL, source.slateId)))) {
+    throw new DefenseError(`Slate ${slateId} not found`, 404);
+  }
+  const players = (await loadSlatePlayers(source, { includeZero: true })).map(p => ({
+    ...Object.fromEntries(SLATE_PLAYER_FIELDS.map(k => [k, p[k] ?? null])), id: p.id, archetype: p.archetype ?? null,
+  }));
+  if (!source.isBacktest) {
+    return { source, players, defenseQuery: {}, asOfDate: undefined, archetypeFor: (lookup) => lookup };
+  }
+  const captured = new Map(players.filter(p => p.archetype).map(p => [playerKey(p.name), p.archetype]));
+  return {
+    source,
+    players,
+    defenseQuery: { defaultSeason: seasonForDate(source.slateDate), endDate: query.endDate || dayBefore(source.slateDate) },
+    asOfDate: source.slateDate,
+    archetypeFor: (lookup) => (key) => captured.get(key) ?? lookup(key),
+  };
+}
+
+// Backtest actuals keyed by player_id
+async function actualsByPlayerId(source, players) {
+  const byId = await loadActuals(source, players);
+  return new Map(players.filter(p => byId.has(p.id)).map(p => [String(p.player_id), byId.get(p.id)]));
+}
+
+const NO_ACTUAL = { actualPoints: null, actualMinutes: null, resultStatus: null };
+
+const backtestFields = (source) => (source.isBacktest
+  ? { isBacktest: true, slateDate: source.slateDate, label: source.label }
+  : { isBacktest: false });
 
 /**
  * player_key -> archetype for `season`, falling back to the prior season's
@@ -549,32 +600,42 @@ export function qualifiedDefenses(rows, minGames = THIN_SEASON.minGames) {
  * still come from the requested season.
  */
 export async function getTonight(query = {}) {
-  if (!query.slateId) throw new DefenseError('slateId is required');
+  if (!query.slateId && !query.slateDate) throw new DefenseError('slateId is required');
   const stat = query.stat || 'fp';
   if (!STAT_COLUMNS[stat]) throw new DefenseError(`stat must be one of: ${Object.keys(STAT_COLUMNS).join(', ')}`);
-  const asOfDate = checkDate(query.date, 'date') ?? undefined;
-  if (!(await db.get(SLATE_SQL, query.slateId))) throw new DefenseError(`Slate ${query.slateId} not found`, 404);
+  const requestedDate = checkDate(query.date, 'date');
+  const ctx = await slateContext(query.slateId, query);
+  const { slateId } = ctx.source;
+  const asOfDate = requestedDate ?? ctx.asOfDate;
 
-  const { site, error } = await resolveSite(query.site ? (SITE_ALIASES[String(query.site).toLowerCase()] || query.site) : null, query.slateId);
+  const { site, error } = ctx.source.isBacktest && !query.site
+    ? { site: ctx.source.site }
+    : await resolveSite(query.site ? (SITE_ALIASES[String(query.site).toLowerCase()] || query.site) : null, slateId);
   if (error) throw new DefenseError(error);
-  const defense = await getDefense({ ...query, site, team: null, group: null, seasonFallback: true });
+  const defense = await getDefense({ ...query, ...ctx.defenseQuery, site, team: null, group: null, seasonFallback: true });
   const { fallback } = defense;
   // Archetypes come from the requested season even when defense fell back
   const archetypeSeason = fallback?.from ?? defense.season;
   const { season, grouping } = defense;
 
-  const [players, archetypeOf, edgeContext] = await Promise.all([
-    db.all(SLATE_PLAYERS_SQL, query.slateId),
+  const { players } = ctx;
+  const [lookup, edgeContext] = await Promise.all([
     loadArchetypeLookup(archetypeSeason),
     loadEdgeContext({ season: archetypeSeason, lastSeason: previousSeason(archetypeSeason), asOfDate }),
   ]);
 
-  const { matchedPlayers, players: out } = buildTonight(players, {
-    tiers: weakTiers(defense.rows, stat), column: STAT_COLUMNS[stat], grouping, archetypeOf, edgeContext,
+  let { matchedPlayers, players: out } = buildTonight(players, {
+    tiers: weakTiers(defense.rows, stat), column: STAT_COLUMNS[stat], grouping, archetypeOf: ctx.archetypeFor(lookup), edgeContext,
   });
+  if (ctx.source.isBacktest) {
+    const actuals = await actualsByPlayerId(ctx.source, players);
+    out = out.map(r => ({ ...r, ...(actuals.get(String(r.player_id)) ?? NO_ACTUAL) }));
+  }
 
   return {
-    slateId: query.slateId, season, site, grouping, stat, fallback,
+    slateId, season, site, grouping, stat, fallback,
+    ...backtestFields(ctx.source),
+    endDate: defense.endDate ?? null,
     lastNGames: defense.lastNGames, source: defense.source, edgeConfig: MATCHUP_EDGE_CONFIG,
     slatePlayers: players.length, matchedPlayers, defenseRows: defense.rows.length,
     players: out,
@@ -675,18 +736,22 @@ const matchupFrom = (hit, grouping, group, opponent, base) => ({
  * requested season. Site defaults to the slate's.
  */
 export async function getSlateMatchups(slateId, query = {}) {
-  const { site, error } = await resolveSite(query.site ? (SITE_ALIASES[String(query.site).toLowerCase()] || query.site) : null, slateId);
+  const ctx = await slateContext(slateId, query);
+  const { site, error } = ctx.source.isBacktest && !query.site
+    ? { site: ctx.source.site }
+    : await resolveSite(query.site ? (SITE_ALIASES[String(query.site).toLowerCase()] || query.site) : null, slateId);
   if (error) throw new DefenseError(error);
-  const base = { season: query.season, site };
+  const base = { season: query.season, site, ...ctx.defenseQuery };
 
   const byArchetype = await getDefense({ ...base, grouping: 'archetype', seasonFallback: true });
   const { season } = byArchetype;
   const archetypeSeason = byArchetype.fallback?.from ?? season;
-  const [players, archetypeOf, edgeContext] = await Promise.all([
-    db.all(SLATE_PLAYERS_SQL, slateId),
+  const { players } = ctx;
+  const [lookup, edgeContext] = await Promise.all([
     loadArchetypeLookup(archetypeSeason),
-    loadEdgeContext({ season: archetypeSeason, lastSeason: previousSeason(archetypeSeason) }),
+    loadEdgeContext({ season: archetypeSeason, lastSeason: previousSeason(archetypeSeason), asOfDate: ctx.asOfDate }),
   ]);
+  const archetypeOf = ctx.archetypeFor(lookup);
   const archetypeRanks = rankDefenses(byArchetype.rows);
   let positionRanks = null; // loaded on first need
 

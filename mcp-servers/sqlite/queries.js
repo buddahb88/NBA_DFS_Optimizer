@@ -152,3 +152,55 @@ export function playerHistory(db, name, limit = 10) {
 
   return { recentGames, seasonStats };
 }
+
+/**
+ * Slate rows for the value / GPP tools: the latest live slate, or with
+ * slateDate (YYYY-MM-DD) the biggest saved slate of that night from
+ * slate_player_snapshots, with actual DK points from historical_games
+ * (a backtest). Returns { slateId, slateDate, backtest, from, actual }
+ * where `from` is a FROM/WHERE clause over alias p.
+ */
+function slateRows(db, slateDate) {
+  if (!slateDate) {
+    const slate = latestSlate(db);
+    return {
+      slateId: slate?.slate_id ?? null, slateDate: null, backtest: false,
+      from: 'FROM players p WHERE p.slate_id = ?', params: [slate?.slate_id ?? null], name: 'p.name', actual: ''
+    };
+  }
+  const slate = db.prepare(`SELECT slate_id FROM slate_player_snapshots WHERE game_date = ? AND site = 'draftkings'
+    GROUP BY slate_id ORDER BY COUNT(*) DESC LIMIT 1`).get(slateDate);
+  return {
+    slateId: slate?.slate_id ?? null, slateDate, backtest: true,
+    from: `FROM slate_player_snapshots p
+      LEFT JOIN historical_games h ON h.player_key = p.player_key AND h.game_date = p.game_date
+      WHERE p.game_date = ? AND p.site = 'draftkings' AND p.slate_id = ?`,
+    params: [slateDate, slate?.slate_id ?? null],
+    name: 'p.player_name',
+    actual: ', h.dk_fantasy_points AS actual_points'
+  };
+}
+
+/** Value plays (projection per $1K) under maxSalary. */
+export function valuePlays(db, { maxSalary = 5500, limit = 15, slateDate = null } = {}) {
+  const s = slateRows(db, slateDate);
+  const plays = db.prepare(
+    `SELECT ${s.name} AS name, p.position, p.team, p.opponent, p.salary, p.projected_points,
+            ROUND(p.projected_points / p.salary * 1000, 2) AS value, p.floor, p.ceiling${s.actual}
+     ${s.from} AND p.salary < ? AND p.salary > 0
+     ORDER BY value DESC LIMIT ?`
+  ).all(...s.params, maxSalary, limit);
+  return { slateId: s.slateId, slateDate: s.slateDate, backtest: s.backtest, plays };
+}
+
+/** GPP leverage plays: low ownership, high ceiling. */
+export function gppPlays(db, { maxRostership = 12, minCeiling = 40, limit = 15, slateDate = null } = {}) {
+  const s = slateRows(db, slateDate);
+  const plays = db.prepare(
+    `SELECT ${s.name} AS name, p.position, p.team, p.opponent, p.salary, p.projected_points,
+            p.rostership, p.ceiling, p.leverage_score, p.boom_probability${s.actual}
+     ${s.from} AND p.rostership < ? AND p.ceiling > ?
+     ORDER BY p.leverage_score DESC LIMIT ?`
+  ).all(...s.params, maxRostership, minCeiling, limit);
+  return { slateId: s.slateId, slateDate: s.slateDate, backtest: s.backtest, plays };
+}
