@@ -20,7 +20,7 @@ import db, { DATABASE_TYPE } from '../config/database.js';
 import { getSiteConfig, getEligibleSlots, isValidSite } from '../config/sites.js';
 import { parseCsv } from '../utils/csvParser.js';
 import { normalizeName, normalizeTeam } from '../utils/nameNormalizer.js';
-import { snapshotSlate } from './slateSnapshotService.js';
+import { easternToIso, snapshotSlate } from './slateSnapshotService.js';
 import { recomputeSlateRanges } from './variance/outcomeRangeService.js';
 
 export class SalaryImportError extends Error {
@@ -120,16 +120,6 @@ const parseNumber = (raw) => {
   return Number.isFinite(n) ? n : null;
 };
 
-// Offset (ms) of America/New_York from UTC at a given instant
-const easternOffsetMs = (ts) => {
-  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/New_York', hourCycle: 'h23',
-    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit'
-  }).formatToParts(new Date(ts)).map(p => [p.type, p.value]));
-  const asUtc = Date.UTC(+parts.year, +parts.month - 1, +parts.day, +parts.hour, +parts.minute, +parts.second);
-  return asUtc - ts;
-};
-
 /**
  * Parse "AWAY@HOME [MM/DD/YYYY HH:MMAM ET]" into teams and an ISO UTC start time.
  * Times on DFS CSVs are US Eastern.
@@ -146,8 +136,7 @@ export function parseGameInfo(raw) {
   if (dt) {
     let hour = parseInt(dt[4], 10) % 12;
     if (dt[6].toUpperCase() === 'PM') hour += 12;
-    const guess = Date.UTC(+dt[3], +dt[1] - 1, +dt[2], hour, +dt[5]);
-    result.startTime = new Date(guess - easternOffsetMs(guess)).toISOString();
+    result.startTime = easternToIso(+dt[3], +dt[1], +dt[2], hour, +dt[5]);
   }
   return result;
 }

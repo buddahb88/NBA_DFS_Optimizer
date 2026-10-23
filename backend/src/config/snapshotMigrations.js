@@ -1,6 +1,53 @@
 import { DATABASE_TYPE } from './database.js';
 
 /**
+ * Columns added so a past slate can be rebuilt (optimizer, portfolio, chat),
+ * not just scored: DK slot eligibility and export IDs, the game start time
+ * (UTC ISO, for late swap), the pre-lock variance metrics, the RotoWire
+ * inputs projection recalculation reads (raw_data keeps the full feed row),
+ * and the archetype / opponent matchup cell as known at capture time.
+ * Names match the players columns they copy, except the matchup_* fields.
+ */
+export const SNAPSHOT_DETAIL_COLUMNS = [
+  { name: 'player_id', sqlite: 'TEXT', azure: 'NVARCHAR(100)' },
+  { name: 'site_player_id', sqlite: 'TEXT', azure: 'NVARCHAR(100)' },
+  { name: 'roster_positions', sqlite: 'TEXT', azure: 'NVARCHAR(100)' },
+  { name: 'game_info', sqlite: 'TEXT', azure: 'NVARCHAR(255)' },
+  { name: 'game_start_time', sqlite: 'TEXT', azure: 'NVARCHAR(40)' },
+  { name: 'is_home', sqlite: 'INTEGER', azure: 'BIT' },
+  { name: 'std_dev', sqlite: 'REAL', azure: 'FLOAT' },
+  { name: 'volatility', sqlite: 'REAL', azure: 'FLOAT' },
+  { name: 'boom_probability', sqlite: 'REAL', azure: 'FLOAT' },
+  { name: 'bust_probability', sqlite: 'REAL', azure: 'FLOAT' },
+  { name: 'leverage_score', sqlite: 'REAL', azure: 'FLOAT' },
+  { name: 'blowout_risk', sqlite: 'REAL', azure: 'FLOAT' },
+  { name: 'fppm', sqlite: 'REAL', azure: 'FLOAT' },
+  { name: 'value', sqlite: 'REAL', azure: 'FLOAT' },
+  { name: 'value_gpp', sqlite: 'REAL', azure: 'FLOAT' },
+  { name: 'per', sqlite: 'REAL', azure: 'FLOAT' },
+  { name: 'usage', sqlite: 'REAL', azure: 'FLOAT' },
+  { name: 'fpts_last3', sqlite: 'REAL', azure: 'FLOAT' },
+  { name: 'fpts_last5', sqlite: 'REAL', azure: 'FLOAT' },
+  { name: 'fpts_last7', sqlite: 'REAL', azure: 'FLOAT' },
+  { name: 'fpts_last14', sqlite: 'REAL', azure: 'FLOAT' },
+  { name: 'vegas_win_prob', sqlite: 'REAL', azure: 'FLOAT' },
+  { name: 'rest_days', sqlite: 'INTEGER', azure: 'INT' },
+  { name: 'dvp_pts_allowed', sqlite: 'REAL', azure: 'FLOAT' },
+  { name: 'opp_def_eff', sqlite: 'REAL', azure: 'FLOAT' },
+  { name: 'rotowire_projection', sqlite: 'REAL', azure: 'FLOAT' },
+  { name: 'headshot', sqlite: 'TEXT', azure: 'NVARCHAR(500)' },
+  { name: 'raw_data', sqlite: 'TEXT', azure: 'NVARCHAR(MAX)' },
+  { name: 'archetype', sqlite: 'TEXT', azure: 'NVARCHAR(50)' },
+  { name: 'matchup_grouping', sqlite: 'TEXT', azure: 'NVARCHAR(20)' },
+  { name: 'matchup_group_key', sqlite: 'TEXT', azure: 'NVARCHAR(50)' },
+  { name: 'matchup_season', sqlite: 'TEXT', azure: 'NVARCHAR(20)' },
+  { name: 'matchup_delta', sqlite: 'REAL', azure: 'FLOAT' },
+  { name: 'matchup_rank', sqlite: 'INTEGER', azure: 'INT' },
+  { name: 'matchup_teams', sqlite: 'INTEGER', azure: 'INT' },
+  { name: 'matchup_adjusted_edge', sqlite: 'REAL', azure: 'FLOAT' },
+];
+
+/**
  * slate_player_snapshots migration (idempotent, runs on every startup)
  *
  * A slate sync wipes players and slates, so every sync / salary import first
@@ -43,6 +90,16 @@ export async function migrateSlatePlayerSnapshots(db) {
       IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_snapshots_player_key_date')
         CREATE INDEX idx_snapshots_player_key_date ON slate_player_snapshots(player_key, game_date);
     `);
+    for (const { name, azure } of SNAPSHOT_DETAIL_COLUMNS) {
+      await db.exec(`
+        IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('slate_player_snapshots') AND name = '${name}')
+          ALTER TABLE slate_player_snapshots ADD [${name}] ${azure};
+      `);
+    }
+    await db.exec(`
+      IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_snapshots_slate')
+        CREATE INDEX idx_snapshots_slate ON slate_player_snapshots(slate_id, game_date);
+    `);
   } else {
     await db.exec(`
       CREATE TABLE IF NOT EXISTS slate_player_snapshots (
@@ -72,5 +129,10 @@ export async function migrateSlatePlayerSnapshots(db) {
       );
       CREATE INDEX IF NOT EXISTS idx_snapshots_player_key_date ON slate_player_snapshots(player_key, game_date);
     `);
+    const existing = new Set((await db.all(`PRAGMA table_info(slate_player_snapshots)`)).map(c => c.name));
+    for (const { name, sqlite } of SNAPSHOT_DETAIL_COLUMNS) {
+      if (!existing.has(name)) await db.exec(`ALTER TABLE slate_player_snapshots ADD COLUMN ${name} ${sqlite}`);
+    }
+    await db.exec(`CREATE INDEX IF NOT EXISTS idx_snapshots_slate ON slate_player_snapshots(slate_id, game_date)`);
   }
 }

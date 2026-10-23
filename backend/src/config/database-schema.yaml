@@ -755,7 +755,115 @@ tables:
         description: "1 = lineup confirmed"
       - name: captured_at
         type: DATETIME
-        description: "When the row was last written"
+        description: "When the pre-lock values were last written (a capture after the game started only fills missing detail columns)"
+      - name: roster_positions
+        type: TEXT
+        description: "DK/FD slots the player could fill, e.g. 'PG/G/UTIL' (derived from position when the slate had none)"
+      - name: site_player_id
+        type: TEXT
+        description: "Site player ID for CSV export (only set for slates loaded from a salary CSV)"
+      - name: player_id
+        type: TEXT
+        description: "players.player_id (RotoWire ID) at capture"
+      - name: game_start_time
+        type: TEXT
+        description: "Game tip-off, ISO UTC"
+      - name: std_dev
+        type: REAL
+        description: "Pre-lock variance metric (boom/bust in percent). Never overwritten after lock"
+      - name: volatility
+        type: REAL
+        description: "Pre-lock variance metric (boom/bust in percent). Never overwritten after lock"
+      - name: boom_probability
+        type: REAL
+        description: "Pre-lock variance metric (boom/bust in percent). Never overwritten after lock"
+      - name: bust_probability
+        type: REAL
+        description: "Pre-lock variance metric (boom/bust in percent). Never overwritten after lock"
+      - name: leverage_score
+        type: REAL
+        description: "Pre-lock variance metric (boom/bust in percent). Never overwritten after lock"
+      - name: game_info
+        type: mixed
+        description: "Copy of the players column of the same name at capture (raw_data: the RotoWire feed row, JSON)"
+      - name: is_home
+        type: mixed
+        description: "Copy of the players column of the same name at capture (raw_data: the RotoWire feed row, JSON)"
+      - name: value
+        type: mixed
+        description: "Copy of the players column of the same name at capture (raw_data: the RotoWire feed row, JSON)"
+      - name: value_gpp
+        type: mixed
+        description: "Copy of the players column of the same name at capture (raw_data: the RotoWire feed row, JSON)"
+      - name: per
+        type: mixed
+        description: "Copy of the players column of the same name at capture (raw_data: the RotoWire feed row, JSON)"
+      - name: usage
+        type: mixed
+        description: "Copy of the players column of the same name at capture (raw_data: the RotoWire feed row, JSON)"
+      - name: fpts_last3
+        type: mixed
+        description: "Copy of the players column of the same name at capture (raw_data: the RotoWire feed row, JSON)"
+      - name: fpts_last5
+        type: mixed
+        description: "Copy of the players column of the same name at capture (raw_data: the RotoWire feed row, JSON)"
+      - name: fpts_last7
+        type: mixed
+        description: "Copy of the players column of the same name at capture (raw_data: the RotoWire feed row, JSON)"
+      - name: fpts_last14
+        type: mixed
+        description: "Copy of the players column of the same name at capture (raw_data: the RotoWire feed row, JSON)"
+      - name: vegas_win_prob
+        type: mixed
+        description: "Copy of the players column of the same name at capture (raw_data: the RotoWire feed row, JSON)"
+      - name: rest_days
+        type: mixed
+        description: "Copy of the players column of the same name at capture (raw_data: the RotoWire feed row, JSON)"
+      - name: dvp_pts_allowed
+        type: mixed
+        description: "Copy of the players column of the same name at capture (raw_data: the RotoWire feed row, JSON)"
+      - name: opp_def_eff
+        type: mixed
+        description: "Copy of the players column of the same name at capture (raw_data: the RotoWire feed row, JSON)"
+      - name: fppm
+        type: mixed
+        description: "Copy of the players column of the same name at capture (raw_data: the RotoWire feed row, JSON)"
+      - name: blowout_risk
+        type: mixed
+        description: "Copy of the players column of the same name at capture (raw_data: the RotoWire feed row, JSON)"
+      - name: rotowire_projection
+        type: mixed
+        description: "Copy of the players column of the same name at capture (raw_data: the RotoWire feed row, JSON)"
+      - name: headshot
+        type: mixed
+        description: "Copy of the players column of the same name at capture (raw_data: the RotoWire feed row, JSON)"
+      - name: raw_data
+        type: mixed
+        description: "Copy of the players column of the same name at capture (raw_data: the RotoWire feed row, JSON)"
+      - name: archetype
+        type: TEXT
+        description: "Player archetype for the game's season (prior season fallback) at capture"
+      - name: matchup_grouping
+        type: mixed
+        description: "Opponent defense cell (fp_over_expectation) vs the player's archetype or G/F/C as known before lock"
+      - name: matchup_group_key
+        type: mixed
+        description: "Opponent defense cell (fp_over_expectation) vs the player's archetype or G/F/C as known before lock"
+      - name: matchup_season
+        type: mixed
+        description: "Opponent defense cell (fp_over_expectation) vs the player's archetype or G/F/C as known before lock"
+      - name: matchup_delta
+        type: mixed
+        description: "Opponent defense cell (fp_over_expectation) vs the player's archetype or G/F/C as known before lock"
+      - name: matchup_rank
+        type: mixed
+        description: "Opponent defense cell (fp_over_expectation) vs the player's archetype or G/F/C as known before lock"
+      - name: matchup_teams
+        type: mixed
+        description: "Opponent defense cell (fp_over_expectation) vs the player's archetype or G/F/C as known before lock"
+      - name: matchup_adjusted_edge
+        type: mixed
+        description: "Opponent defense cell (fp_over_expectation) vs the player's archetype or G/F/C as known before lock"
 
     example_queries:
       - description: "Projection vs actual DK points for past slates"
