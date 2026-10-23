@@ -12,7 +12,7 @@
     "start:backtest": "BACKTESTING_MODE=true node src/server.js",
     "init-db": "node src/config/initDb.js",
     "snapshot": "node scripts/snapshot-db.js",
-    "backfill": "node scripts/backfill-advanced-metrics.js",
+    "backfill": "node scripts/recompute-outcome-ranges.js",
     "enhanced-projections": "node scripts/backfill-enhanced-projections.js",
     "enhanced-projections:update": "node scripts/backfill-enhanced-projections.js --update-db",
     "enhanced-projections:verbose": "node scripts/backfill-enhanced-projections.js --verbose",

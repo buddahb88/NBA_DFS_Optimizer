@@ -144,6 +144,16 @@ test('stdev derivation: historical CV, then range, then default', () => {
   assert.equal(derivePlayerSd({ projected_points: 40 }).source, 'default');
 });
 
+test('stdev derivation: stored std_dev (game-log outcome distribution) comes first', () => {
+  const hist = summarize([30, 40, 50, 20, 60, 35, 45, 40, 30, 50]);
+  const p = { projected_points: 40, floor: 28, ceiling: 53, std_dev: 12 };
+  assert.deepEqual(derivePlayerSd(p, hist), { sd: 12, source: 'distribution' });
+  // Clamped to the same CV bounds as the other sources
+  assert.equal(derivePlayerSd({ projected_points: 40, std_dev: 100 }, hist).sd, 40 * 0.9);
+  // Missing / zero std_dev falls through to the historical CV
+  assert.equal(derivePlayerSd({ ...p, std_dev: 0 }, hist).source, 'historical');
+});
+
 test('performance: 10k iterations x 150+ players under 2s', () => {
   const players = makeSlate({ games: 4, perTeam: 19 }); // 152 players
   const start = performance.now();

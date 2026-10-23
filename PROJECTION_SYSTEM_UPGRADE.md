@@ -1,5 +1,11 @@
 # NBA DFS Projection System - Major Upgrade Summary
 
+> **Superseded (variance model):** floor / ceiling / std_dev / volatility / boom / bust are no longer
+> `projection ± stdDev` of RotoWire's rolling averages (that spread collapsed to a few points). They now
+> come from each player's game-log outcome distribution: 15th / 85th percentiles, calibrated on a
+> no-lookahead 2025-26 replay. See `backend/src/services/variance/outcomeDistribution.js` and
+> `backend/scripts/calibrate-outcome-ranges.js`. leverage_score is now `boom_probability / (ownership + 1)`.
+
 ## Overview
 This document outlines the comprehensive upgrade to the NBA DFS projection system, implementing expert-recommended methodologies for variance modeling, blowout risk analysis, and GPP optimization.
 

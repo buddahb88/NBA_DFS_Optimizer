@@ -2,6 +2,7 @@ import fetch from 'node-fetch';
 import teamDefenseModel from '../models/teamDefenseModel.js';
 import teamDefenseVsPositionModel from '../models/teamDefenseVsPositionModel.js';
 import { normalizeForRankings, normalizeForVsPosition } from '../utils/teamMapping.js';
+import { applyRangesToPlayers } from './variance/outcomeRangeService.js';
 
 class RotowireService {
   constructor() {
@@ -150,151 +151,12 @@ class RotowireService {
     return weightedFPPM;
   }
 
-  calculatePlayerVariance(recentGames) {
-    // Calculate standard deviation from recent games
-    // recentGames should be an array of fantasy point values
-
-    if (!recentGames || recentGames.length < 3) {
-      return {
-        stdDev: 0,
-        floor: 0,
-        ceiling: 0,
-        volatility: 0
-      };
-    }
-
-    // Calculate mean
-    const mean = recentGames.reduce((sum, val) => sum + val, 0) / recentGames.length;
-
-    // Calculate variance
-    const squaredDiffs = recentGames.map(val => Math.pow(val - mean, 2));
-    const variance = squaredDiffs.reduce((sum, val) => sum + val, 0) / recentGames.length;
-    const stdDev = Math.sqrt(variance);
-
-    // Calculate floor (25th percentile) and ceiling (75th percentile)
-    // Using standard deviation: 68% of values fall within ±1 stdDev
-    const floor = mean - stdDev;
-    const ceiling = mean + stdDev;
-
-    // Volatility ratio (coefficient of variation)
-    const volatility = mean > 0 ? stdDev / mean : 0;
-
-    return {
-      stdDev,
-      floor: Math.max(0, floor), // Don't allow negative floor
-      ceiling,
-      volatility
-    };
-  }
-
-  getBlowoutRisk(vegasSpread, vegasTotal) {
-    // Advanced blowout risk model
-    // Returns object with projection, floor, and ceiling impacts
-
-    if (!vegasSpread || vegasSpread === 0) {
-      return {
-        projectionAdjustment: 0,
-        floorImpact: 0,
-        ceilingImpact: 0,
-        risk: 0
-      };
-    }
-
-    const absSpread = Math.abs(vegasSpread);
-
-    // Blowout risk kicks in above 10 point spreads
-    if (absSpread <= 10) {
-      return {
-        projectionAdjustment: 0,
-        floorImpact: 0,
-        ceilingImpact: 0,
-        risk: 0
-      };
-    }
-
-    const blowoutMagnitude = absSpread - 10;
-
-    // Big favorites: Risk of early pulls (negative spread = favorite)
-    if (vegasSpread < -10) {
-      return {
-        projectionAdjustment: -blowoutMagnitude * 0.3,  // Reduce projection
-        floorImpact: -blowoutMagnitude * 0.5,            // Floor drops significantly
-        ceilingImpact: -blowoutMagnitude * 0.2,          // Ceiling also drops (no opportunity for big game)
-        risk: blowoutMagnitude * 0.1
-      };
-    }
-
-    // Big underdogs: Garbage time uncertainty (positive spread = underdog)
-    if (vegasSpread > 10) {
-      return {
-        projectionAdjustment: -blowoutMagnitude * 0.2,  // Slight reduction (less playing time in competitive minutes)
-        floorImpact: -blowoutMagnitude * 0.4,            // Floor drops (may get pulled)
-        ceilingImpact: blowoutMagnitude * 0.3,           // Ceiling increases (garbage time potential)
-        risk: blowoutMagnitude * 0.1
-      };
-    }
-
-    return {
-      projectionAdjustment: 0,
-      floorImpact: 0,
-      ceilingImpact: 0,
-      risk: 0
-    };
-  }
-
-  calculateBoomBustProbabilities(projection, stdDev, salary) {
-    // Calculate boom (10+ pts above value) and bust (fail to meet value) probabilities
-
-    if (!projection || !salary || stdDev === 0) {
-      return {
-        boomProb: 0,
-        bustProb: 0
-      };
-    }
-
-    // Calculate expected value threshold (points needed to hit value)
-    // Typical value threshold is 5x salary (e.g., $10k salary needs 50 FP)
-    const valueThreshold = (salary / 1000) * 5;
-
-    // Boom threshold: 10 points above value
-    const boomThreshold = valueThreshold + 10;
-
-    // Calculate z-scores
-    const zScoreBoom = (boomThreshold - projection) / stdDev;
-    const zScoreBust = (valueThreshold - projection) / stdDev;
-
-    // Use normal distribution approximation for probabilities
-    // Simplified calculation using error function approximation
-    const normalCDF = (z) => {
-      // Approximation of cumulative distribution function
-      const t = 1 / (1 + 0.2316419 * Math.abs(z));
-      const d = 0.3989423 * Math.exp(-z * z / 2);
-      const prob = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
-      return z > 0 ? 1 - prob : prob;
-    };
-
-    // Boom probability: P(X > boomThreshold)
-    const boomProb = 1 - normalCDF(zScoreBoom);
-
-    // Bust probability: P(X < valueThreshold)
-    const bustProb = normalCDF(zScoreBust);
-
-    return {
-      boomProb: Math.max(0, Math.min(1, boomProb)) * 100,  // Convert to percentage
-      bustProb: Math.max(0, Math.min(1, bustProb)) * 100   // Convert to percentage
-    };
-  }
-
-  calculateLeverageScore(boomProbability, ownership) {
-    // GPP Leverage: High boom probability + low ownership = leverage
-    if (!ownership || ownership === 0) {
-      ownership = 1; // Avoid division by zero
-    }
-
-    // Leverage = (Boom Probability × 100) / (Ownership % + 1)
-    const leverage = (boomProbability * 100) / (ownership + 1);
-
-    return leverage;
+  getBlowoutRisk(vegasSpread) {
+    // Blowout risk for spreads beyond 10 points (either side): 0.1 per point.
+    // Starters may sit late (favorites) or garbage time reshuffles minutes
+    // (underdogs); outcomeRangeService widens the minutes distribution by it.
+    const absSpread = Math.abs(Number(vegasSpread) || 0);
+    return { risk: absSpread > 10 ? (absSpread - 10) * 0.1 : 0 };
   }
 
   async fetchPlayers(slateId) {
@@ -330,7 +192,8 @@ class RotowireService {
 
       const data = await response.json();
       const lookups = await this.loadDefenseLookups();
-      return this.transformPlayerData(data, lookups);
+      const players = this.transformPlayerData(data, lookups);
+      return await applyRangesToPlayers(players, { site: 'draftkings' });
     } catch (error) {
       console.error('Error fetching RotoWire data:', error);
       throw error;
@@ -447,14 +310,7 @@ class RotowireService {
       // We calculate floor/ceiling/volatility and advanced metrics on top
       // ═══════════════════════════════════════════════════════════════
       let projectedPoints = 0;
-      let floor = 0;
-      let ceiling = 0;
-      let volatility = 0;
-      let stdDev = 0;
-      let boomProbability = 0;
-      let bustProbability = 0;
       let fppm = 0;
-      let leverageScore = 0;
       let blowoutRisk = 0;
 
       // Get RotoWire's projection (already matchup-adjusted by their experts)
@@ -470,67 +326,18 @@ class RotowireService {
         projectedPoints = rotowireProjection;
 
         // ───────────────────────────────────────────────────────────
-        // STEP 2: Calculate Variance from Recent Performance
-        // ───────────────────────────────────────────────────────────
-        // Use spread between recent averages to estimate volatility
-        const recentGames = [];
-        if (fptsLast3 > 0) recentGames.push(fptsLast3);
-        if (fptsLast5 > 0) recentGames.push(fptsLast5);
-        if (fptsLast7 > 0) recentGames.push(fptsLast7);
-        if (fptsSeason > 0) recentGames.push(fptsSeason);
-
-        const varianceData = this.calculatePlayerVariance(recentGames);
-        stdDev = varianceData.stdDev;
-        volatility = varianceData.volatility;
-
-        // If we don't have enough variance data, estimate from projection
-        if (stdDev === 0 || recentGames.length < 2) {
-          // Default volatility: ~15% of projection
-          stdDev = projectedPoints * 0.15;
-          volatility = 0.15;
-        }
-
-        // ───────────────────────────────────────────────────────────
-        // STEP 3: Calculate FPPM (Fantasy Points Per Minute)
+        // STEP 2: Calculate FPPM (Fantasy Points Per Minute)
         // ───────────────────────────────────────────────────────────
         fppm = minutes > 0 ? projectedPoints / minutes : 0;
 
         // ───────────────────────────────────────────────────────────
-        // STEP 4: Calculate Floor & Ceiling
+        // STEP 3: Blowout Risk (widens the outcome distribution in
+        // variance/outcomeRangeService, does not move the projection)
         // ───────────────────────────────────────────────────────────
-        // Floor = projection - 1 standard deviation (roughly 16th percentile)
-        // Ceiling = projection + 1 standard deviation (roughly 84th percentile)
-        floor = Math.max(0, projectedPoints - stdDev);
-        ceiling = projectedPoints + stdDev;
+        blowoutRisk = this.getBlowoutRisk(vegasSpread).risk;
 
-        // ───────────────────────────────────────────────────────────
-        // STEP 5: Calculate Boom/Bust Probabilities
-        // ───────────────────────────────────────────────────────────
-        const probabilities = this.calculateBoomBustProbabilities(projectedPoints, stdDev, salary);
-        boomProbability = probabilities.boomProb;
-        bustProbability = probabilities.bustProb;
-
-        // ───────────────────────────────────────────────────────────
-        // STEP 6: Calculate GPP Leverage Score
-        // ───────────────────────────────────────────────────────────
-        leverageScore = this.calculateLeverageScore(boomProbability, rostership);
-
-        // ───────────────────────────────────────────────────────────
-        // STEP 7: Blowout Risk (informational, not adjusting projection)
-        // ───────────────────────────────────────────────────────────
-        const blowoutData = this.getBlowoutRisk(vegasSpread, vegasOverUnder);
-        blowoutRisk = blowoutData.risk;
-
-        // Adjust floor/ceiling for blowout scenarios
-        if (blowoutRisk > 0) {
-          floor = Math.max(0, floor + blowoutData.floorImpact);
-          ceiling = ceiling + blowoutData.ceilingImpact;
-        }
-
-        // ───────────────────────────────────────────────────────────
-        // LOGGING: Show projection source
-        // ───────────────────────────────────────────────────────────
-        console.log(`  📊 ${name}: RotoWire ${rotowireProjection.toFixed(1)} FP | Floor: ${floor.toFixed(1)} | Ceiling: ${ceiling.toFixed(1)} | Boom: ${boomProbability.toFixed(0)}% | Lev: ${leverageScore.toFixed(1)}`);
+        // Floor / ceiling / std dev / boom / bust / leverage come from the player's
+        // game logs and are applied by fetchPlayers (applyRangesToPlayers).
       }
 
       // ═══════════════════════════════════════════════════════════════
@@ -683,16 +490,16 @@ class RotowireService {
         headshot,
         dvpPtsAllowed,
         oppDefEff,
-        // Advanced projection metrics
-        floor,
-        ceiling,
-        volatility,
-        boomProbability,
-        bustProbability,
+        // Advanced projection metrics (range fields filled by applyRangesToPlayers)
+        floor: 0,
+        ceiling: 0,
+        volatility: 0,
+        boomProbability: 0,
+        bustProbability: 0,
         fppm,
-        leverageScore,
+        leverageScore: 0,
         blowoutRisk,
-        stdDev,
+        stdDev: 0,
         rawData: JSON.stringify(player)
       };
     })

@@ -21,6 +21,7 @@ import { getSiteConfig, getEligibleSlots, isValidSite } from '../config/sites.js
 import { parseCsv } from '../utils/csvParser.js';
 import { normalizeName, normalizeTeam } from '../utils/nameNormalizer.js';
 import { snapshotSlate } from './slateSnapshotService.js';
+import { recomputeSlateRanges } from './variance/outcomeRangeService.js';
 
 export class SalaryImportError extends Error {
   constructor(message, status = 400) {
@@ -492,6 +493,8 @@ export async function importSalaries({ csvText, site: siteHint, slateId, slateNa
     .filter(r => !claimed.has(r.id))
     .map(r => ({ name: r.name, team: r.team, salary: r.salary }));
 
+  // Ranges copied from another site's slate used that site's salary and scoring
+  await recomputeSlateRanges(targetId);
   await snapshotSlate(targetId);
 
   return report;

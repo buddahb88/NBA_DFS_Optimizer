@@ -30,16 +30,16 @@ The AI Assistant has been upgraded with complete knowledge of all advanced proje
 ## 📊 New Metrics the AI Understands
 
 ### **1. floor** (REAL)
-- **Description**: 25th percentile projection (worst-case reasonable outcome)
+- **Description**: 15th percentile of the player's projected outcome distribution (game-log based)
 - **Range**: 0-70 FP
-- **Calculation**: `projection - std_dev + blowout_floor_impact`
+- **Calculation**: see `backend/src/services/variance/outcomeDistribution.js`
 - **AI Usage**: Cash game safety analysis
 - **Target**: floor >= 30 for cash game cores
 
 ### **2. ceiling** (REAL)
-- **Description**: 75th percentile projection (best-case reasonable outcome)
+- **Description**: 85th percentile of the player's projected outcome distribution (game-log based)
 - **Range**: 0-80 FP
-- **Calculation**: `projection + std_dev + blowout_ceiling_impact`
+- **Calculation**: same distribution as floor; blowout risk widens it
 - **AI Usage**: GPP tournament upside identification
 - **Target**: ceiling >= 50 for high upside plays
 
@@ -74,8 +74,8 @@ The AI Assistant has been upgraded with complete knowledge of all advanced proje
 
 ### **7. leverage_score** (REAL) ⭐ **PRIMARY GPP METRIC**
 - **Description**: GPP leverage formula
-- **Calculation**: `(boom_probability × 100) / (ownership + 1)`
-- **Range**: 0-5000+
+- **Calculation**: `boom_probability / (ownership + 1)`
+- **Range**: 0-50+
 - **Interpretation**:
   - ≥3.0 = HIGH LEVERAGE (ideal GPP play)
   - 1.0-3.0 = Moderate leverage

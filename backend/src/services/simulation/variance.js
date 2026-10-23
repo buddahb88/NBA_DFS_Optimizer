@@ -1,7 +1,10 @@
 /**
  * Per-player outcome spread (stdev) derivation.
  *
- * Primary source: historical_games dk_fantasy_points variance, expressed as a
+ * Primary source: the player's stored std_dev, from the game-log outcome
+ * distribution (services/variance) that also sets floor / ceiling, as a CV of
+ * the row's projection.
+ * Then historical_games dk_fantasy_points variance, expressed as a
  * coefficient of variation and re-applied to today's projection (so a player
  * whose role grew keeps a sensible spread).
  * Fallback: (ceiling - floor) / 2.5, then a flat league-typical CV.
@@ -38,13 +41,18 @@ export function summarize(values) {
 }
 
 /**
- * @returns {{ sd:number, source:'historical'|'range'|'default' }}
+ * @returns {{ sd:number, source:'distribution'|'historical'|'range'|'default' }}
  */
 export function derivePlayerSd(player, hist) {
   const mean = Number(player.projected_points) || 0;
   if (mean <= 0) return { sd: 0, source: 'default' };
 
   const clampCv = (cv) => Math.min(CV_MAX, Math.max(CV_MIN, cv));
+
+  const stored = Number(player.std_dev);
+  if (Number.isFinite(stored) && stored > 0) {
+    return { sd: clampCv(stored / mean) * mean, source: 'distribution' };
+  }
 
   if (hist && hist.n >= MIN_HIST_GAMES && hist.mean > 0 && hist.sd > 0) {
     return { sd: clampCv(hist.sd / hist.mean) * mean, source: 'historical' };

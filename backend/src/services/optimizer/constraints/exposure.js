@@ -155,7 +155,7 @@ export function parseExposureSettings(body = {}) {
   };
 }
 
-/** Apply projectionOverride (floor/ceiling scale proportionally) and drop excluded players. */
+/** Apply projectionOverride (floor/ceiling/std_dev scale proportionally) and drop excluded players. */
 export function applyPlayerOverrides(players, config) {
   return players
     .filter((p) => !config.playerSettings.get(Number(p.id))?.exclude)
@@ -169,6 +169,7 @@ export function applyPlayerOverrides(players, config) {
         projected_points: override,
         floor: p.floor != null && base > 0 ? p.floor * scale : p.floor,
         ceiling: p.ceiling != null && base > 0 ? p.ceiling * scale : p.ceiling,
+        std_dev: p.std_dev != null && base > 0 ? p.std_dev * scale : p.std_dev,
       };
     });
 }

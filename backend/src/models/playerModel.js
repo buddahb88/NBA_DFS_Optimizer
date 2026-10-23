@@ -357,14 +357,10 @@ class PlayerModel {
         UPDATE players SET
           projected_points = @projectedPoints,
           rotowire_projection = COALESCE(rotowire_projection, projected_points),
-          floor = @floor,
-          ceiling = @ceiling,
           updated_at = GETDATE()
         WHERE slate_id = @slateId AND player_id = @playerId
       `, {
         projectedPoints: projectionData.adjusted_projection,
-        floor: projectionData.floor || 0,
-        ceiling: projectionData.ceiling || 0,
         slateId,
         playerId
       });
@@ -373,14 +369,10 @@ class PlayerModel {
         UPDATE players SET
           projected_points = ?,
           rotowire_projection = COALESCE(rotowire_projection, projected_points),
-          floor = ?,
-          ceiling = ?,
           updated_at = CURRENT_TIMESTAMP
         WHERE slate_id = ? AND player_id = ?
       `,
         projectionData.adjusted_projection,
-        projectionData.floor || 0,
-        projectionData.ceiling || 0,
         slateId,
         playerId
       );
@@ -400,14 +392,10 @@ class PlayerModel {
         await db.run(`
           UPDATE players SET
             projected_points = @adjustedProjection,
-            floor = @floor,
-            ceiling = @ceiling,
             updated_at = GETDATE()
           WHERE slate_id = @slateId AND player_id = @playerId
         `, {
           adjustedProjection: proj.adjusted_projection,
-          floor: proj.floor || 0,
-          ceiling: proj.ceiling || 0,
           slateId,
           playerId: String(proj.player_id)
         });
@@ -426,14 +414,10 @@ class PlayerModel {
           const result = db.run(`
             UPDATE players SET
               projected_points = @adjustedProjection,
-              floor = @floor,
-              ceiling = @ceiling,
               updated_at = CURRENT_TIMESTAMP
             WHERE slate_id = @slateId AND player_id = @playerId
           `, {
             adjustedProjection: proj.adjusted_projection,
-            floor: proj.floor || 0,
-            ceiling: proj.ceiling || 0,
             slateId,
             playerId: String(proj.player_id)
           });

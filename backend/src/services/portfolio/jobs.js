@@ -24,7 +24,7 @@ let running = 0;
 // Only the fields the engine reads - keeps the structured clone into the worker small
 const PLAYER_FIELDS = [
   'id', 'player_id', 'name', 'team', 'opponent', 'position', 'salary', 'projected_points',
-  'projected_minutes', 'usage', 'rostership', 'floor', 'ceiling', 'volatility', 'injury_status',
+  'projected_minutes', 'usage', 'rostership', 'floor', 'ceiling', 'volatility', 'std_dev', 'injury_status',
   'vegas_implied_total', 'vegas_spread', 'vegas_over_under'
 ];
 

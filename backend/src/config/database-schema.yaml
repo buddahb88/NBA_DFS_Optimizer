@@ -202,45 +202,45 @@ tables:
       # Advanced Projection Metrics (Variance & Risk Analysis)
       - name: floor
         type: REAL
-        description: "25th percentile projection (worst-case reasonable outcome)"
-        calculation: "projection - standard_deviation + blowout_floor_impact"
+        description: "15th percentile of the player's projected DK outcome distribution (~15% of games score below it)"
+        calculation: "game-log points-per-minute x minutes distribution around the projection (services/variance/outcomeDistribution.js)"
         notes: "Use for cash game safety analysis. Higher floor = safer play"
       - name: ceiling
         type: REAL
-        description: "75th percentile projection (best-case reasonable outcome)"
-        calculation: "projection + standard_deviation + blowout_ceiling_impact"
+        description: "85th percentile of the player's projected DK outcome distribution (~15% of games score above it)"
+        calculation: "same distribution as floor; blowout risk widens it"
         notes: "Use for GPP tournament upside analysis. Higher ceiling = more boom potential"
       - name: volatility
         type: REAL
         description: "Coefficient of variation (std_dev / mean)"
-        range: [0, 1]
+        range: [0, 1.5]
         notes: |
-          - <0.15 = consistent/safe (good for cash)
-          - 0.15-0.30 = moderate variance
-          - >0.30 = high variance/boom-bust (good for GPP with low ownership)
+          - <0.30 = consistent (heavy-minute starters; good for cash)
+          - 0.30-0.45 = moderate variance
+          - >0.45 = high variance/boom-bust (low-minute and bench roles; GPP with low ownership)
       - name: boom_probability
         type: REAL
-        description: "Percentage chance of exceeding value threshold by 10+ fantasy points"
+        description: "Percentage chance of scoring 5x salary/1000 + 10 or more"
         range: [0, 100]
         notes: |
-          - ≥30% = high boom potential (great for GPP)
-          - 10-30% = moderate boom chance
+          - ≥25% = high boom potential (great for GPP)
+          - 10-25% = moderate boom chance
           - <10% = low upside
       - name: bust_probability
         type: REAL
-        description: "Percentage chance of failing to meet value threshold"
+        description: "Percentage chance of scoring under 5x salary/1000 (about 65% of all slate players do)"
         range: [0, 100]
         notes: |
-          - <20% = safe play (good for cash)
-          - 20-40% = moderate bust risk
-          - >40% = high bust risk (avoid in cash, use sparingly in GPP)
+          - <40% = safe play (good for cash)
+          - 40-60% = moderate bust risk
+          - >60% = high bust risk (avoid in cash, use sparingly in GPP)
       - name: fppm
         type: REAL
         description: "Weighted fantasy points per minute (40% L3, 30% L5, 30% season)"
         notes: "Measures current efficiency better than season averages"
       - name: leverage_score
         type: REAL
-        description: "GPP leverage score: (boom_probability × 100) / (ownership + 1)"
+        description: "GPP leverage score: boom_probability / (ownership + 1)"
         notes: |
           - ≥3.0 = high leverage (great GPP play - low owned with boom potential)
           - 1.0-3.0 = moderate leverage
@@ -252,7 +252,7 @@ tables:
         notes: "Triggers when |spread| > 10. Favorites risk early pulls, underdogs get garbage time"
       - name: std_dev
         type: REAL
-        description: "Standard deviation of recent fantasy point performance"
+        description: "Standard deviation of the projected DK outcome distribution (same model as floor/ceiling)"
         notes: "Higher std_dev = more variance (boom/bust potential)"
 
       # Metadata
@@ -282,11 +282,11 @@ tables:
       weak_defense: "WHERE opp_def_eff > 118"
       elite_defense: "WHERE opp_def_eff < 108"
       # Advanced metric filters
-      safe_cash_plays: "WHERE floor >= 30 AND volatility < 0.20 AND bust_probability < 25"
+      safe_cash_plays: "WHERE floor >= 30 AND volatility < 0.30 AND bust_probability < 45"
       high_ceiling_gpp: "WHERE ceiling >= 50 AND boom_probability >= 25"
       elite_leverage: "WHERE leverage_score >= 3.0 AND boom_probability >= 20"
-      consistent_producers: "WHERE volatility < 0.15 AND floor >= 25"
-      boom_bust_candidates: "WHERE volatility >= 0.30 AND ceiling >= 45"
+      consistent_producers: "WHERE volatility < 0.30 AND floor >= 25"
+      boom_bust_candidates: "WHERE volatility >= 0.45 AND ceiling >= 45"
 
     example_queries:
       basic:
@@ -326,7 +326,7 @@ tables:
 
       advanced_metrics:
         - description: "Safe cash game plays (high floor, low volatility, low bust risk)"
-          query: "SELECT name, salary, projected_points, floor, ceiling, volatility, bust_probability FROM players WHERE floor >= 30 AND volatility < 0.20 AND bust_probability < 25 AND (injury_status IS NULL OR injury_status = '') ORDER BY floor DESC LIMIT 15"
+          query: "SELECT name, salary, projected_points, floor, ceiling, volatility, bust_probability FROM players WHERE floor >= 30 AND volatility < 0.30 AND bust_probability < 45 AND (injury_status IS NULL OR injury_status = '') ORDER BY floor DESC LIMIT 15"
 
         - description: "Elite GPP leverage plays (low owned + high boom potential)"
           query: "SELECT name, salary, projected_points, leverage_score, boom_probability, rostership, ceiling FROM players WHERE leverage_score >= 3.0 AND boom_probability >= 20 AND (injury_status IS NULL OR injury_status = '') ORDER BY leverage_score DESC LIMIT 15"
@@ -335,10 +335,10 @@ tables:
           query: "SELECT name, salary, projected_points, ceiling, boom_probability, volatility, rostership FROM players WHERE ceiling >= 50 AND boom_probability >= 25 AND (injury_status IS NULL OR injury_status = '') ORDER BY ceiling DESC LIMIT 10"
 
         - description: "Consistent producers (low variance, high floor)"
-          query: "SELECT name, salary, floor, ceiling, volatility, projected_points FROM players WHERE volatility < 0.15 AND floor >= 25 AND projected_minutes >= 28 AND (injury_status IS NULL OR injury_status = '') ORDER BY floor DESC"
+          query: "SELECT name, salary, floor, ceiling, volatility, projected_points FROM players WHERE volatility < 0.30 AND floor >= 25 AND projected_minutes >= 28 AND (injury_status IS NULL OR injury_status = '') ORDER BY floor DESC"
 
         - description: "Boom/bust candidates with upside"
-          query: "SELECT name, salary, floor, ceiling, volatility, boom_probability, leverage_score FROM players WHERE volatility >= 0.30 AND ceiling >= 45 AND leverage_score >= 2.0 AND (injury_status IS NULL OR injury_status = '') ORDER BY leverage_score DESC"
+          query: "SELECT name, salary, floor, ceiling, volatility, boom_probability, leverage_score FROM players WHERE volatility >= 0.45 AND ceiling >= 45 AND leverage_score >= 2.0 AND (injury_status IS NULL OR injury_status = '') ORDER BY leverage_score DESC"
 
         - description: "Compare floor vs ceiling spread for risk assessment"
           query: "SELECT name, salary, projected_points, floor, ceiling, (ceiling - floor) as spread, volatility, boom_probability FROM players WHERE projected_minutes >= 25 AND (injury_status IS NULL OR injury_status = '') ORDER BY spread DESC LIMIT 15"
@@ -347,7 +347,7 @@ tables:
           query: "SELECT name, salary, ceiling, boom_probability, leverage_score, rostership, volatility FROM players WHERE ceiling >= 45 AND rostership <= 10 AND boom_probability >= 15 AND (injury_status IS NULL OR injury_status = '') ORDER BY leverage_score DESC LIMIT 20"
 
         - description: "Value plays with safe floors (cash game)"
-          query: "SELECT name, salary, value, floor, volatility, bust_probability, projected_points FROM players WHERE value >= 5.5 AND floor >= 28 AND volatility < 0.25 AND (injury_status IS NULL OR injury_status = '') ORDER BY value DESC"
+          query: "SELECT name, salary, value, floor, volatility, bust_probability, projected_points FROM players WHERE value >= 5.5 AND floor >= 28 AND volatility < 0.35 AND (injury_status IS NULL OR injury_status = '') ORDER BY value DESC"
 
         - description: "Players in blowout risk situations"
           query: "SELECT name, team, opponent, vegas_spread, blowout_risk, projected_points, floor, ceiling FROM players WHERE blowout_risk > 0 AND (injury_status IS NULL OR injury_status = '') ORDER BY blowout_risk DESC"
@@ -1011,15 +1011,15 @@ query_tips:
   - "Player names: resolve them to player_key with the tools (get_player_history, compare_players, get_usage_without_teammate, ...) or the player_key utility (utils/playerKey.js); they handle accents, punctuation and Jr./III and return closest matches. Then filter history tables by player_key, never player_name LIKE '%name%'. The slate-wide example joins on name are approximate and can miss players"
   - "historical_games has every game since 2024-25; filter season_type = 'regular' for season averages. usg_pct/off_rtg/def_rtg/bpm are empty there - use player_season_profiles"
   # Advanced metrics tips
-  - "CASH GAMES: Filter by floor >= 30 AND volatility < 0.20 AND bust_probability < 25"
+  - "CASH GAMES: Filter by floor >= 30 AND volatility < 0.30 AND bust_probability < 45"
   - "GPP TOURNAMENTS: Sort by leverage_score DESC for maximum differentiation"
   - "Elite leverage plays: leverage_score >= 3.0 (low owned + high boom potential)"
-  - "Safe plays: floor >= 30 AND volatility < 0.15"
+  - "Safe plays: floor >= 30 AND volatility < 0.30"
   - "High ceiling plays: ceiling >= 50 AND boom_probability >= 25"
-  - "Consistent producers: volatility < 0.15 (low variance)"
-  - "Boom/bust candidates: volatility >= 0.30 (high variance, good for GPP if low owned)"
-  - "Low bust risk: bust_probability < 20 (safe for cash)"
-  - "High boom potential: boom_probability >= 30 (great for GPP)"
+  - "Consistent producers: volatility < 0.30 (low variance)"
+  - "Boom/bust candidates: volatility >= 0.45 (high variance, good for GPP if low owned)"
+  - "Low bust risk: bust_probability < 40 (safe for cash)"
+  - "High boom potential: boom_probability >= 25 (great for GPP)"
   - "leverage_score is THE PRIMARY metric for GPP optimization"
   - "Blowout risk > 0 means spread is >10 points (starters may get pulled early)"
 
@@ -1027,8 +1027,8 @@ query_tips:
 dfs_strategy:
   cash_games:
     focus: "Safety, high floor, low volatility, low bust risk"
-    metrics: ["floor >= 30", "volatility < 0.20", "bust_probability < 25", "value >= 5.5"]
-    sql_example: "WHERE floor >= 30 AND volatility < 0.20 AND bust_probability < 25 AND projected_minutes >= 28 ORDER BY floor DESC"
+    metrics: ["floor >= 30", "volatility < 0.30", "bust_probability < 45", "value >= 5.5"]
+    sql_example: "WHERE floor >= 30 AND volatility < 0.30 AND bust_probability < 45 AND projected_minutes >= 28 ORDER BY floor DESC"
     explanation: "Cash games reward consistency. Prioritize high floors and low variance to minimize downside risk."
 
   gpp_tournaments:
@@ -1044,7 +1044,7 @@ dfs_strategy:
   leverage_plays:
     description: "Contrarian plays with low ownership but high upside - USE leverage_score!"
     sql_example: "WHERE leverage_score >= 3.0 AND boom_probability >= 20 AND rostership <= 10 ORDER BY leverage_score DESC"
-    explanation: "leverage_score is calculated as (boom_probability × 100) / (ownership + 1). Higher = better GPP value."
+    explanation: "leverage_score is calculated as boom_probability / (ownership + 1). Higher = better GPP value."
 
   pace_upside:
     description: "Target high-pace games for increased volume and fantasy opportunities"

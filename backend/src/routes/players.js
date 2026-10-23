@@ -6,6 +6,7 @@ import espnScraperService from '../services/espnScraperService.js';
 import hashtagBasketballService from '../services/hashtagBasketballService.js';
 import projectionService from '../services/projectionService.js';
 import { snapshotAllSlates, snapshotSlate } from '../services/slateSnapshotService.js';
+import { recomputeSlateRanges } from '../services/variance/outcomeRangeService.js';
 import { getSlateMatchups } from '../services/archetypeDefenseService.js';
 import { DEFAULT_SITE, isValidSite } from '../config/sites.js';
 
@@ -168,9 +169,7 @@ router.post('/:slateId/recalculate-projections', async (req, res) => {
         baseline: result.baseline,
         adjusted_projection: result.adjusted_projection,
         total_adjustment: result.total_adjustment,
-        adjustments: result.adjustments,
-        floor: result.baseline * 0.75, // Simple floor calculation
-        ceiling: result.baseline * 1.25 // Simple ceiling calculation
+        adjustments: result.adjustments
       });
 
       totalBaseline += result.baseline;
@@ -185,6 +184,8 @@ router.post('/:slateId/recalculate-projections', async (req, res) => {
 
     // Update database with new projections
     const updated = await playerModel.bulkUpdateProjections(slateId, projectionResults);
+    // Floor / ceiling / std dev / boom / bust follow the new projections
+    await recomputeSlateRanges(slateId);
 
     console.log(`\n✅ Projection recalculation complete!`);
     console.log(`   📊 Players updated: ${updated}`);
@@ -247,6 +248,7 @@ router.post('/:slateId/reset-projections', async (req, res) => {
     console.log(`🔄 Resetting projections to RotoWire baseline for slate ${slateId}`);
 
     const result = await playerModel.resetProjections(slateId);
+    await recomputeSlateRanges(slateId);
 
     res.json({
       success: true,
@@ -316,17 +318,13 @@ router.post('/:slateId/enhanced-projections', async (req, res) => {
     // Optionally update database
     if (updateDb) {
       console.log(`💾 Updating database with enhanced projections...`);
-      const projectionsToUpdate = enhancedResults.map(r => {
-        // OUT players project to 0, so their range does too
-        const isOut = r.minutes_model?.source === 'out';
-        return {
-          player_id: r.player_id,
-          adjusted_projection: r.enhanced_projection,
-          floor: isOut ? 0 : r.historical?.floor || r.enhanced_projection * 0.7,
-          ceiling: isOut ? 0 : r.historical?.ceiling || r.enhanced_projection * 1.3
-        };
-      });
+      // OUT players project to 0, so their range does too
+      const projectionsToUpdate = enhancedResults.map(r => ({
+        player_id: r.player_id,
+        adjusted_projection: r.enhanced_projection
+      }));
       await playerModel.bulkUpdateProjections(slateId, projectionsToUpdate);
+      await recomputeSlateRanges(slateId);
     }
 
     // Calculate summary stats

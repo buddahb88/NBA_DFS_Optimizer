@@ -3,6 +3,7 @@ import db from '../config/database.js';
 import playerModel from '../models/playerModel.js';
 import projectionOverrideModel from '../models/projectionOverrideModel.js';
 import projectionService from '../services/projectionService.js';
+import { recomputeSlateRanges } from '../services/variance/outcomeRangeService.js';
 import { DEFAULT_SITE, isValidSite } from '../config/sites.js';
 
 const router = express.Router();
@@ -28,15 +29,12 @@ async function projectSlate(slateId, { site, slateDate = null, minutesWeight = n
   });
 
   if (updateDb) {
-    await playerModel.bulkUpdateProjections(slateId, results.map(r => {
-      const isOut = r.minutes_model?.source === 'out';
-      return {
-        player_id: r.player_id,
-        adjusted_projection: r.enhanced_projection,
-        floor: isOut ? 0 : r.historical?.floor || r.enhanced_projection * 0.7,
-        ceiling: isOut ? 0 : r.historical?.ceiling || r.enhanced_projection * 1.3
-      };
-    }));
+    // OUT players project to 0, so their range does too
+    await playerModel.bulkUpdateProjections(slateId, results.map(r => ({
+      player_id: r.player_id,
+      adjusted_projection: r.enhanced_projection
+    })));
+    await recomputeSlateRanges(slateId);
   }
   return results;
 }
