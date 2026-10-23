@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import HomePage from './HomePage'
 import useSlateDashboard from './home/useSlateDashboard'
@@ -7,6 +7,7 @@ import { useSlate } from '../context/SlateContext'
 
 vi.mock('./home/useSlateDashboard', () => ({ default: vi.fn() }))
 vi.mock('../context/SlateContext', () => ({ useSlate: vi.fn() }))
+vi.mock('../services/api', () => ({ slatesAPI: { getAvailableSlates: vi.fn(() => new Promise(() => {})) } }))
 
 const dashboard = (overrides = {}) => ({
   status: 'ready',
@@ -67,5 +68,27 @@ describe('HomePage game log health', () => {
     useSlateDashboard.mockReturnValue(dashboard({ status: 'empty', slate: null, historyStatus: null }))
     renderHome()
     expect(screen.getByRole('link', { name: 'Data Status' })).toHaveAttribute('href', '/data-status')
+  })
+})
+
+describe('HomePage stale slate', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-23T16:00:00Z'))
+  })
+  afterEach(() => vi.useRealTimers())
+
+  it('cautions that the slate is from an earlier night and opens the slate loader to sync', () => {
+    useSlateDashboard.mockReturnValue(dashboard({ slate: { slate_id: '29805', name: 'All', slate_date: '2026-10-21', updated_at: '2026-10-21T21:24:37Z' } }))
+    renderHome()
+    expect(screen.getByRole('status')).toHaveTextContent("Slate is from Wed, Oct 21 - sync tonight's slate")
+    fireEvent.click(screen.getByRole('button', { name: 'Sync slate' }))
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument()
+  })
+
+  it("shows no caution for tonight's slate", () => {
+    useSlateDashboard.mockReturnValue(dashboard({ slate: { slate_id: '29900', name: 'All', slate_date: '2026-10-23', updated_at: '2026-10-23T15:00:00Z' } }))
+    renderHome()
+    expect(screen.queryByText(/slate is from/i)).toBeNull()
   })
 })

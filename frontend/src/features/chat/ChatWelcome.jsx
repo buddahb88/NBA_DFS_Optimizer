@@ -1,4 +1,5 @@
 import { memo } from 'react';
+import { Link } from 'react-router-dom';
 import {
   Badge,
   IconBolt,
@@ -8,6 +9,7 @@ import {
   IconDollar,
   IconFlame,
   IconLayers,
+  IconRefresh,
   IconTarget,
   IconUsers,
   cn,
@@ -15,6 +17,7 @@ import {
 import { formatTipoff } from '../../pages/home/slateDashboard';
 import { AssistantMark } from './ChatMessage';
 import { greeting } from './chatFormat';
+import StaleSlateBadge from '../slate/StaleSlateBadge';
 
 const KIND_ICONS = {
   usage_bump: IconUsers,
@@ -24,7 +27,11 @@ const KIND_ICONS = {
   value_play: IconDollar,
   score_lineup: IconClipboardCheck,
   leverage: IconChart,
+  sync_slate: IconRefresh,
 };
+
+const CARD_CLASS =
+  'group flex items-start gap-3 rounded-lg border border-line bg-surface p-3 text-left transition-[border-color,background-color,transform] duration-150 hover:-translate-y-px hover:border-line-strong hover:bg-surface-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 disabled:pointer-events-none disabled:opacity-50 motion-reduce:transition-none motion-reduce:hover:translate-y-0';
 
 const fmtLine = (n) => (n > 0 ? `+${n}` : `${n}`);
 
@@ -50,7 +57,7 @@ function GameChip({ game }) {
   );
 }
 
-function SlateSummary({ slate, siteName, games, firstLock, loading }) {
+function SlateSummary({ slate, siteName, games, firstLock, loading, now }) {
   if (!slate) {
     return (
       <p className="rounded-lg border border-dashed border-line px-4 py-3 text-sm text-fg-muted">
@@ -75,6 +82,7 @@ function SlateSummary({ slate, siteName, games, firstLock, loading }) {
             </span>
           </>
         )}
+        <StaleSlateBadge slate={slate} now={now} />
       </div>
       {loading ? (
         <div className="mt-3 flex gap-2 overflow-hidden sm:flex-wrap" aria-hidden="true">
@@ -98,21 +106,31 @@ function SlateSummary({ slate, siteName, games, firstLock, loading }) {
 
 function SuggestionCard({ suggestion, onSend, disabled }) {
   const Icon = KIND_ICONS[suggestion.kind] ?? IconBolt;
-  return (
-    <button
-      type="button"
-      onClick={() => onSend(suggestion.prompt)}
-      disabled={disabled}
-      title={suggestion.detail}
-      className="group flex items-start gap-3 rounded-lg border border-line bg-surface p-3 text-left transition-[border-color,background-color,transform] duration-150 hover:-translate-y-px hover:border-line-strong hover:bg-surface-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 disabled:pointer-events-none disabled:opacity-50 motion-reduce:transition-none motion-reduce:hover:translate-y-0"
-    >
+  const isSync = suggestion.kind === 'sync_slate';
+  const body = (
+    <>
       <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-accent-soft text-accent">
         <Icon size={14} />
       </span>
       <span className="min-w-0">
         <span className="block text-2xs font-semibold uppercase tracking-wide text-fg-subtle">{suggestion.label}</span>
-        <span className="mt-0.5 block text-sm text-fg-muted group-hover:text-fg">{suggestion.prompt}</span>
+        <span className="mt-0.5 block text-sm text-fg-muted group-hover:text-fg">{isSync ? suggestion.detail : suggestion.prompt}</span>
       </span>
+    </>
+  );
+
+  // Stale slate: syncing happens on Home, not in the chat
+  if (isSync) {
+    return (
+      <Link to="/" title={suggestion.detail} className={CARD_CLASS}>
+        {body}
+      </Link>
+    );
+  }
+
+  return (
+    <button type="button" onClick={() => onSend(suggestion.prompt)} disabled={disabled} title={suggestion.detail} className={CARD_CLASS}>
+      {body}
     </button>
   );
 }
@@ -134,7 +152,7 @@ function ChatWelcome({ slate, siteName, games = [], firstLock, slateLoading, sug
         </p>
       </header>
 
-      <SlateSummary slate={slate} siteName={siteName} games={games} firstLock={firstLock} loading={slateLoading} />
+      <SlateSummary slate={slate} siteName={siteName} games={games} firstLock={firstLock} loading={slateLoading} now={now} />
 
       <section aria-label="Suggested prompts">
         <h3 className="mb-2 text-2xs font-semibold uppercase tracking-wide text-fg-subtle">Try asking</h3>

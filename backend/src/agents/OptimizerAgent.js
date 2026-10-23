@@ -12,6 +12,7 @@ import db from '../config/database.js';
 import optimizerService from '../services/optimizerService.js';
 import { resolveSite } from '../utils/resolveSite.js';
 import { withUiBlocks } from '../services/chatTools/uiBlockBuilders.js';
+import { slateDateFields } from '../services/slateFreshness.js';
 
 const SYSTEM_PROMPT = `You are an expert DFS lineup optimizer for DraftKings NBA.
 
@@ -31,6 +32,9 @@ DraftKings NBA Rules:
 Optimization Modes:
 - CASH: Prioritize floor, consistency, lower variance plays
 - GPP: Prioritize ceiling, upside, leverage (low ownership + high upside)
+
+Stale slates: build_lineup and get_player_pool return slateDate and isStale (with staleWarning).
+If isStale is true, do not present the lineup as tonight's: say the slate is from <slateDate> and tell the user to sync tonight's slate (Home or Data Status page), unless the task explicitly asks about that past date.
 
 Always explain WHY you selected players - ownership, matchups, value, ceiling potential.`;
 
@@ -147,6 +151,7 @@ class OptimizerAgent extends BaseAgent {
             count: formattedLineups.length,
             mode,
             slateId,
+            ...(await slateDateFields(slateId)),
           };
           return withUiBlocks('build_lineup', result);
         }
@@ -302,6 +307,8 @@ class OptimizerAgent extends BaseAgent {
 
           return {
             success: true,
+            slateId,
+            ...(await slateDateFields(slateId)),
             count: players.length,
             filters: { position, minSalary, maxSalary, minProjection },
             players: players.map(p => ({

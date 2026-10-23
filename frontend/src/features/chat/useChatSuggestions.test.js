@@ -50,6 +50,15 @@ describe('useChatSuggestions', () => {
     expect(result.current.suggestions).toEqual(FALLBACK_SUGGESTIONS.slice(0, 4))
   })
 
+  it('keeps a stale slate to its sync prompt without slate-specific fallbacks', async () => {
+    const sync = { id: 'sync_slate', kind: 'sync_slate', label: "Sync tonight's slate", prompt: 'sync prompt' }
+    chatAPI.getSuggestions.mockResolvedValue({ data: { success: true, isStale: true, slateDate: '2026-10-21', suggestions: [sync, gen('score_lineup')] } })
+    const { result } = renderHook(() => useChatSuggestions('29805'))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.suggestions.map((s) => s.kind)).toEqual(['sync_slate', 'score_lineup'])
+    expect(result.current.isStale).toBe(true)
+  })
+
   it('does not fetch while disabled', () => {
     renderHook(() => useChatSuggestions('42', { enabled: false }))
     expect(chatAPI.getSuggestions).not.toHaveBeenCalled()

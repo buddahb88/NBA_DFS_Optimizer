@@ -1,5 +1,6 @@
 import { Badge, IconClock, Tabs, Tooltip } from '../../components/ui';
 import { formatTipoff } from '../../pages/home/slateDashboard';
+import StaleSlateBadge from '../slate/StaleSlateBadge';
 
 const CHAT_MODES = [
   { value: 'cash', label: 'Cash', hint: 'Floor, minutes certainty, safe plays' },
@@ -8,9 +9,10 @@ const CHAT_MODES = [
 
 /**
  * Strip above the conversation: which slate the assistant is looking at and
- * the Cash/GPP mode sent with each message.
+ * the Cash/GPP mode sent with each message. Cautions when the slate is from
+ * an earlier night than today.
  */
-export default function SlateContextBar({ slate, siteName, gameCount, firstLock, loading, mode, onModeChange }) {
+export default function SlateContextBar({ slate, siteName, gameCount, firstLock, loading, mode, onModeChange, now }) {
   const activeMode = CHAT_MODES.find((m) => m.value === mode);
 
   return (
@@ -31,6 +33,7 @@ export default function SlateContextBar({ slate, siteName, gameCount, firstLock,
                 Lock <span className="num text-fg">{loading ? '…' : formatTipoff(firstLock)}</span>
               </span>
             </span>
+            <StaleSlateBadge slate={slate} now={now} />
           </>
         ) : (
           <span className="text-fg-muted">{loading ? 'Loading slate…' : 'No slate selected — pick one in the top bar for slate-aware answers.'}</span>

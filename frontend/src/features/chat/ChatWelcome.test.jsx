@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { fireEvent, render, screen, within } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
 import ChatWelcome from './ChatWelcome'
 import { greeting } from './chatFormat'
 import { buildGames } from '../../pages/home/slateDashboard'
@@ -87,5 +88,27 @@ describe('ChatWelcome', () => {
     expect(screen.queryByRole('region', { name: "Tonight's slate" })).not.toBeInTheDocument()
     expect(screen.getByText(/No slate selected/)).toBeInTheDocument()
     expect(screen.getAllByRole('button')).toHaveLength(2)
+  })
+  it('flags a stale slate and turns the sync suggestion into a link instead of a prompt', () => {
+    const onSend = vi.fn()
+    const sync = { id: 'sync_slate', kind: 'sync_slate', label: "Sync tonight's slate", prompt: 'The latest slate is from 2026-10-21. What do I need to sync?' }
+    render(
+      <MemoryRouter>
+        <ChatWelcome
+          slate={{ ...SLATE, slate_date: '2026-10-21' }}
+          games={buildGames(PLAYERS)}
+          suggestions={[sync, SUGGESTIONS[1]]}
+          onSend={onSend}
+          now={new Date('2026-10-23T16:00:00Z')}
+        />
+      </MemoryRouter>,
+    )
+    const summary = screen.getByRole('region', { name: "Tonight's slate" })
+    expect(summary).toHaveTextContent("Slate is from Wed, Oct 21 - sync tonight's slate")
+    const prompts = screen.getByRole('region', { name: 'Suggested prompts' })
+    const link = within(prompts).getByRole('link', { name: /Sync tonight's slate/ })
+    expect(link).toHaveAttribute('href', '/')
+    fireEvent.click(link)
+    expect(onSend).not.toHaveBeenCalled()
   })
 })

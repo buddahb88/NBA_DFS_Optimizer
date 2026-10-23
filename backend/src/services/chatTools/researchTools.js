@@ -13,7 +13,8 @@
  * - score_lineup              resultsService.getPlayerResultsOnDate
  * - get_projection_results    resultsService.getResults / getPlayerResults
  *
- * Slate tools default to the latest slate. Rates are fractions (0.31 = 31%).
+ * Slate tools default to the latest slate and return its slateDate / isStale
+ * (staleWarning when it is not tonight's). Rates are fractions (0.31 = 31%).
  * Successful results carry ui blocks (uiBlocks.js) under a symbol key the
  * LLM never sees.
  */
@@ -29,6 +30,7 @@ import { canonicalTeam } from '../../utils/playerKey.js';
 import { getCurrentSeason } from '../../utils/season.js';
 import { resolveSite } from '../../utils/resolveSite.js';
 import { withUiBlocks } from './uiBlockBuilders.js';
+import { slateDateFields } from '../slateFreshness.js';
 
 export const RESEARCH_TOOL_NAMES = Object.freeze([
   'get_archetype_matchups',
@@ -85,6 +87,7 @@ async function getArchetypeMatchups({ slateId, site, minEdge, limit = 15 }) {
   return {
     success: true,
     slateId: id,
+    ...(await slateDateFields(id)),
     season: tonight.season,
     site: tonight.site,
     fallback: tonight.fallback,
@@ -250,12 +253,14 @@ async function slatePlayersFor({ slateId, team }) {
 async function getUsageBumps({ team, slateId, startDate, endDate, site }) {
   const slate = await slatePlayersFor({ slateId, team });
   if (slate.error) return { success: false, message: slate.error };
-  if (slate.players.length === 0) return { success: true, slateId: slate.id, team: slate.team, count: 0, usageBumps: [], message: `No ${slate.team} players on slate ${slate.id}.` };
+  const dated = await slateDateFields(slate.id);
+  if (slate.players.length === 0) return { success: true, slateId: slate.id, ...dated, team: slate.team, count: 0, usageBumps: [], message: `No ${slate.team} players on slate ${slate.id}.` };
   const siteKey = await siteFor(site, slate.id);
   const usageBumps = await insightsService.detectUsageBumps(slate.players, { site: siteKey, startDate, endDate, minGames: 8, minAvgDk: 25 });
   return {
     success: true,
     slateId: slate.id,
+    ...dated,
     team: slate.team,
     site: siteKey,
     count: usageBumps.length,
@@ -268,11 +273,12 @@ async function getUsageBumps({ team, slateId, startDate, endDate, site }) {
 async function getMissingPlayers({ team, slateId, startDate, endDate, site }) {
   const slate = await slatePlayersFor({ slateId, team });
   if (slate.error) return { success: false, message: slate.error };
-  if (slate.players.length === 0) return { success: true, slateId: slate.id, team: slate.team, teamsWithMissing: 0, report: [] };
+  const dated = await slateDateFields(slate.id);
+  if (slate.players.length === 0) return { success: true, slateId: slate.id, ...dated, team: slate.team, teamsWithMissing: 0, report: [] };
   const siteKey = await siteFor(site, slate.id);
   const report = await insightsService.getMissingPlayersReport(slate.players, { site: siteKey, startDate, endDate, minGames: 5, minAvgDk: 20 });
   return {
-    success: true, slateId: slate.id, team: slate.team, site: siteKey, teamsWithMissing: report.length, report,
+    success: true, slateId: slate.id, ...dated, team: slate.team, site: siteKey, teamsWithMissing: report.length, report,
     note: report.length === 0 ? EMPTY_WINDOW_NOTE : undefined,
   };
 }

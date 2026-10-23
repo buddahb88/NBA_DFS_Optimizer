@@ -13,12 +13,12 @@ import { playerKey } from '../utils/playerKey.js';
  */
 
 // YYYY-MM-DD in US Eastern, the date NBA slates are named by
-const easternDate = (d) => new Intl.DateTimeFormat('en-CA', {
+export const easternDate = (d) => new Intl.DateTimeFormat('en-CA', {
   timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit'
 }).format(d);
 
 // Eastern date of slates.start_time when it is a full timestamp, else null
-function startTimeDate(startTime) {
+export function startTimeDate(startTime) {
   if (startTime instanceof Date && !isNaN(startTime)) return easternDate(startTime);
   if (typeof startTime === 'string' && /^\d{4}-\d{2}-\d{2}/.test(startTime)) {
     const parsed = new Date(startTime);

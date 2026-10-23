@@ -19,8 +19,9 @@ import OptimizerAgent from '../agents/OptimizerAgent.js';
 import ResearchAgent from '../agents/ResearchAgent.js';
 import AnalystAgent from '../agents/AnalystAgent.js';
 import db from '../config/database.js';
+import { getCurrentSlateInfo } from './slateFreshness.js';
 
-const ORCHESTRATOR_SYSTEM_PROMPT = `You are an expert NBA DFS assistant with access to specialized agents.
+export const ORCHESTRATOR_SYSTEM_PROMPT = `You are an expert NBA DFS assistant with access to specialized agents.
 
 Your role is to:
 1. Understand the user's question or task
@@ -49,6 +50,12 @@ CRITICAL - NO HALLUCINATION RULES:
 - If the database has no slate data, say: "No active slate data found. Please ensure a slate has been imported."
 - When tool results are empty, DO NOT fill in with general knowledge - be honest about missing data
 - Always distinguish between "data from our database" vs "general NBA knowledge"
+
+STALE SLATE GUARD:
+- Call get_current_slate before any "tonight" request (lineups, plays, matchups, stacks, injuries). It returns slateDate (the night the slate covers), today (ET) and isStale
+- If isStale is true, STOP: do not build lineups or recommend plays for tonight. Tell the user the latest slate is from <slateDate>, not today, and ask them to sync tonight's slate (Home or Data Status page)
+- Only use a stale slate when the user explicitly asks about that past date, and then say which date the answer covers
+- Every answer built on slate data names the slate date it covers
 
 IMPORTANT:
 - Always delegate to an agent for data - never make up statistics
@@ -139,7 +146,7 @@ class AgenticChatService {
         type: 'function',
         function: {
           name: 'get_current_slate',
-          description: 'Quick helper to get the current active slate ID. Use before delegating lineup tasks.',
+          description: 'Get the latest synced slate: ID, slateDate (night it covers), today (ET), isStale and a warning when it is not tonight\'s. Use before delegating any "tonight" or lineup task.',
           parameters: {
             type: 'object',
             properties: {}
@@ -158,14 +165,16 @@ class AgenticChatService {
     }
 
     if (name === 'get_current_slate') {
-      const slate = await db.get(`
-        SELECT slate_id, name, start_time FROM slates
-        ORDER BY created_at DESC LIMIT 1
-      `);
+      const slate = await getCurrentSlateInfo();
+      if (!slate) {
+        return JSON.stringify({ success: false, slate: null, message: 'No slates found' });
+      }
       return JSON.stringify({
-        success: !!slate,
-        slate: slate || null,
-        message: slate ? `Current slate: ${slate.slate_id} (${slate.name})` : 'No slates found'
+        success: true,
+        slate,
+        message: slate.isStale
+          ? slate.warning
+          : `Current slate: ${slate.slateId} (${slate.name}) for ${slate.slateDate ?? 'an unknown date'}`
       });
     }
 

@@ -7,6 +7,7 @@ import { ChalkPanel, InjuryFeedPanel, LeveragePanel, TopValuesPanel } from './ho
 import useSlateDashboard from './home/useSlateDashboard';
 import { useSlate } from '../context/SlateContext';
 import { DATA_STATUS_PATH, historyHealth } from '../features/dataStatus/dataStatus';
+import StaleSlateBadge from '../features/slate/StaleSlateBadge';
 import {
   buildGames,
   buildInjuryFeed,
@@ -168,6 +169,7 @@ export default function HomePage() {
           <p className="text-xs text-fg-muted">
             First lock {formatTipoff(summary.firstLock)} · slate {slateId}
           </p>
+          <StaleSlateBadge slate={slate} now={now} onSync={() => setShowLoader(true)} className="mt-1.5" />
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="ghost" size="sm" onClick={() => setShowLoader((v) => !v)}>

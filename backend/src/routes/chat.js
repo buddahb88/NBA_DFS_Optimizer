@@ -103,8 +103,9 @@ router.get('/agents', (req, res) => {
 /**
  * GET /api/chat/suggestions?slateId=
  * Starter prompts for a new chat built from the slate (default: latest).
- * Returns { success, slateId, suggestions: [{ id, kind, label, prompt, detail }] };
- * suggestions is empty when the data can't support any.
+ * Returns { success, slateId, slateDate, today, isStale, daysOld,
+ * suggestions: [{ id, kind, label, prompt, detail }] }; suggestions is empty
+ * when the data can't support any, and leads with sync_slate when stale.
  */
 router.get('/suggestions', async (req, res) => {
   try {

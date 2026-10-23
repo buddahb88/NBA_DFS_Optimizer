@@ -11,6 +11,7 @@
 import BaseAgent from './BaseAgent.js';
 import db from '../config/database.js';
 import { createResearchTools } from '../services/chatTools/researchTools.js';
+import { getCurrentSlateInfo } from '../services/slateFreshness.js';
 
 const SYSTEM_PROMPT = `You are a DFS research specialist with expertise in database queries and data retrieval.
 
@@ -67,6 +68,11 @@ CRITICAL - NO HALLUCINATION RULES:
 - NEVER invent player names, salaries, stats, or matchups that weren't in the query results
 - If there's no slate data, say "No slate data available in the database"
 - If a player search returns empty, say "Player not found in current slate"
+
+STALE SLATE GUARD:
+- get_current_slate returns slateDate (the night the slate covers), today (ET) and isStale
+- If isStale is true, do not present the slate as tonight's: report the warning, do not recommend plays or build lineups for tonight, and tell the user to sync tonight's slate (Home or Data Status page). Only use it when the user explicitly asks about that past date
+- State the slate date your answer covers (slate tools return slateDate)
 - DO NOT use your general NBA knowledge to fill gaps - only use actual query results
 
 Always show your SQL queries and explain what data you retrieved.`;
@@ -217,7 +223,7 @@ class ResearchAgent extends BaseAgent {
 
       {
         name: 'get_current_slate',
-        description: 'Get the most recent slate ID and details. Use this when slate_id is not provided.',
+        description: 'Get the latest slate: ID, details, slateDate (night it covers), today (ET), isStale and a warning when it is not tonight\'s. Use this when slate_id is not provided.',
         parameters: {
           type: 'object',
           properties: {}
@@ -225,30 +231,14 @@ class ResearchAgent extends BaseAgent {
         execute: async () => {
           console.log('\n📅 [ResearchAgent] Getting current slate...');
 
-          const slate = await db.get(`
-            SELECT slate_id, name, start_time, created_at,
-                   (SELECT COUNT(*) FROM players WHERE players.slate_id = slates.slate_id) as player_count
-            FROM slates
-            ORDER BY created_at DESC
-            LIMIT 1
-          `);
-
+          const slate = await getCurrentSlateInfo();
           if (!slate) {
             return { success: false, error: 'No slates found in database' };
           }
 
-          console.log(`✅ Current slate: ${slate.slate_id} (${slate.name})`);
+          console.log(`✅ Current slate: ${slate.slateId} (${slate.name}) for ${slate.slateDate}${slate.isStale ? ' - STALE' : ''}`);
 
-          return {
-            success: true,
-            slate: {
-              slateId: slate.slate_id,
-              name: slate.name,
-              startTime: slate.start_time,
-              createdAt: slate.created_at,
-              playerCount: slate.player_count
-            }
-          };
+          return { success: true, slate };
         }
       },
 

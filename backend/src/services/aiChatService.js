@@ -12,6 +12,7 @@ import { createResearchTools } from './chatTools/researchTools.js';
 import { SITE_KEYS } from '../config/sites.js';
 import { resolveSite } from '../utils/resolveSite.js';
 import { getCurrentSeason } from '../utils/season.js';
+import { getCurrentSlateInfo, slateDateFields } from './slateFreshness.js';
 import { createClaudeClient, isClaudeEndpoint, runClaudeToolLoop, toClaudeHistory, toClaudeTool } from './llm/claude.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -238,7 +239,12 @@ ${schemaDoc}
 - ALWAYS use tools to get actual data - never make up stats or player names
 - When users ask to "lock" or "build around" players, extract their names and use the lineup_builder tool
 - Show your work: explain SQL queries and optimization parameters
-- If data is missing or unclear, ask clarifying questions`;
+- If data is missing or unclear, ask clarifying questions
+
+**Stale Slate Guard:**
+- Call get_current_slate before any "tonight" request; it returns slateDate (the night the slate covers), today (ET) and isStale
+- If isStale is true, do not present the slate as tonight's: report the warning, do not recommend plays or build lineups for tonight, and tell the user to sync tonight's slate (Home or Data Status page). Only use it when the user explicitly asks about that past date
+- State the slate date your answer covers (slate tools and build_lineup return slateDate)`;
   }
 
   /**
@@ -416,6 +422,7 @@ ${schemaDoc}
               site,
               mode,
               slateId,
+              ...(await slateDateFields(slateId)),
             }, null, 2);
           } catch (error) {
             console.error('❌ Lineup Builder Error:', error);
@@ -430,18 +437,13 @@ ${schemaDoc}
       // Get Current Slate Tool
       new DynamicStructuredTool({
         name: 'get_current_slate',
-        description: 'Get the most recent slate ID and details. Use this when slate_id is not provided by user.',
+        description: 'Get the latest slate: ID, details, slateDate (night it covers), today (ET), isStale and a warning when it is not tonight\'s. Use this when slate_id is not provided by user.',
         schema: z.object({}),
         func: async () => {
           try {
             console.log('\n📅 Getting current slate...');
 
-            const slate = await db.get(`
-              SELECT slate_id, name, start_time, created_at
-              FROM slates
-              ORDER BY created_at DESC
-              LIMIT 1
-            `);
+            const slate = await getCurrentSlateInfo();
 
             if (!slate) {
               return JSON.stringify({
@@ -450,7 +452,7 @@ ${schemaDoc}
               });
             }
 
-            console.log(`✅ Current slate: ${slate.slate_id} (${slate.name})`);
+            console.log(`✅ Current slate: ${slate.slateId} (${slate.name}) for ${slate.slateDate}${slate.isStale ? ' - STALE' : ''}`);
 
             return JSON.stringify({
               success: true,

@@ -28,10 +28,12 @@ export function withFallback(generated = []) {
 
 /**
  * Starter prompts for an empty chat from GET /chat/suggestions.
- * Returns { suggestions, loading, isFallback }; static prompts fill in on error or thin data.
+ * Returns { suggestions, loading, isFallback, isStale }; static prompts fill in
+ * on error or thin data, except for a stale slate, whose list (a sync prompt
+ * plus slate-independent ones) is kept as is.
  */
 export default function useChatSuggestions(slateId, { enabled = true } = {}) {
-  const [state, setState] = useState({ suggestions: [], loading: true, isFallback: false });
+  const [state, setState] = useState({ suggestions: [], loading: true, isFallback: false, isStale: false });
 
   useEffect(() => {
     if (!enabled) return undefined;
@@ -41,11 +43,14 @@ export default function useChatSuggestions(slateId, { enabled = true } = {}) {
       .getSuggestions(slateId)
       .then((res) => {
         const generated = res.data?.success && Array.isArray(res.data.suggestions) ? res.data.suggestions : [];
-        if (!cancelled) setState({ suggestions: withFallback(generated), loading: false, isFallback: generated.length === 0 });
+        const isStale = Boolean(res.data?.success && res.data.isStale);
+        if (cancelled) return;
+        if (isStale) setState({ suggestions: generated.slice(0, MAX_SUGGESTIONS), loading: false, isFallback: false, isStale });
+        else setState({ suggestions: withFallback(generated), loading: false, isFallback: generated.length === 0, isStale });
       })
       .catch((err) => {
         console.error('Failed to load chat suggestions:', err);
-        if (!cancelled) setState({ suggestions: withFallback([]), loading: false, isFallback: true });
+        if (!cancelled) setState({ suggestions: withFallback([]), loading: false, isFallback: true, isStale: false });
       });
     return () => {
       cancelled = true;

@@ -11,6 +11,9 @@
  *
  * Each source is optional: a source that throws or finds nothing is skipped,
  * so the list holds only what tonight's data supports (possibly nothing).
+ *
+ * A stale slate (game date before today, ET) gets a sync_slate prompt in
+ * place of the slate-specific ones, which would describe a past night.
  */
 
 import slateModel from '../models/slateModel.js';
@@ -18,6 +21,7 @@ import playerModel from '../models/playerModel.js';
 import db from '../config/database.js';
 import { createResearchTools } from './chatTools/researchTools.js';
 import { playerKey } from '../utils/playerKey.js';
+import { getSlateFreshness } from './slateFreshness.js';
 
 const VALUE_MAX_SALARY = 6000;
 const VALUE_MIN_SALARY = 3500;
@@ -70,6 +74,7 @@ function defaultSources() {
       return latest?.slate_id ?? null;
     },
     slatePlayers: (slateId) => playerModel.getBySlateId(slateId),
+    slateFreshness: (slateId) => getSlateFreshness(slateId),
     async usageBumps(slateId) {
       const res = await tools.get_usage_bumps.execute({ slateId });
       return res.success ? res.usageBumps : [];
@@ -90,6 +95,17 @@ function defaultSources() {
 }
 
 // ── Builders: data -> { id, kind, label, prompt, detail } or null ──
+
+const SLATE_BUILDERS = new Set(['usageBump', 'archetypeEdge', 'gameStack', 'hotStreak', 'valuePlay']);
+
+export function syncSlateSuggestion({ slateDate, today }) {
+  return {
+    kind: 'sync_slate',
+    label: 'Sync tonight\'s slate',
+    prompt: `The latest slate is from ${slateDate}. What do I need to sync for tonight (${today})?`,
+    detail: `Slate is from ${slateDate} - sync tonight's slate before asking about tonight`,
+  };
+}
 
 const BUILDERS = [
   async function usageBump({ src, slateId }) {
@@ -159,16 +175,18 @@ const BUILDERS = [
 
 /**
  * Suggestions for the slate (default: latest). Never throws for a missing
- * source; returns { slateId, suggestions } with suggestions possibly empty.
+ * source; returns { slateId, slateDate, today, isStale, daysOld, suggestions }
+ * with suggestions possibly empty.
  */
 export async function buildChatSuggestions({ slateId } = {}, sources = defaultSources()) {
   const id = slateId ? String(slateId) : await sources.latestSlateId().catch(() => null);
-  const players = id ? await sources.slatePlayers(id).catch(() => []) : [];
+  const freshness = id && sources.slateFreshness ? await sources.slateFreshness(id).catch(() => null) : null;
+  const isStale = Boolean(freshness?.isStale);
+  const players = id && !isStale ? await sources.slatePlayers(id).catch(() => []) : [];
   const ctx = { src: sources, slateId: id, players };
-  const slateBuilders = new Set(['usageBump', 'archetypeEdge', 'gameStack', 'hotStreak', 'valuePlay']);
 
   const results = await Promise.all(BUILDERS.map(async (build) => {
-    if (slateBuilders.has(build.name) && players.length === 0) return null;
+    if (SLATE_BUILDERS.has(build.name) && players.length === 0) return null;
     try {
       return await build(ctx);
     } catch (error) {
@@ -176,9 +194,14 @@ export async function buildChatSuggestions({ slateId } = {}, sources = defaultSo
       return null;
     }
   }));
+  if (isStale) results.unshift(syncSlateSuggestion(freshness));
 
   return {
     slateId: id,
+    slateDate: freshness?.slateDate ?? null,
+    today: freshness?.today ?? null,
+    isStale,
+    daysOld: freshness?.daysOld ?? null,
     suggestions: results.filter(Boolean).map((s) => ({ id: s.kind, ...s })),
   };
 }

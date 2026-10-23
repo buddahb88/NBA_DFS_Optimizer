@@ -4,12 +4,19 @@ import rotowireService from '../services/rotowireService.js';
 import { importSalaries } from '../services/salaryImportService.js';
 import { parseMultipart } from '../utils/multipart.js';
 import { DEFAULT_SITE, isValidSite } from '../config/sites.js';
+import { getSlateFreshness } from '../services/slateFreshness.js';
 
 const router = express.Router();
 
 // Slates with no site predate multi-site support and are DraftKings
 export const filterSlatesBySite = (slates, site) =>
   slates.filter(s => (s.site || DEFAULT_SITE) === site.toLowerCase());
+
+// Slate row plus the night it covers and whether that is before today (ET)
+async function withFreshness(slate) {
+  const f = await getSlateFreshness(slate);
+  return { ...slate, slate_date: f.slateDate, is_stale: f.isStale, days_old: f.daysOld };
+}
 
 // Get available slates from RotoWire (Classic contests only)
 router.get('/list', async (req, res) => {
@@ -54,7 +61,7 @@ router.get('/', async (req, res) => {
       return res.status(400).json({ error: `Unknown site: ${site}` });
     }
     const slates = await slateModel.getAll();
-    res.json(site ? filterSlatesBySite(slates, site) : slates);
+    res.json(await Promise.all((site ? filterSlatesBySite(slates, site) : slates).map(withFreshness)));
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -67,7 +74,7 @@ router.get('/:slateId', async (req, res) => {
     if (!slate) {
       return res.status(404).json({ error: 'Slate not found' });
     }
-    res.json(slate);
+    res.json(await withFreshness(slate));
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
