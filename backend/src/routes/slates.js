@@ -5,6 +5,7 @@ import { importSalaries } from '../services/salaryImportService.js';
 import { parseMultipart } from '../utils/multipart.js';
 import { DEFAULT_SITE, isValidSite } from '../config/sites.js';
 import { getSlateFreshness } from '../services/slateFreshness.js';
+import { listBacktestSlates, resolveSlate, sourceFields } from '../services/slateSource.js';
 
 const router = express.Router();
 
@@ -64,6 +65,31 @@ router.get('/', async (req, res) => {
     res.json(await Promise.all((site ? filterSlatesBySite(slates, site) : slates).map(withFreshness)));
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+// Saved past slates that can be rebuilt (Backtest picker), newest first (?site=)
+router.get('/backtests', async (req, res) => {
+  try {
+    const { site } = req.query;
+    if (site !== undefined && !isValidSite(site)) {
+      return res.status(400).json({ error: `Unknown site: ${site}` });
+    }
+    res.json(await listBacktestSlates({ site: site || null }));
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Which slate a request means: ?slateId=&slateDate=&site= (services/slateSource.js)
+router.get('/source', async (req, res) => {
+  try {
+    const { slateId, slateDate, site } = req.query;
+    const source = await resolveSlate({ slateId, slateDate, site });
+    if (!source) return res.status(404).json({ error: 'No slate synced' });
+    res.json(sourceFields(source));
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
   }
 });
 
