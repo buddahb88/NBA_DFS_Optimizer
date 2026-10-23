@@ -20,6 +20,8 @@ export const slatesAPI = {
   getAll: (site = null) => api.get('/slates', { params: site ? { site } : {} }),
   getAvailableSlates: () => api.get('/slates/list'), // Get available slates from RotoWire
   getById: (slateId) => api.get(`/slates/${slateId}`),
+  // Saved past slates that can be rebuilt: [{ slateDate, slateId, site, players, label }], newest first
+  getBacktests: (site = null) => api.get('/slates/backtests', { params: site ? { site } : {} }),
   // Upload a site's official salary CSV; site/slateId are optional (site is auto-detected)
   importSalaries: (file, { site, slateId } = {}) => {
     const form = new FormData();
@@ -60,8 +62,9 @@ export const lineupsAPI = {
 // Optimizer API
 export const optimizerAPI = {
   generate: (settings) => api.post('/optimizer/generate', settings),
-  slateBreakdown: (slateId, mode) => api.post('/optimizer/slate-breakdown', { slateId, mode }),
-  reviewLineup: (slateId, lineup, mode) => api.post('/optimizer/review-lineup', { slateId, lineup, mode }),
+  // extra: { slateDate, ranges } to rebuild a saved past slate (backtest)
+  slateBreakdown: (slateId, mode, extra = {}) => api.post('/optimizer/slate-breakdown', { slateId, mode, ...extra }),
+  reviewLineup: (slateId, lineup, mode, extra = {}) => api.post('/optimizer/review-lineup', { slateId, lineup, mode, ...extra }),
 };
 
 // Export API (site upload CSVs)

@@ -1,10 +1,21 @@
 import { useState } from 'react';
 import { Badge, DataTable, Tabs, Tooltip } from '../../components/ui';
 import { TONIGHT_SORTS, edgeBadges, edgeExplanation, formatDelta, statFor, tonightSorting } from './archetypes';
+import { formatActual } from '../slate/backtest';
 
-function columnsFor(stat, edgeConfig) {
+// Backtest only: what the player actually scored that night
+const ACTUAL_COLUMN = {
+  id: 'actual',
+  accessorFn: (p) => p.actualPoints ?? null,
+  header: 'Actual',
+  meta: { numeric: true, label: 'Actual DK points' },
+  sortUndefined: 'last',
+  cell: ({ getValue }) => <span className="font-semibold">{formatActual(getValue())}</span>,
+};
+
+function columnsFor(stat, edgeConfig, isBacktest) {
   const { unit } = statFor(stat);
-  return [
+  const columns = [
     { accessorKey: 'name', header: 'Player' },
     { accessorKey: 'position', header: 'Pos' },
     { accessorKey: 'team', header: 'Tm' },
@@ -84,6 +95,9 @@ function columnsFor(stat, edgeConfig) {
       cell: ({ getValue }) => (getValue() ? <Badge tone="caution" size="sm">{getValue()}</Badge> : null),
     },
   ];
+  // Actual next to the projection
+  if (isBacktest) columns.splice(columns.findIndex((c) => c.accessorKey === 'projected_points') + 1, 0, ACTUAL_COLUMN);
+  return columns;
 }
 
 /**
@@ -99,7 +113,7 @@ export default function TonightTable({ data, stat, loading, emptyState }) {
       // Remount so the toggle resets the table's own sorting
       key={sort}
       data={data?.players ?? []}
-      columns={columnsFor(stat, data?.edgeConfig)}
+      columns={columnsFor(stat, data?.edgeConfig, !!data?.isBacktest)}
       loading={loading && !data}
       maxHeight="60vh"
       initialSorting={tonightSorting(sort)}

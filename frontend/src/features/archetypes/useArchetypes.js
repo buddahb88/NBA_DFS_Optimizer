@@ -26,13 +26,14 @@ function load(request, setState, pick = (d) => d) {
  *   definitions  GET /archetypes/definitions (legend + column order), once
  *   seasons      GET /historical/seasons, once
  *   defense      GET /archetypes/defense for site + season / grouping / lastNGames
- *   tonight      GET /archetypes/tonight for slateId (+ stat), idle without a slate
+ *   tonight      GET /archetypes/tonight for slateId (+ stat), idle without a slate;
+ *                with slateDate (backtest) that night's saved slate, no lookahead, actual points
  *   cell         drill-down for one heatmap cell: openCell({ team, group, label }),
  *                closeCell(); null when closed. Uses the season the grid loaded.
  * Sections are { status: 'idle' | 'loading' | 'ready' | 'error', data, error }.
  * The stat only re-ranks tonight; the heatmap reads it client-side.
  */
-export default function useArchetypes({ site, slateId, filters }) {
+export default function useArchetypes({ site, slateId, slateDate = null, filters }) {
   const [definitions, setDefinitions] = useState(IDLE);
   const [seasons, setSeasons] = useState(IDLE);
   const [defense, setDefense] = useState(IDLE);
@@ -58,8 +59,11 @@ export default function useArchetypes({ site, slateId, filters }) {
       setTonight(IDLE);
       return undefined;
     }
-    return load(() => archetypesAPI.getTonight({ ...JSON.parse(paramsJson), slateId, stat }), setTonight);
-  }, [paramsJson, slateId, stat, reloadToken]);
+    return load(
+      () => archetypesAPI.getTonight({ ...JSON.parse(paramsJson), slateId, stat, ...(slateDate ? { slateDate } : {}) }),
+      setTonight,
+    );
+  }, [paramsJson, slateId, slateDate, stat, reloadToken]);
 
   // The season the grid actually shows (Auto may have fallen back to last season)
   const gridSeason = defense.data?.season ?? null;

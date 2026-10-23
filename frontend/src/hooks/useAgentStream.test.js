@@ -84,3 +84,17 @@ describe('useAgentStream ui blocks', () => {
     expect(result.current.message).toBe('Plain')
   })
 })
+
+describe('useAgentStream backtest', () => {
+  it('sends slateDate only for a backtest question', async () => {
+    const done = sse('done', { sessionId: 1, toolsUsed: [], agentsUsed: [], iterations: 1, timestamp: T(1) })
+    mockFetch([done])
+    const { result } = renderHook(() => useAgentStream())
+    await act(() => result.current.startStream('rebuild', { slateId: '29805', slateDate: '2026-10-21' }))
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toMatchObject({ slateId: '29805', slateDate: '2026-10-21' })
+
+    mockFetch([done])
+    await act(() => result.current.startStream('tonight', { slateId: '29806' }))
+    expect(JSON.parse(fetch.mock.calls[0][1].body).slateDate).toBeUndefined()
+  })
+})

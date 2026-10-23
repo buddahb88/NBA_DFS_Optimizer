@@ -9,6 +9,7 @@ import ArchetypeLegend from './ArchetypeLegend';
 import CellDrilldown from './CellDrilldown';
 import TonightTable from './TonightTable';
 import useArchetypes from './useArchetypes';
+import SlateModeSelect from '../slate/SlateModeSelect';
 import { parseDeepLink, statFor } from './archetypes';
 
 const TABS = [
@@ -58,7 +59,9 @@ function FallbackNote({ lead, season, fallback }) {
 }
 
 export default function ArchetypesPage() {
-  const { slate, slateId, site, siteConfig, loadingSlates } = useSlate();
+  const { slate, slateId: liveSlateId, site, siteConfig, loadingSlates, backtest = null, workSlateId } = useSlate();
+  // Tonight follows the slate selector: a backtest ranks that saved night (no lookahead)
+  const slateId = workSlateId ?? liveSlateId;
   const [searchParams] = useSearchParams();
   const [deepLink] = useState(() => parseDeepLink(searchParams));
   const [filters, setFilters] = useState(deepLink.filters);
@@ -70,6 +73,7 @@ export default function ArchetypesPage() {
     site,
     // Wait for the top bar's slate list so a stored slate isn't fetched twice
     slateId: loadingSlates ? null : slateId,
+    slateDate: backtest?.slateDate ?? null,
     filters,
   });
 
@@ -101,7 +105,7 @@ export default function ArchetypesPage() {
       />
     );
 
-  const tonightEmpty = !loadingSlates && !slate ? (
+  const tonightEmpty = !loadingSlates && !slate && !backtest ? (
     <EmptyState
       compact
       title="No slate selected"
@@ -159,6 +163,14 @@ export default function ArchetypesPage() {
         <Card><SectionError error={tonight.error} onRetry={reload} /></Card>
       ) : (
         <div className="flex flex-col gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <SlateModeSelect />
+            {tonight.data?.isBacktest && (
+              <span className="text-xs text-fg-muted">
+                Defense through {tonight.data.endDate}, minutes as of {tonight.data.slateDate}; Actual = DK points scored that night.
+              </span>
+            )}
+          </div>
           {tonight.data?.fallback && <FallbackNote lead="Tiers use" season={tonight.data.season} fallback={tonight.data.fallback} />}
           <TonightTable data={tonight.data} stat={filters.stat} loading={tonight.status === 'loading'} emptyState={tonightEmpty} />
         </div>

@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react';
 import { Badge, Button, DataTable, IconSearch, Input, cn } from '../../components/ui';
 import { formatSalary } from './lineupMath';
+import { formatActual } from '../slate/backtest';
 
-/** Optimizer pool with lock / exclude toggles. */
-export default function PlayerPoolTable({ players, locked, excluded, onToggleLock, onToggleExclude, onClear }) {
+/** Optimizer pool with lock / exclude toggles; showActual (backtest) adds actual DK points. */
+export default function PlayerPoolTable({ players, locked, excluded, onToggleLock, onToggleExclude, onClear, showActual = false }) {
   const [search, setSearch] = useState('');
 
   const columns = useMemo(
@@ -34,6 +35,15 @@ export default function PlayerPoolTable({ players, locked, excluded, onToggleLoc
       { id: 'team', header: 'Team', accessorFn: (p) => `${p.team ?? ''} v ${p.opponent ?? ''}`, size: 90 },
       { id: 'salary', header: 'Salary', accessorKey: 'salary', cell: (c) => formatSalary(c.getValue()), meta: { numeric: true } },
       { id: 'proj', header: 'Proj', accessorFn: (p) => p.projected_points || 0, cell: (c) => c.getValue().toFixed(1), meta: { numeric: true } },
+      ...(showActual
+        ? [{
+            id: 'actual',
+            header: 'Actual',
+            accessorFn: (p) => p.actualPoints ?? -1,
+            cell: (c) => <span className="font-semibold">{formatActual(c.row.original.actualPoints)}</span>,
+            meta: { numeric: true },
+          }]
+        : []),
       {
         id: 'value',
         header: 'Value',
@@ -43,7 +53,7 @@ export default function PlayerPoolTable({ players, locked, excluded, onToggleLoc
       },
       { id: 'own', header: 'Own', accessorFn: (p) => p.rostership || 0, cell: (c) => `${c.getValue().toFixed(1)}%`, meta: { numeric: true } },
     ],
-    [locked, excluded, onToggleLock, onToggleExclude],
+    [locked, excluded, onToggleLock, onToggleExclude, showActual],
   );
 
   return (

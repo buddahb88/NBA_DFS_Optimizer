@@ -103,6 +103,8 @@ export function lineupRows(result) {
       players: l.players,
       salary: l.totalSalary,
       projection: l.projectedPoints,
+      // Backtest: actual DK points of the lineup (null live, or while results are pending)
+      actual: l.actualPoints ?? null,
       ...l.metrics,
     }))
     .sort((a, b) => b.roi - a.roi);

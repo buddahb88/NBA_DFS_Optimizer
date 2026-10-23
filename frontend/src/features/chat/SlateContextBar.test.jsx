@@ -22,4 +22,22 @@ describe('SlateContextBar', () => {
     renderBar({ slate_id: '29900', name: 'All', slate_date: '2026-10-23' })
     expect(screen.queryByText(/slate is from/i)).toBeNull()
   })
+
+  it('backtest: shows the selector, a note and no stale caution', () => {
+    render(
+      <MemoryRouter>
+        <SlateContextBar
+          slate={{ slate_id: '29805', name: 'All', slate_date: '2026-10-21' }}
+          siteName="DraftKings" gameCount={7} loading={false} mode="cash" onModeChange={vi.fn()}
+          now={new Date('2026-10-23T16:00:00Z')}
+          backtest={{ slateDate: '2026-10-21', slateId: '29805' }}
+          slateSelector={<span data-testid="selector">Backtest 2026-10-21</span>}
+        />
+      </MemoryRouter>,
+    )
+    expect(screen.getByTestId('selector')).toBeInTheDocument()
+    expect(screen.getByText(/Questions use the saved 2026-10-21 slate/)).toBeInTheDocument()
+    expect(screen.queryByText(/sync tonight/i)).toBeNull()
+  })
 })
+

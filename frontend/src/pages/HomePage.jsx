@@ -8,6 +8,7 @@ import useSlateDashboard from './home/useSlateDashboard';
 import { useSlate } from '../context/SlateContext';
 import { DATA_STATUS_PATH, historyHealth } from '../features/dataStatus/dataStatus';
 import StaleSlateBadge from '../features/slate/StaleSlateBadge';
+import { BACKTEST_DISABLED } from '../features/slate/backtest';
 import {
   buildGames,
   buildInjuryFeed,
@@ -59,7 +60,7 @@ function useNow(intervalMs = 60000) {
   return now;
 }
 
-function RefreshTile({ updatedAt, historyStatus, syncing, onRefresh, now, canRefresh }) {
+function RefreshTile({ updatedAt, historyStatus, syncing, onRefresh, now, canRefresh, blockedReason = null }) {
   return (
     <div className="col-span-2 flex items-center justify-between gap-3 rounded-md border border-line bg-surface px-3 py-2.5">
       <div className="min-w-0">
@@ -73,8 +74,8 @@ function RefreshTile({ updatedAt, historyStatus, syncing, onRefresh, now, canRef
         variant="secondary"
         size="sm"
         loading={syncing}
-        disabled={!canRefresh}
-        title={canRefresh ? undefined : 'RotoWire refresh is DraftKings only'}
+        disabled={!canRefresh || !!blockedReason}
+        title={blockedReason ?? (canRefresh ? undefined : 'RotoWire refresh is DraftKings only')}
         onClick={onRefresh}
       >
         {syncing ? 'Refreshing…' : 'Refresh data'}
@@ -83,7 +84,7 @@ function RefreshTile({ updatedAt, historyStatus, syncing, onRefresh, now, canRef
   );
 }
 
-function NoSlate({ syncSlate, syncing, syncError, canImport, siteName }) {
+function NoSlate({ syncSlate, syncing, syncError, canImport, siteName, syncBlocked }) {
   return (
     <div className="mx-auto max-w-2xl px-4 py-16">
       <Card>
@@ -94,7 +95,7 @@ function NoSlate({ syncSlate, syncing, syncError, canImport, siteName }) {
             description="Import a slate from RotoWire to see tonight's games, Vegas lines, injury news, value plays and ownership."
           />
           {canImport ? (
-            <SlateLoader onLoad={syncSlate} loading={syncing} error={syncError} submitLabel="Load slate" />
+            <SlateLoader onLoad={syncSlate} loading={syncing} error={syncError} submitLabel="Load slate" disabledReason={syncBlocked} />
           ) : (
             <ImportUnavailable siteName={siteName} />
           )}
@@ -114,8 +115,10 @@ function NoSlate({ syncSlate, syncing, syncError, canImport, siteName }) {
 export default function HomePage() {
   const { status, error, slate, players, teamStats, historyStatus, news, syncing, syncError, reload, syncSlate, refresh } =
     useSlateDashboard();
-  const { site, siteConfig } = useSlate();
+  const { site, siteConfig, isBacktest = false } = useSlate();
   const canImport = site === IMPORT_SITE;
+  // Syncing would replace the live slate; off while the selector is on a backtest
+  const syncBlocked = isBacktest ? BACKTEST_DISABLED : null;
   const [showLoader, setShowLoader] = useState(false);
   const now = useNow();
   const navigate = useNavigate();
@@ -154,7 +157,7 @@ export default function HomePage() {
 
   if (status === 'empty') {
     return (
-      <NoSlate syncSlate={syncSlate} syncing={syncing} syncError={syncError} canImport={canImport} siteName={siteConfig?.name} />
+      <NoSlate syncSlate={syncSlate} syncing={syncing} syncError={syncError} canImport={canImport} siteName={siteConfig?.name} syncBlocked={syncBlocked} />
     );
   }
 
@@ -192,6 +195,7 @@ export default function HomePage() {
                 activeSlateId={slateId}
                 loading={syncing}
                 error={syncError}
+                disabledReason={syncBlocked}
                 submitLabel="Load slate"
                 onLoad={async (s) => {
                   if (await syncSlate(s)) setShowLoader(false);
@@ -220,6 +224,7 @@ export default function HomePage() {
           syncing={syncing}
           onRefresh={refresh}
           canRefresh={canImport}
+          blockedReason={syncBlocked}
           now={now}
         />
       </div>

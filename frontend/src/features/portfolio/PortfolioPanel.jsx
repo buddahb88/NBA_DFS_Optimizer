@@ -16,6 +16,7 @@ import {
   signedPct,
   toExportLineups,
 } from './portfolioMath';
+import { BACKTEST_DISABLED, formatActual } from '../slate/backtest';
 
 const errorMessage = (err) => err.response?.data?.error || err.response?.data?.message || err.message;
 const STAGE_ORDER = ['loading', 'simulate', 'pool', 'field', 'contest', 'optimal', 'select'];
@@ -101,6 +102,9 @@ const TONE_TEXT = { positive: 'text-positive', negative: 'text-negative', cautio
 function Results({ state, slateId, onNotice, onNewBuild }) {
   const { result } = state;
   const rows = useMemo(() => lineupRows(result), [result]);
+  // A backtest build (POST /portfolio/build with slateDate) comes back scored with actual points
+  const isBacktest = !!state.request?.slateDate;
+  const actualBest = result.portfolio.actual?.best ?? null;
   const dist = result.portfolio.scoreDistribution;
   const [selected, setSelected] = useState(() => new Set(rows.map((r) => r.key)));
   const [focusKey, setFocusKey] = useState(null);
@@ -170,9 +174,13 @@ function Results({ state, slateId, onNotice, onNewBuild }) {
       { accessorKey: 'totalOwnership', header: 'Own Σ', meta: { numeric: true }, cell: ({ getValue }) => `${getValue().toFixed(0)}%` },
       { accessorKey: 'meanScore', header: 'Sim avg', meta: { numeric: true }, cell: ({ getValue }) => getValue().toFixed(1) },
       { accessorKey: 'projection', header: 'Proj', meta: { numeric: true }, cell: ({ getValue }) => getValue().toFixed(1) },
+      ...(isBacktest
+        ? [{ id: 'actual', accessorFn: (r) => r.actual ?? -1, header: 'Actual', meta: { numeric: true },
+            cell: ({ row }) => <span className="font-semibold text-fg">{formatActual(row.original.actual)}</span> }]
+        : []),
       { accessorKey: 'salary', header: 'Salary', meta: { numeric: true }, cell: ({ getValue }) => formatSalary(getValue()) },
     ],
-    [rows, selected, allSelected],
+    [rows, selected, allSelected, isBacktest],
   );
 
   const playerColumns = useMemo(
@@ -182,6 +190,10 @@ function Results({ state, slateId, onNotice, onNewBuild }) {
       { accessorKey: 'position', header: 'Pos', size: 64 },
       { accessorKey: 'salary', header: 'Salary', meta: { numeric: true }, cell: ({ getValue }) => formatSalary(getValue()) },
       { accessorKey: 'projected_points', header: 'Proj', meta: { numeric: true }, cell: ({ getValue }) => getValue().toFixed(1) },
+      ...(isBacktest
+        ? [{ id: 'actual', accessorFn: (p) => p.actualPoints ?? -1, header: 'Actual', meta: { numeric: true },
+            cell: ({ row }) => formatActual(row.original.actualPoints) }]
+        : []),
       { accessorKey: 'optimalRate', header: 'Optimal %', meta: { numeric: true }, cell: ({ getValue }) => `${getValue().toFixed(1)}%` },
       { accessorKey: 'ownership', header: 'Own %', meta: { numeric: true }, cell: ({ getValue }) => `${getValue().toFixed(1)}%` },
       {
@@ -197,7 +209,7 @@ function Results({ state, slateId, onNotice, onNewBuild }) {
       },
       { accessorKey: 'portfolioExposure', header: 'Portfolio %', meta: { numeric: true }, cell: ({ getValue }) => `${getValue().toFixed(0)}%` },
     ],
-    [],
+    [isBacktest],
   );
 
   const focus = rows.find((r) => r.key === focusKey) || null;
@@ -240,13 +252,18 @@ function Results({ state, slateId, onNotice, onNewBuild }) {
           <Button size="sm" variant="ghost" onClick={onNewBuild}>
             New build
           </Button>
-          <Button size="sm" variant="primary" onClick={exportPortfolio} loading={exporting} disabled={exportRows.length === 0}>
-            Export {exportRows.length} for DraftKings
-          </Button>
+          <span title={isBacktest ? BACKTEST_DISABLED : undefined}>
+            <Button size="sm" variant="primary" onClick={exportPortfolio} loading={exporting} disabled={isBacktest || exportRows.length === 0}>
+              Export {exportRows.length} for DraftKings
+            </Button>
+          </span>
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
+      <div className={cn('grid grid-cols-2 gap-2', isBacktest ? 'md:grid-cols-6' : 'md:grid-cols-5')}>
+        {isBacktest && (
+          <Stat label="Actual (best)" value={formatActual(actualBest)} hint={`avg ${formatActual(result.portfolio.actual?.mean)} DK pts`} />
+        )}
         <Stat
           label="Portfolio ROI"
           value={signedPct(metrics.roi)}
@@ -287,6 +304,7 @@ function Results({ state, slateId, onNotice, onNewBuild }) {
             <h3 className="text-sm font-semibold text-fg">Lineup #{focus.number}</h3>
             <span className="num text-xs text-fg-muted">
               {formatSalary(focus.salary)} · {focus.projection.toFixed(1)} proj · {focus.totalOwnership.toFixed(0)}% own
+              {isBacktest && ` · ${formatActual(focus.actual)} actual`}
             </span>
           </div>
           <ul className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs sm:grid-cols-4">
@@ -296,7 +314,8 @@ function Results({ state, slateId, onNotice, onNewBuild }) {
                   {slot.position}
                 </Badge>
                 <span className="truncate text-fg">{slot.player.name}</span>
-                <span className="num ml-auto text-fg-subtle">{slot.player.rostership.toFixed(0)}%</span>
+                {isBacktest && <span className="num ml-auto font-medium text-fg">{formatActual(slot.player.actualPoints)}</span>}
+                <span className={cn('num text-fg-subtle', !isBacktest && 'ml-auto')}>{slot.player.rostership.toFixed(0)}%</span>
               </li>
             ))}
           </ul>

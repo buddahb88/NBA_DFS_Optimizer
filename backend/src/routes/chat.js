@@ -7,16 +7,32 @@ import { buildChatSuggestions } from '../services/chatSuggestions.js';
 const router = express.Router();
 
 /**
+ * Message the agents see when the chat bar is in backtest mode: the user's
+ * text plus a note to use the saved slate of slateDate (tools take slateDate;
+ * services/slateSource.js). The stored history keeps the user's own text.
+ */
+export function withBacktestContext(message, { slateDate, slateId } = {}) {
+  if (!slateDate) return message;
+  return `[Backtest mode: the user selected the saved ${slateDate} slate${slateId ? ` (${slateId})` : ''}. `
+    + `Answer about that night: pass slateDate "${slateDate}" to the slate tools, compare projections with actual points, `
+    + `and label the answer "Backtest ${slateDate}".]\n\n${message}`;
+}
+
+/**
  * POST /api/chat/stream
  * Send a message with SSE streaming response (new agentic system)
- * Body: { message: string, sessionId?: number, slateId?: string, maxIterations?: number, mode?: 'cash' | 'gpp' }
+ * Body: { message: string, sessionId?: number, slateId?: string, slateDate?: 'YYYY-MM-DD', maxIterations?: number, mode?: 'cash' | 'gpp' }
  * mode is passed through to the chat service (not yet used to steer answers).
+ * slateDate (chat bar in backtest mode) points the agents at that saved slate.
  */
 router.post('/stream', async (req, res) => {
   const stream = new StreamHandler(res);
 
   try {
-    const { message, sessionId, slateId, maxIterations = 10, mode } = req.body;
+    const { message, sessionId, slateId, slateDate, maxIterations = 10, mode } = req.body;
+    if (slateDate !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(String(slateDate))) {
+      return res.status(400).json({ error: 'slateDate must be YYYY-MM-DD', code: 'INVALID_SLATE_DATE' });
+    }
 
     if (!message || message.trim().length === 0) {
       return res.status(400).json({ error: 'Message is required', code: 'INVALID_MESSAGE' });
@@ -48,7 +64,7 @@ router.post('/stream', async (req, res) => {
     const callbacks = createStreamCallbacks(stream);
 
     // Get AI response with streaming
-    const response = await agenticChatService.chat(message, activeSessionId, {
+    const response = await agenticChatService.chat(withBacktestContext(message, { slateDate, slateId }), activeSessionId, {
       maxIterations: Math.min(Math.max(maxIterations, 5), 30), // Clamp between 5-30
       slateId,
       mode,

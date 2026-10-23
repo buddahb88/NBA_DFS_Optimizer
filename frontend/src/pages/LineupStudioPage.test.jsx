@@ -236,4 +236,92 @@ describe('LineupStudioPage', () => {
     await screen.findByText('No lineups yet')
     expect(screen.getByRole('button', { name: 'Simulate & build portfolio' })).toBeDisabled()
   })
+
+  describe('backtest mode', () => {
+    const BACKTEST = { slateDate: '2026-10-21', slateId: '29805', site: 'draftkings', players: 242 }
+    const scored = (ids, actuals) => ({
+      lineupNumber: 1,
+      actualPoints: actuals.reduce((a, b) => a + b, 0),
+      players: ids.map((id, i) => ({ position: SLOTS[i], player: { ...PLAYERS[id - 1], actualPoints: actuals[i] } })),
+    })
+
+    function renderBacktest() {
+      useSlate.mockReturnValue({
+        slate: { slate_id: '42', name: 'Main' },
+        slateId: '42',
+        site: 'draftkings',
+        siteConfig: FALLBACK_SITE,
+        loadingSlates: false,
+        backtests: [BACKTEST],
+        backtest: BACKTEST,
+        isBacktest: true,
+        setBacktestDate: vi.fn(),
+        rangeMode: 'model',
+        setRangeMode: vi.fn(),
+        workSlateId: '29805',
+        slateParams: { slateDate: '2026-10-21', ranges: 'model' },
+        settingsKey: 'backtest:2026-10-21:29805',
+      })
+      return render(
+        <MemoryRouter initialEntries={['/optimizer']}>
+          <LineupStudioPage />
+        </MemoryRouter>,
+      )
+    }
+
+    it('rebuilds the saved slate, shows actual points and turns off live-only actions', async () => {
+      playersAPI.getBySlateId.mockResolvedValue({ data: PLAYERS.map((p) => ({ ...p, actualPoints: 30 })) })
+      optimizerAPI.generate.mockResolvedValue({
+        data: { isBacktest: true, lineups: [scored([1, 2, 3, 4, 5, 6, 7, 8], [50, 40, 30, 20, 10, 5, 2.5, 0])] },
+      })
+      renderBacktest()
+
+      expect(screen.getByTestId('backtest-badge')).toHaveTextContent('Backtest 2026-10-21')
+      expect(screen.getByText(/Saved slate 29805 \(2026-10-21, read-only\)/)).toBeInTheDocument()
+      await screen.findByText('No lineups yet')
+      expect(playersAPI.getBySlateId).toHaveBeenCalledWith('29805', { slateDate: '2026-10-21', ranges: 'model' })
+      expect(screen.getByRole('button', { name: 'Recalculate projections' })).toBeDisabled()
+      expect(screen.getByRole('button', { name: 'Reset to RotoWire' })).toBeDisabled()
+
+      fireEvent.click(screen.getByRole('button', { name: /Generate lineup/ }))
+      const card = (await screen.findByText('#1')).closest('article')
+      // Saved controls come from the backtest key, never the live slate's
+      expect(playerSettingsAPI.getBySlateId).toHaveBeenCalledWith('backtest:2026-10-21:29805')
+      expect(optimizerAPI.generate.mock.calls[0][0]).toMatchObject({ slateId: '29805', slateDate: '2026-10-21', ranges: 'model' })
+
+      expect(within(card).getByTestId('lineup-actual')).toHaveTextContent('157.5')
+      expect(within(card).getByText('50.0')).toBeInTheDocument()
+      expect(within(card).queryByRole('button', { name: 'Save' })).not.toBeInTheDocument()
+      expect(screen.getByText('Actual (best)')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /Save all/ })).toBeDisabled()
+      expect(screen.getByRole('button', { name: /Export 1 for/ })).toBeDisabled()
+
+      fireEvent.click(screen.getByRole('tab', { name: 'Player pool' }))
+      expect(await screen.findByRole('columnheader', { name: /Actual/ })).toBeInTheDocument()
+    })
+
+    it('builds a backtest portfolio with slateDate and shows actual points', async () => {
+      const result = makeResult()
+      result.portfolio.lineups = result.portfolio.lineups.map((l, i) => ({ ...l, actualPoints: 280 + i }))
+      result.portfolio.actual = { best: 281, mean: 280.5 }
+      portfolioAPI.getPresets.mockResolvedValue({ data: { presets: PRESETS, limits: LIMITS } })
+      portfolioAPI.build.mockResolvedValue({ data: { jobId: 'job-1', status: 'queued' } })
+      portfolioAPI.getJob.mockResolvedValue({ data: { jobId: 'job-1', status: 'completed', finishedAt: 'now', result } })
+
+      renderBacktest()
+      await screen.findByText('No lineups yet')
+      fireEvent.click(screen.getByRole('button', { name: 'Simulate & build portfolio' }))
+      const dialog = await screen.findByRole('dialog')
+      await within(dialog).findByLabelText('Contest preset')
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Run simulation' }))
+
+      await waitFor(() => expect(portfolioAPI.build).toHaveBeenCalled())
+      expect(portfolioAPI.build.mock.calls[0][0]).toMatchObject({ slateId: '29805', slateDate: '2026-10-21', ranges: 'model' })
+      expect(await screen.findByText('Actual (best)', {}, { timeout: 3000 })).toBeInTheDocument()
+      // Best actual in the stat and in the lineup table's Actual column
+      expect(screen.getAllByText('281.0')).toHaveLength(2)
+      expect(screen.getAllByRole('columnheader', { name: /Actual/ })).toHaveLength(2) // lineups + players
+      expect(screen.getByRole('button', { name: /Export .* for DraftKings/ })).toBeDisabled()
+    })
+  })
 })

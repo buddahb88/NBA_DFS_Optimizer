@@ -91,4 +91,12 @@ describe('HomePage stale slate', () => {
     renderHome()
     expect(screen.queryByText(/slate is from/i)).toBeNull()
   })
+
+  it('turns off refresh (re-sync) while the slate selector is on a backtest', () => {
+    useSlate.mockReturnValue({ site: 'draftkings', siteConfig: { key: 'draftkings', name: 'DraftKings' }, isBacktest: true })
+    useSlateDashboard.mockReturnValue(dashboard())
+    renderHome()
+    expect(screen.getByRole('button', { name: 'Refresh data' })).toBeDisabled()
+  })
 })
+

@@ -31,6 +31,8 @@ import PortfolioBuilderModal from '../features/portfolio/PortfolioBuilderModal';
 import PortfolioPanel from '../features/portfolio/PortfolioPanel';
 import usePortfolioJob from '../features/portfolio/usePortfolioJob';
 import { PORTFOLIO_SITE } from '../features/portfolio/portfolioMath';
+import SlateModeSelect from '../features/slate/SlateModeSelect';
+import { BACKTEST_DISABLED, formatActual, lineupActual } from '../features/slate/backtest';
 import {
   FALLBACK_SITE,
   downloadText,
@@ -92,9 +94,21 @@ function CenteredState({ children }) {
  * Lineup Studio: optimizer settings + results, and a manual click-to-fill
  * builder (?mode=manual). Site and slate come from the top bar (SlateContext).
  * A chat lineup arrives as router state { chatLineup } (see slotsFromHandoff).
+ *
+ * Backtest mode (slate selector in the header): rebuilds a saved past slate
+ * read-only. Players, lineups and portfolios carry actual DK points; saving,
+ * export and projection edits are off; saved player controls come from the
+ * backtest's own settings key, never the live slate's.
  */
 export default function LineupStudioPage() {
-  const { slate, slateId, site, siteConfig: contextSiteConfig, loadingSlates } = useSlate();
+  const {
+    slate, slateId: liveSlateId, site, siteConfig: contextSiteConfig, loadingSlates,
+    isBacktest = false, backtest = null, workSlateId, slateParams, settingsKey,
+  } = useSlate();
+  // Requests go to the backtest's saved slate when one is picked
+  const slateId = workSlateId ?? liveSlateId;
+  const paramsKey = JSON.stringify(slateParams ?? {});
+  const slateKey = `${slateId}|${paramsKey}`;
   const siteConfig = contextSiteConfig || FALLBACK_SITE;
   const salaryCap = siteConfig.salaryCap;
   const [searchParams, setSearchParams] = useSearchParams();
@@ -106,7 +120,7 @@ export default function LineupStudioPage() {
   // Player pool
   const [pool, setPool] = useState({ status: 'idle', players: [], error: null });
   const [poolVersion, setPoolVersion] = useState(0);
-  const slateRef = useRef(slateId);
+  const slateRef = useRef(slateKey);
 
   // Optimizer
   const [settings, setSettings] = useState(() => settingsFromPreset('cash', salaryCap));
@@ -135,9 +149,9 @@ export default function LineupStudioPage() {
   const [breakdown, setBreakdown] = useState({ open: false, loading: false, text: '' });
   const [review, setReview] = useState({ key: null, loading: false, text: '' });
 
-  // New slate: drop everything slate-specific and load its players
+  // New slate (or Live <-> Backtest, or other ranges): drop everything slate-specific and load its players
   useEffect(() => {
-    slateRef.current = slateId;
+    slateRef.current = slateKey;
     setLocked(new Set());
     setExcluded(new Set());
     setRun({ status: 'idle' });
@@ -145,12 +159,12 @@ export default function LineupStudioPage() {
     setSaved(new Set());
     setNotice(null);
     setBreakdown({ open: false, loading: false, text: '' });
-  }, [slateId]);
+  }, [slateKey]);
 
   useEffect(() => {
     resetPortfolio();
     setPortfolioOpen(false);
-  }, [slateId, resetPortfolio]);
+  }, [slateKey, resetPortfolio]);
 
   useEffect(() => {
     if (!slateId) {
@@ -160,13 +174,13 @@ export default function LineupStudioPage() {
     let cancelled = false;
     setPool((p) => ({ status: 'loading', players: p.players, error: null }));
     playersAPI
-      .getBySlateId(slateId)
+      .getBySlateId(slateId, JSON.parse(paramsKey))
       .then((res) => !cancelled && setPool({ status: 'ready', players: res.data || [], error: null }))
       .catch((err) => !cancelled && setPool({ status: 'error', players: [], error: errorMessage(err) }));
     return () => {
       cancelled = true;
     };
-  }, [slateId, poolVersion]);
+  }, [slateId, paramsKey, poolVersion]);
 
   // Site switch: new roster shape and salary scale
   const prevCap = useRef(salaryCap);
@@ -211,21 +225,23 @@ export default function LineupStudioPage() {
   }, []);
 
   const generate = async () => {
-    const requestSlate = slateId;
+    const requestSlate = slateKey;
     setRun({ status: 'loading', requested: settings.numLineups });
     setSelected(new Set());
     setSaved(new Set());
     setTab('lineups');
     setNotice(null);
     try {
-      // Per-player controls saved on the Player Pool page (exposure.js request contract)
-      const { data: savedControls } = await playerSettingsAPI.getBySlateId(slateId);
+      // Per-player controls saved on the Player Pool page (exposure.js request contract);
+      // a backtest reads its own key, so the live slate's controls never leak in
+      const { data: savedControls } = await playerSettingsAPI.getBySlateId(settingsKey ?? slateId);
       const poolControls = toOptimizerPlayers(
         players,
         Object.fromEntries((savedControls || []).map((s) => [String(s.playerId), s])),
       );
       const res = await optimizerAPI.generate({
         ...buildOptimizerRequest({ slateId, site, settings, locked, excluded }),
+        ...JSON.parse(paramsKey),
         players: poolControls,
       });
       if (slateRef.current !== requestSlate) return;
@@ -268,11 +284,14 @@ export default function LineupStudioPage() {
     if (!lineups.length) return null;
     const totals = lineups.map((l) => lineupTotals(l.slots, salaryCap));
     const avg = (f) => totals.reduce((s, t) => s + f(t), 0) / totals.length;
+    const actuals = lineups.map((l) => lineupActual(l.slots)).filter((a) => a !== null);
     return {
       avgProj: avg((t) => t.projection),
       topProj: Math.max(...totals.map((t) => t.projection)),
       avgOwn: avg((t) => t.ownership),
       avgSalary: avg((t) => t.salary),
+      bestActual: actuals.length ? Math.max(...actuals) : null,
+      avgActual: actuals.length ? actuals.reduce((s, a) => s + a, 0) / actuals.length : null,
     };
   }, [lineups, salaryCap]);
 
@@ -351,8 +370,9 @@ export default function LineupStudioPage() {
   const reviewLineup = async (lineup) => {
     setReview({ key: lineup.key, loading: true, text: '' });
     try {
-      const res = await optimizerAPI.reviewLineup(slateId, lineup.raw, settings.mode);
-      setReview({ key: lineup.key, loading: false, text: res.data.review || 'No review returned.', number: lineup.number });
+      const res = await optimizerAPI.reviewLineup(slateId, lineup.raw, settings.mode, JSON.parse(paramsKey));
+      const actual = res.data.actualPoints != null ? `\n\nActual: ${formatActual(res.data.actualPoints)} DK points (${res.data.label}).` : '';
+      setReview({ key: lineup.key, loading: false, text: `${res.data.review || 'No review returned.'}${actual}`, number: lineup.number });
     } catch (err) {
       setReview({ key: null, loading: false, text: '' });
       setNotice({ tone: 'negative', text: `AI review failed: ${errorMessage(err)}` });
@@ -362,7 +382,7 @@ export default function LineupStudioPage() {
   const runBreakdown = async () => {
     setBreakdown({ open: true, loading: true, text: '' });
     try {
-      const res = await optimizerAPI.slateBreakdown(slateId, settings.mode);
+      const res = await optimizerAPI.slateBreakdown(slateId, settings.mode, JSON.parse(paramsKey));
       setBreakdown({ open: true, loading: false, text: res.data.aiAnalysis || 'No analysis returned.' });
     } catch (err) {
       setBreakdown({ open: false, loading: false, text: '' });
@@ -409,7 +429,7 @@ export default function LineupStudioPage() {
   const startPortfolio = (request) => {
     setPortfolioOpen(false);
     setTab('portfolio');
-    portfolioJob.start(request);
+    portfolioJob.start({ ...request, slateId, ...JSON.parse(paramsKey) });
   };
 
   // ---- render -------------------------------------------------------------
@@ -474,8 +494,8 @@ export default function LineupStudioPage() {
         players={players}
         slots={manualSlots}
         onSlotsChange={setManualSlots}
-        onSave={saveManual}
-        onExport={() => exportLineups([manualEntries()])}
+        onSave={isBacktest ? () => setNotice({ tone: 'caution', text: BACKTEST_DISABLED }) : saveManual}
+        onExport={isBacktest ? () => setNotice({ tone: 'caution', text: BACKTEST_DISABLED }) : () => exportLineups([manualEntries()])}
         saving={manualSaving}
         exporting={exporting}
       />
@@ -531,6 +551,7 @@ export default function LineupStudioPage() {
                   setLocked(new Set());
                   setExcluded(new Set());
                 }}
+                showActual={isBacktest}
               />
             )}
 
@@ -590,9 +611,12 @@ export default function LineupStudioPage() {
 
             {tab === 'lineups' && run.status === 'done' && (
               <div className="flex flex-col gap-3">
-                <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+                <div className={cn('grid grid-cols-2 gap-2', isBacktest ? 'md:grid-cols-5' : 'md:grid-cols-4')}>
                   <Stat label="Lineups" value={lineups.length} hint={lineups.length < run.requested ? `of ${run.requested} requested` : undefined} />
                   <Stat label="Avg projection" value={summary.avgProj.toFixed(1)} hint={`Top ${summary.topProj.toFixed(1)}`} />
+                  {isBacktest && (
+                    <Stat label="Actual (best)" value={formatActual(summary.bestActual)} hint={`avg ${formatActual(summary.avgActual)} DK pts`} />
+                  )}
                   <Stat label="Avg ownership Σ" value={`${summary.avgOwn.toFixed(0)}%`} />
                   <Stat label="Avg salary" value={formatSalary(summary.avgSalary)} hint={`of ${formatSalary(salaryCap)}`} />
                 </div>
@@ -616,16 +640,16 @@ export default function LineupStudioPage() {
                     </label>
                     <Select size="sm" aria-label="Sort lineups" value={sortBy} onChange={(e) => setSortBy(e.target.value)} options={SORTS} className="w-40" />
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2" title={isBacktest ? BACKTEST_DISABLED : undefined}>
                     <Button
                       size="sm"
                       onClick={() => saveLineups(target.filter((l) => !saved.has(l.key)))}
-                      disabled={target.every((l) => saved.has(l.key)) || savingKeys.size > 0}
+                      disabled={isBacktest || target.every((l) => saved.has(l.key)) || savingKeys.size > 0}
                       loading={savingKeys.size > 1}
                     >
                       Save {selected.size ? 'selected' : 'all'}
                     </Button>
-                    <Button variant="primary" size="sm" onClick={() => exportLineups(target.map((l) => l.slots))} loading={exporting}>
+                    <Button variant="primary" size="sm" disabled={isBacktest} onClick={() => exportLineups(target.map((l) => l.slots))} loading={exporting}>
                       Export {target.length} for {siteConfig.name}
                     </Button>
                   </div>
@@ -645,6 +669,8 @@ export default function LineupStudioPage() {
                       onEdit={() => editInBuilder(l)}
                       onReview={() => reviewLineup(l)}
                       reviewing={review.loading && review.key === l.key}
+                      showActual={isBacktest}
+                      readOnly={isBacktest}
                     />
                   ))}
                 </div>
@@ -662,9 +688,10 @@ export default function LineupStudioPage() {
         <div className="min-w-0">
           <h1 className="text-xl font-semibold text-fg">Lineup Studio</h1>
           <p className="truncate text-xs text-fg-muted">
-            {slate ? (
+            {slate || backtest ? (
               <>
-                {slate.name} · {siteConfig.name} · {pool.status === 'ready' ? `${players.length} players` : 'loading players'}
+                {backtest ? `Saved slate ${backtest.slateId} (${backtest.slateDate}, read-only)` : slate.name} · {siteConfig.name} ·{' '}
+                {pool.status === 'ready' ? `${players.length} players` : 'loading players'}
                 {pool.status === 'loading' && players.length > 0 && <Spinner size="xs" className="ml-1.5 align-middle" />}
               </>
             ) : (
@@ -673,6 +700,7 @@ export default function LineupStudioPage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <SlateModeSelect showRanges />
           <Tabs
             variant="pill"
             value={view}
@@ -682,12 +710,14 @@ export default function LineupStudioPage() {
               { value: 'manual', label: 'Manual builder' },
             ]}
           />
-          <Button size="sm" variant="ghost" disabled={!slateId} loading={projectionBusy} onClick={() => projections('recalculate')}>
-            Recalculate projections
-          </Button>
-          <Button size="sm" variant="ghost" disabled={!slateId || projectionBusy} onClick={() => projections('reset')}>
-            Reset to RotoWire
-          </Button>
+          <span className="contents" title={isBacktest ? BACKTEST_DISABLED : undefined}>
+            <Button size="sm" variant="ghost" disabled={!slateId || isBacktest} loading={projectionBusy} onClick={() => projections('recalculate')}>
+              Recalculate projections
+            </Button>
+            <Button size="sm" variant="ghost" disabled={!slateId || projectionBusy || isBacktest} onClick={() => projections('reset')}>
+              Reset to RotoWire
+            </Button>
+          </span>
           <Button size="sm" variant="ghost" disabled={!slateId} loading={breakdown.loading} onClick={runBreakdown}>
             AI breakdown
           </Button>

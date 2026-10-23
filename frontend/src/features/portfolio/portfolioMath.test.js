@@ -68,6 +68,15 @@ describe('portfolio results', () => {
     expect(rows.map((r) => [r.number, r.distIndex])).toEqual([[2, 1], [1, 0]])
     expect(rows[0]).toMatchObject({ roi: 0.25, cashRate: 0.25, salary: 48000 })
     expect(lineupRows(null)).toEqual([])
+    expect(rows[0].actual).toBeNull()
+  })
+
+  it('backtest results carry the actual points of each lineup', () => {
+    const scored = {
+      ...result,
+      portfolio: { ...result.portfolio, lineups: result.portfolio.lineups.map((l, i) => ({ ...l, actualPoints: 250 + i })) },
+    }
+    expect(lineupRows(scored).map((r) => [r.number, r.actual])).toEqual([[2, 251], [1, 250]])
   })
 
   it('buckets dupe risk', () => {

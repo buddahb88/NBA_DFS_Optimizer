@@ -1,12 +1,16 @@
 import { Badge, Button, IconCheck, Tooltip, cn } from '../../components/ui';
 import { formatSalary, lineupTotals } from './lineupMath';
+import { formatActual, lineupActual } from '../slate/backtest';
 
 /**
  * One generated lineup. `lineup` = { key, number, slots: [{ slot, player }] }.
+ * showActual (backtest): actual DK points per player and an Actual total.
+ * readOnly: no Save (a past slate's lineups are not entries).
  */
-export default function LineupCard({ lineup, salaryCap, selected, onToggleSelect, saved, saving, onSave, onEdit, onReview, reviewing }) {
+export default function LineupCard({ lineup, salaryCap, selected, onToggleSelect, saved, saving, onSave, onEdit, onReview, reviewing, showActual = false, readOnly = false }) {
   const totals = lineupTotals(lineup.slots, salaryCap);
   const usedPct = Math.min(100, (totals.salary / salaryCap) * 100);
+  const actual = showActual ? lineupActual(lineup.slots) : null;
 
   return (
     <article
@@ -35,7 +39,7 @@ export default function LineupCard({ lineup, salaryCap, selected, onToggleSelect
         </div>
       </header>
 
-      <dl className="grid grid-cols-3 gap-2 border-b border-line px-3 py-2">
+      <dl className={cn('grid gap-2 border-b border-line px-3 py-2', showActual ? 'grid-cols-4' : 'grid-cols-3')}>
         <div>
           <dt className="text-2xs uppercase tracking-wider text-fg-subtle">Salary</dt>
           <dd className="num text-sm font-semibold text-fg">{formatSalary(totals.salary)}</dd>
@@ -47,6 +51,17 @@ export default function LineupCard({ lineup, salaryCap, selected, onToggleSelect
           <dt className="text-2xs uppercase tracking-wider text-fg-subtle">Proj</dt>
           <dd className="num text-sm font-semibold text-accent">{totals.projection.toFixed(1)}</dd>
         </div>
+        {showActual && (
+          <div>
+            <dt className="text-2xs uppercase tracking-wider text-fg-subtle">Actual</dt>
+            <dd
+              data-testid="lineup-actual"
+              className={cn('num text-sm font-semibold', actual == null ? 'text-fg-muted' : actual >= totals.projection ? 'text-positive' : 'text-negative')}
+            >
+              {formatActual(actual)}
+            </dd>
+          </div>
+        )}
         <div>
           <dt className="text-2xs uppercase tracking-wider text-fg-subtle">Own Σ</dt>
           <dd className="num text-sm font-semibold text-fg">{totals.ownership.toFixed(0)}%</dd>
@@ -61,6 +76,11 @@ export default function LineupCard({ lineup, salaryCap, selected, onToggleSelect
             <span className="w-9 shrink-0 text-2xs text-fg-subtle">{player?.team}</span>
             <span className="num w-14 shrink-0 text-right text-fg-muted">{player ? formatSalary(player.salary) : ''}</span>
             <span className="num w-10 shrink-0 text-right font-medium text-fg">{player?.projected_points?.toFixed(1)}</span>
+            {showActual && (
+              <span className="num w-10 shrink-0 text-right font-semibold text-fg" title="Actual DK points">
+                {player ? formatActual(player.actualPoints) : ''}
+              </span>
+            )}
           </li>
         ))}
       </ul>
@@ -76,9 +96,11 @@ export default function LineupCard({ lineup, salaryCap, selected, onToggleSelect
             Edit
           </Button>
         </Tooltip>
-        <Button variant="secondary" size="xs" onClick={onSave} loading={saving} disabled={saved}>
-          {saved ? 'Saved' : 'Save'}
-        </Button>
+        {!readOnly && (
+          <Button variant="secondary" size="xs" onClick={onSave} loading={saving} disabled={saved}>
+            {saved ? 'Saved' : 'Save'}
+          </Button>
+        )}
       </footer>
     </article>
   );

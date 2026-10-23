@@ -20,9 +20,10 @@ import useChatSessions from '../features/chat/useChatSessions';
 import useChatSuggestions from '../features/chat/useChatSuggestions';
 import useComposerDraft from '../features/chat/useComposerDraft';
 import useSlateSummary from '../features/chat/useSlateSummary';
+import SlateModeSelect from '../features/slate/SlateModeSelect';
 
 export default function ChatPage() {
-  const { slate, slateId, site, siteConfig } = useSlate();
+  const { slate, slateId, site, siteConfig, backtest = null } = useSlate();
   const sessionsState = useChatSessions();
   const { sessions, activeSessionId, setActiveSessionId, refresh, selectSession } = sessionsState;
   const slateSummary = useSlateSummary(slateId);
@@ -122,7 +123,9 @@ export default function ChatPage() {
   const ask = (text, mentions = []) =>
     startStream(text, {
       sessionId: activeSessionId,
-      slateId,
+      // Backtest: ask about the saved night (the route tells the agents to pass slateDate)
+      slateId: backtest ? backtest.slateId : slateId,
+      slateDate: backtest?.slateDate,
       maxIterations,
       mode,
       mentions: mentions.map(({ name, team, player_key }) => ({ name, team, player_key })),
@@ -227,6 +230,8 @@ export default function ChatPage() {
               loading={slateSummary.loading}
               mode={mode}
               onModeChange={setMode}
+              backtest={backtest}
+              slateSelector={<SlateModeSelect />}
             />
           }
           composer={

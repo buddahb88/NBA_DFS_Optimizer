@@ -10,9 +10,11 @@ const CHAT_MODES = [
 /**
  * Strip above the conversation: which slate the assistant is looking at and
  * the Cash/GPP mode sent with each message. Cautions when the slate is from
- * an earlier night than today.
+ * an earlier night than today. slateSelector (Live / Backtest: <date>) sits
+ * at the end of the slate info; with a backtest picked, questions go to that
+ * saved night and the stale caution is replaced by its Backtest badge.
  */
-export default function SlateContextBar({ slate, siteName, gameCount, firstLock, loading, mode, onModeChange, now }) {
+export default function SlateContextBar({ slate, siteName, gameCount, firstLock, loading, mode, onModeChange, now, backtest = null, slateSelector = null }) {
   const activeMode = CHAT_MODES.find((m) => m.value === mode);
 
   return (
@@ -33,10 +35,14 @@ export default function SlateContextBar({ slate, siteName, gameCount, firstLock,
                 Lock <span className="num text-fg">{loading ? '…' : formatTipoff(firstLock)}</span>
               </span>
             </span>
-            <StaleSlateBadge slate={slate} now={now} />
+            {!backtest && <StaleSlateBadge slate={slate} now={now} />}
           </>
         ) : (
           <span className="text-fg-muted">{loading ? 'Loading slate…' : 'No slate selected — pick one in the top bar for slate-aware answers.'}</span>
+        )}
+        {slateSelector}
+        {backtest && (
+          <span className="text-fg-muted">Questions use the saved {backtest.slateDate} slate and its actual results.</span>
         )}
       </div>
 

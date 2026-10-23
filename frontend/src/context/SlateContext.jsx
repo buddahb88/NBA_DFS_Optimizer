@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { sitesAPI, slatesAPI } from '../services/api';
 import { readStoredSelection, resolveSite, resolveSlateId, writeStoredSelection } from './slateSelection';
+import { findBacktest, settingsKeyFor, slateRequestParams } from '../features/slate/backtest';
 
 const SlateContext = createContext(null);
 
@@ -15,6 +16,17 @@ const SlateContext = createContext(null);
  *   setSite(key), setSlateId(id)
  *   refreshSlates(preferId?)  reload the site's slates, optionally selecting preferId
  *   loadingSlates, error
+ *
+ * Backtest mode (Lineup Studio, Archetypes Tonight, chat): rebuild a saved
+ * past slate while the live one stays selected. Not persisted, so a reload
+ * is always Live.
+ *   backtests                 saved past slates of the site (GET /api/slates/backtests)
+ *   backtest, isBacktest      the selected one ({ slateDate, slateId, site, players }) or null
+ *   setBacktestDate(date|null)
+ *   rangeMode, setRangeMode   'model' | 'original' floor / ceiling for a backtest
+ *   workSlateId               the slate requests go to: the backtest's, else slateId
+ *   slateParams               { slateDate, ranges } to add to slate requests in a backtest, else {}
+ *   settingsKey               player-settings key (a backtest never uses the live slate's)
  */
 export function SlateProvider({ children }) {
   const [stored] = useState(readStoredSelection);
@@ -25,6 +37,21 @@ export function SlateProvider({ children }) {
   const [loadingSlates, setLoadingSlates] = useState(true);
   const [error, setError] = useState(null);
   const requestRef = useRef(0);
+  const [backtests, setBacktests] = useState([]);
+  const [backtestDate, setBacktestDateState] = useState(null);
+  const [rangeMode, setRangeMode] = useState('model');
+
+  useEffect(() => {
+    let cancelled = false;
+    // .then() so a client without getBacktests (older mocks) just lists none
+    Promise.resolve()
+      .then(() => slatesAPI.getBacktests(site))
+      .then((res) => !cancelled && setBacktests(Array.isArray(res?.data) ? res.data : []))
+      .catch(() => !cancelled && setBacktests([]));
+    return () => {
+      cancelled = true;
+    };
+  }, [site]);
 
   useEffect(() => {
     let cancelled = false;
@@ -79,16 +106,29 @@ export function SlateProvider({ children }) {
       if (key === site) return;
       setSlates([]);
       setSlateIdState(null);
+      setBacktestDateState(null);
       setSiteState(key);
     },
     [site],
   );
 
   const setSlateId = useCallback((id) => setSlateIdState(id == null ? null : String(id)), []);
+  const setBacktestDate = useCallback((date) => setBacktestDateState(date || null), []);
 
   const value = useMemo(() => {
     const slate = slates.find((s) => String(s.slate_id) === slateId) || null;
+    const liveSlateId = slate ? slateId : null;
+    const backtest = findBacktest(backtests, backtestDate);
     return {
+      backtests,
+      backtest,
+      isBacktest: !!backtest,
+      setBacktestDate,
+      rangeMode,
+      setRangeMode,
+      workSlateId: backtest ? backtest.slateId : liveSlateId,
+      slateParams: slateRequestParams(backtest, rangeMode),
+      settingsKey: settingsKeyFor(liveSlateId, backtest),
       site,
       siteConfig: sitesByKey?.[site] || null,
       sites: sitesByKey ? Object.values(sitesByKey) : [],
@@ -101,7 +141,8 @@ export function SlateProvider({ children }) {
       loadingSlates,
       error,
     };
-  }, [site, sitesByKey, slates, slateId, setSite, setSlateId, refreshSlates, loadingSlates, error]);
+  }, [site, sitesByKey, slates, slateId, setSite, setSlateId, refreshSlates, loadingSlates, error,
+    backtests, backtestDate, setBacktestDate, rangeMode]);
 
   return <SlateContext.Provider value={value}>{children}</SlateContext.Provider>;
 }

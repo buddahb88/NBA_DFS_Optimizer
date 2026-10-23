@@ -206,4 +206,28 @@ describe('ArchetypesPage', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Tonight' }))
     expect(await screen.findByText('No archetype defense data for 2026-27')).toBeInTheDocument()
   })
+
+  it('Tonight in backtest mode ranks the saved night and shows actual points', async () => {
+    const BACKTEST = { slateDate: '2026-10-21', slateId: '29805', site: 'fanduel', players: 242 }
+    useSlate.mockReturnValue({
+      ...slateContext({ slate_id: 's1', name: 'Main' }),
+      backtests: [BACKTEST], backtest: BACKTEST, isBacktest: true, setBacktestDate: vi.fn(),
+      rangeMode: 'model', setRangeMode: vi.fn(), workSlateId: '29805',
+    })
+    archetypesAPI.getTonight.mockResolvedValue({
+      data: {
+        ...TONIGHT, isBacktest: true, slateDate: '2026-10-21', endDate: '2026-10-20',
+        players: TONIGHT.players.map((p, i) => ({ ...p, actualPoints: [52.5, 12][i], resultStatus: 'PLAYED' })),
+      },
+    })
+    renderPage()
+    fireEvent.click(screen.getByRole('tab', { name: 'Tonight' }))
+
+    expect(await screen.findByText('52.5')).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: /Actual/ })).toBeInTheDocument()
+    expect(screen.getByTestId('backtest-badge')).toHaveTextContent('Backtest 2026-10-21')
+    expect(screen.getByText(/Defense through 2026-10-20/)).toBeInTheDocument()
+    expect(archetypesAPI.getTonight).toHaveBeenLastCalledWith(expect.objectContaining({ slateId: '29805', slateDate: '2026-10-21' }))
+  })
 })
+

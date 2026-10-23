@@ -30,6 +30,7 @@ export function useAgentStream() {
     const {
       sessionId: existingSessionId,
       slateId,
+      slateDate,
       maxIterations = 10,
       mode,
       mentions
@@ -61,6 +62,8 @@ export function useAgentStream() {
           slateId,
           maxIterations,
           mode,
+          // Backtest: the saved past night the question is about
+          ...(slateDate ? { slateDate } : {}),
           ...(mentions?.length ? { mentions } : {})
         }),
         signal: abortControllerRef.current.signal

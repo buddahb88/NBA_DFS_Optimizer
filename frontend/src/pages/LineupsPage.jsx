@@ -4,9 +4,10 @@ import ExportLineupsModal from '../components/ExportLineupsModal';
 import { useSlate } from '../context/SlateContext';
 import { Tabs } from '../components/ui';
 import LateSwapPanel from '../components/lateSwap/LateSwapPanel';
+import { BACKTEST_DISABLED } from '../features/slate/backtest';
 
 function LineupsPage() {
-  const { site, slateId, loadingSlates } = useSlate();
+  const { site, slateId, loadingSlates, isBacktest = false } = useSlate();
   const [lineups, setLineups] = useState([]);
   const [selectedLineup, setSelectedLineup] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -84,7 +85,10 @@ function LineupsPage() {
           { value: 'lateswap', label: 'Late Swap' },
         ]}
       />
-      {tab === 'lateswap' ? <LateSwapPanel /> : (
+      {tab === 'lateswap' ? (
+        // Late swap edits live entries; a backtest is a past night
+        isBacktest ? <p role="status" className="text-sm text-caution">{BACKTEST_DISABLED}</p> : <LateSwapPanel />
+      ) : (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
       {/* Lineups List */}
       <div className="lg:col-span-1 space-y-4">
