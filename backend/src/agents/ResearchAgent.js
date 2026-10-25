@@ -194,7 +194,7 @@ class ResearchAgent extends BaseAgent {
           for (const name of playerNames) {
             let query = `
               SELECT id, name, position, team, opponent, salary, projected_points,
-                     floor, ceiling, ownership, leverage_score, injury_status, slate_id
+                     floor, ceiling, rostership AS ownership, leverage_score, injury_status, slate_id
               FROM players
               WHERE LOWER(name) LIKE LOWER(?)
             `;
