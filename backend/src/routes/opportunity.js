@@ -7,6 +7,7 @@
 
 import express from 'express';
 import { getOpportunityMetrics } from '../services/opportunity/metricsService.js';
+import { getTeammateOpportunity } from '../services/opportunity/teammateService.js';
 import { sourceFields } from '../services/slateSource.js';
 
 const router = express.Router();
@@ -35,6 +36,31 @@ router.get('/metrics', async (req, res) => {
   } catch (error) {
     if (error.status) return res.status(error.status).json({ error: error.message });
     console.error('Opportunity metrics error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * GET /api/opportunity/teammates
+ * Teammate-out opportunity: per team, who is out (status_source, prelock)
+ * and the usage / minutes / points per game they vacate (vacated_usage is a
+ * share of team plays) with who absorbs it; per slate player, usage /
+ * minutes / FPPM / points with each OUT teammate off the floor vs on it
+ * (splits, sample confirmed | thin | none) and one combined `adjusted` line.
+ * Only games before the slate date count.
+ *
+ * Query params: slateId, slateDate (YYYY-MM-DD; a past date is a backtest), site
+ */
+router.get('/teammates', async (req, res) => {
+  try {
+    const { slateId, slateDate, site } = req.query;
+    const { source, slateDate: date, season, teams, players } = await getTeammateOpportunity({
+      slateId: slateId || null, slateDate: slateDate || null, site: site || null
+    });
+    res.json({ success: true, ...sourceFields(source), slateDate: date, season, teams, count: players.length, players });
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message });
+    console.error('Teammate opportunity error:', error);
     res.status(500).json({ error: error.message });
   }
 });
