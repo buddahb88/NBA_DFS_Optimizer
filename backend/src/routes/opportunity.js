@@ -19,8 +19,13 @@ const truthy = (v) => v === '1' || v === 'true';
  * One row per slate player: minutes / usage / FPPM / shot volume / shooting
  * trends, role stability, value hit rates at the slate salary, rest, game
  * environment, and sample sizes (games_l3 / l5 / l10 / season,
- * season_fallback). Only games before the slate date count; backtest rows
- * add actual_points / actual_minutes / result_status.
+ * season_fallback); the rate projection (projected minutes x blended FPPM x
+ * environment x pre-lock teammate-out bump: rate_projection, rate_gap,
+ * rate_gap_pct, rate_value, rate_* components, rate_reason when null); and
+ * salary lag (salary_change_l1 / salary_change over the last 3 earlier
+ * slates, fp_l5 vs fp_prior_l5, salary_lag, salary_lag_reason when null).
+ * Only games and slates before the slate date count; backtest rows add
+ * actual_points / actual_minutes / result_status.
  *
  * Query params:
  *   slateId, slateDate (YYYY-MM-DD; a past date is a backtest), site

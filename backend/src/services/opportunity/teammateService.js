@@ -11,7 +11,7 @@
  *   dnp, inactive  backtest: listed in game_player_status that night
  *   absent         backtest: a rostered player with no box score row while
  *                  the team played (ESPN rarely lists injured players)
- *   not_on_slate   live: a rostered player missing from the slate
+ *   not_on_slate   live (or prelockOnly): a rostered player missing from the slate
  * Rostered = an appearance for the team this season before the slate date (a
  * box score row or a listing) and no later box score for another team, as
  * insightsService's roster window. Backtest outs other than injury_status use
@@ -105,7 +105,7 @@ async function countTeamGames(teams, { season, slateDate }) {
 }
 
 /** Out candidates per the header's sources: [{ player_key, team, name, status_source, status, reason, prelock }]. */
-function findOutCandidates({ source, all, teams, rosters, night }) {
+function findOutCandidates({ source, all, teams, rosters, night, prelockOnly }) {
   const found = new Map();
   const add = (c) => { if (!found.has(`${c.player_key}|${c.team}`)) found.set(`${c.player_key}|${c.team}`, c); };
   const teamSet = new Set(teams);
@@ -116,7 +116,7 @@ function findOutCandidates({ source, all, teams, rosters, night }) {
       status: p.injury_status, reason: null, prelock: true });
   }
 
-  if (source.isBacktest) {
+  if (source.isBacktest && !prelockOnly) {
     for (const l of night.listings) {
       if (night.played.has(`${l.player_key}|${l.team}`)) continue;
       add({ player_key: l.player_key, team: l.team, name: l.player_name,
@@ -174,8 +174,10 @@ const intersect = (sets) => new Set([...sets[0]].filter(d => sets.every(s => s.h
  * Teammate opportunity for slate players (players-table shape, OUT ones
  * included). Returns { slateDate, season, teams, players } as
  * getTeammateOpportunity. Exported for validation on dates without a slate.
+ * prelockOnly: only outs known before lock (injury_status, not on the slate),
+ * also for a backtest - what a no-lookahead projection may use.
  */
-export async function computeTeammateOpportunity(source, all, { now = new Date() } = {}) {
+export async function computeTeammateOpportunity(source, all, { now = new Date(), prelockOnly = false } = {}) {
   const slateDate = source.slateDate ?? easternDate(now);
   const season = seasonForDate(slateDate);
   const priorSeason = previousSeason(season);
@@ -184,10 +186,10 @@ export async function computeTeammateOpportunity(source, all, { now = new Date()
 
   const [rosters, night, teamGameCounts] = await Promise.all([
     loadRosters(teams, { season, slateDate }),
-    source.isBacktest ? loadNight(teams, slateDate) : null,
+    source.isBacktest && !prelockOnly ? loadNight(teams, slateDate) : null,
     countTeamGames(teams, { season, slateDate })
   ]);
-  const candidates = findOutCandidates({ source, all, teams, rosters, night });
+  const candidates = findOutCandidates({ source, all, teams, rosters, night, prelockOnly });
 
   const logs = await loadPlayerGames([...all.map(keyOf), ...candidates.map(c => c.player_key)],
     { beforeDate: slateDate, seasons: [season, priorSeason], site: source.site });
