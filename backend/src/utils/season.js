@@ -59,6 +59,11 @@ export function seasonEndYear(season) {
   return seasonStartYear(season) + 1;
 }
 
+/** The season before `season` ('2026-27' -> '2025-26'). */
+export function previousSeason(season) {
+  return formatSeason(seasonStartYear(season) - 1);
+}
+
 /** All seasons from `from` through the current one, newest first. */
 export function listSeasons(from = '2024-25', now = new Date()) {
   const first = seasonStartYear(from);

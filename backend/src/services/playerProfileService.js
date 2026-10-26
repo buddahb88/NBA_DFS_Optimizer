@@ -22,8 +22,10 @@ import { listSeasons } from '../utils/season.js';
 
 export const FIRST_PROFILE_SEASON = '2024-25';
 
-const GAME_ROWS_SQL = `
+// Per-game player rows with team and opponent totals: computeProfiles input
+export const GAME_ROWS_SELECT = `
   SELECT h.player_key, h.player_name, h.espn_player_id, h.team, h.position, h.is_starter,
+         h.game_date, h.season, h.fouls, h.yahoo_fantasy_points,
          h.minutes, h.points, h.assists, h.steals, h.blocks, h.turnovers,
          h.fg_made, h.fg_attempted, h.fg3_made, h.fg3_attempted, h.ft_made, h.ft_attempted,
          h.oreb, h.dreb, h.dk_fantasy_points, h.fd_fantasy_points,
@@ -33,7 +35,9 @@ const GAME_ROWS_SQL = `
          o.possessions AS opp_possessions
   FROM historical_games h
   LEFT JOIN team_game_stats t ON t.game_id = h.game_id AND t.team = h.team
-  LEFT JOIN team_game_stats o ON o.game_id = h.game_id AND o.team = t.opponent
+  LEFT JOIN team_game_stats o ON o.game_id = h.game_id AND o.team = t.opponent`;
+
+const GAME_ROWS_SQL = `${GAME_ROWS_SELECT}
   WHERE h.season = ? AND COALESCE(h.season_type, 'regular') = 'regular'
     AND h.minutes > 0 AND h.player_key IS NOT NULL
   ORDER BY h.game_date, h.id

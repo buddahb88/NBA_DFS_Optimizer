@@ -5,6 +5,7 @@ import {
   seasonForDate,
   seasonStartDate,
   seasonEndYear,
+  previousSeason,
   listSeasons,
   getSeasonsInfo,
 } from '../src/utils/season.js';
@@ -51,6 +52,12 @@ test('seasonStartDate uses known opening nights, else October 1st', () => {
 test('seasonEndYear returns the calendar year the season ends in', () => {
   assert.equal(seasonEndYear('2024-25'), 2025);
   assert.equal(seasonEndYear('2026-27'), 2027);
+});
+
+test('previousSeason steps back one season, across centuries', () => {
+  assert.equal(previousSeason('2026-27'), '2025-26');
+  assert.equal(previousSeason('2000-01'), '1999-00');
+  assert.throws(() => previousSeason('2026'), /Invalid season/);
 });
 
 test('listSeasons returns newest first, from 2024-25 to current by default', () => {
