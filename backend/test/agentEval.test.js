@@ -271,10 +271,14 @@ describe.skipIf(!HAS_DB)('chat tool routing (scripted LLM, real DB)', () => {
 });
 
 describe.skipIf(!HAS_DB)('value-pick backtest (real DB, deterministic agent)', () => {
-  test('2026-10-21: agent picks come from get_archetype_matchups; baselines match the reference', async () => {
+  test('2026-10-21: agent picks use matchups (live tool or snapshot replay); baselines match the reference', async () => {
     const bt = await import('../src/services/agentValueBacktest.js');
     const { dates: [d] } = await bt.runValueBacktest({ from: '2026-10-21', to: '2026-10-21', persist: false });
-    assert.equal(d.source, 'get_archetype_matchups');
+    // DK slate 29805 runs through the live tool only while it is still in players;
+    // once a newer slate is synced it is replayed from slate_player_snapshots.
+    // The baselines below come from the same snapshot either way.
+    const loaded = await db.get(`SELECT 1 FROM players WHERE slate_id = '29805' LIMIT 1`);
+    assert.equal(d.source, loaded ? 'get_archetype_matchups' : 'snapshot_replay');
     assert.equal(d.methods.agent.picks, 5);
     assert.ok(d.methods.agent.players.every(p => p.salary <= 6500));
     assert.deepEqual(d.methods.baseline_value.names, ['Dennis Schroder', 'Jalen Smith', 'Isaiah Jackson', 'Draymond Green', 'Grayson Allen']);
