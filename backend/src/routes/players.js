@@ -7,6 +7,7 @@ import hashtagBasketballService from '../services/hashtagBasketballService.js';
 import projectionService from '../services/projectionService.js';
 import { snapshotAllSlates, snapshotSlate } from '../services/slateSnapshotService.js';
 import { recomputeSlateRanges } from '../services/variance/outcomeRangeService.js';
+import { primeOpportunityMetrics } from '../services/opportunity/metricsService.js';
 import { getSlateMatchups } from '../services/archetypeDefenseService.js';
 import { loadSlatePlayers, resolveSlate, withActuals } from '../services/slateSource.js';
 import { DEFAULT_SITE, isValidSite } from '../config/sites.js';
@@ -110,6 +111,8 @@ router.post('/:slateId/sync', async (req, res) => {
     // Bulk insert players (with defense-adjusted projections)
     await playerModel.bulkCreateOrUpdate(slateId, players);
     await snapshotSlate(slateId);
+    // Precompute Opportunity Radar metrics in the background (failures are logged)
+    primeOpportunityMetrics(slateId);
 
     console.log(`✅ Complete! Synced ${players.length} players with matchup-adjusted projections (overall defense + pace + position defense)`);
 

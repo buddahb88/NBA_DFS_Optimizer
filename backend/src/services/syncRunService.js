@@ -7,6 +7,7 @@
  */
 
 import db, { DATABASE_TYPE } from '../config/database.js';
+import { clearOpportunityCache } from './opportunity/metricsService.js';
 
 const COLUMNS = 'id, source, season, started_at, finished_at, games_inserted, error';
 
@@ -42,6 +43,8 @@ class SyncRunService {
   }
 
   async finish(id, { gamesInserted = 0, error = null } = {}) {
+    // New box scores change every cached opportunity metric on or after them
+    clearOpportunityCache();
     await db.run(
       `UPDATE sync_runs SET finished_at = @finished_at, games_inserted = @games, error = @error WHERE id = @id`,
       { id, finished_at: timestamp(), games: gamesInserted, error });

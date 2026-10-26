@@ -22,6 +22,7 @@ import { parseCsv } from '../utils/csvParser.js';
 import { normalizeName, normalizeTeam } from '../utils/nameNormalizer.js';
 import { easternToIso, snapshotSlate } from './slateSnapshotService.js';
 import { recomputeSlateRanges } from './variance/outcomeRangeService.js';
+import { primeOpportunityMetrics } from './opportunity/metricsService.js';
 
 export class SalaryImportError extends Error {
   constructor(message, status = 400) {
@@ -485,6 +486,8 @@ export async function importSalaries({ csvText, site: siteHint, slateId, slateNa
   // Ranges copied from another site's slate used that site's salary and scoring
   await recomputeSlateRanges(targetId);
   await snapshotSlate(targetId);
+  // New salaries change value hit rates; precompute in the background
+  primeOpportunityMetrics(targetId);
 
   return report;
 }
