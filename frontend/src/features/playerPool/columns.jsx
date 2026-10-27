@@ -1,6 +1,7 @@
 import { Badge, Tooltip, cn } from '../../components/ui';
 import { bandTone, injuryCode, injuryTone } from './playerPool';
 import { ControlButton, Dash, IconBan, IconLock, MatchupCell, Num, NumberCell, OwnershipCell } from './cells';
+import ProjectionCell from '../slate/ProjectionCell';
 
 // tanstack sorts `undefined` last with sortUndefined: 'last'
 const orUndef = (v) => (v == null || Number.isNaN(Number(v)) ? undefined : Number(v));
@@ -90,7 +91,7 @@ export function buildColumns({ stats, onUpdate }) {
       meta: { numeric: true, label: 'Projection' },
       cell: ({ row }) => {
         const p = row.original;
-        if (!p.overridden) return <Num value={p.proj} />;
+        if (!p.overridden) return p.proj == null ? <Dash /> : <ProjectionCell player={p} value={p.proj} />;
         return (
           <Tooltip content={`Override (model ${p.baseProj.toFixed(1)})`}>
             <span className="font-semibold text-accent">{p.proj.toFixed(1)}*</span>

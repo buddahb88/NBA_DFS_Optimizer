@@ -32,6 +32,7 @@ import PortfolioPanel from '../features/portfolio/PortfolioPanel';
 import usePortfolioJob from '../features/portfolio/usePortfolioJob';
 import { PORTFOLIO_SITE } from '../features/portfolio/portfolioMath';
 import SlateModeSelect from '../features/slate/SlateModeSelect';
+import ProjectionSanityToggle from '../features/slate/ProjectionSanityToggle';
 import { BACKTEST_DISABLED, formatActual, lineupActual } from '../features/slate/backtest';
 import {
   FALLBACK_SITE,
@@ -701,6 +702,7 @@ export default function LineupStudioPage() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <SlateModeSelect showRanges />
+          <ProjectionSanityToggle onChange={() => setPoolVersion((v) => v + 1)} />
           <Tabs
             variant="pill"
             value={view}

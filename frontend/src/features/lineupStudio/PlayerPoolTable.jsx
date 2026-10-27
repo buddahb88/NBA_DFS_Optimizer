@@ -3,6 +3,7 @@ import { Badge, Button, DataTable, IconSearch, Input, cn } from '../../component
 import { formatSalary } from './lineupMath';
 import { formatActual } from '../slate/backtest';
 import ResultBadge from '../slate/ResultBadge';
+import ProjectionCell from '../slate/ProjectionCell';
 
 /** Optimizer pool with lock / exclude toggles; showActual (backtest) adds actual DK points and the result. */
 export default function PlayerPoolTable({ players, locked, excluded, onToggleLock, onToggleExclude, onClear, showActual = false }) {
@@ -35,7 +36,7 @@ export default function PlayerPoolTable({ players, locked, excluded, onToggleLoc
       { id: 'pos', header: 'Pos', accessorKey: 'position', size: 70 },
       { id: 'team', header: 'Team', accessorFn: (p) => `${p.team ?? ''} v ${p.opponent ?? ''}`, size: 90 },
       { id: 'salary', header: 'Salary', accessorKey: 'salary', cell: (c) => formatSalary(c.getValue()), meta: { numeric: true } },
-      { id: 'proj', header: 'Proj', accessorFn: (p) => p.projected_points || 0, cell: (c) => c.getValue().toFixed(1), meta: { numeric: true } },
+      { id: 'proj', header: 'Proj', accessorFn: (p) => p.projected_points || 0, cell: (c) => <ProjectionCell player={c.row.original} />, meta: { numeric: true } },
       ...(showActual
         ? [{
             id: 'actual',

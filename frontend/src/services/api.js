@@ -162,6 +162,10 @@ export const projectionsAPI = {
     api.put(`/projections/${slateId}/overrides/${playerId}`, override, { timeout: 120000 }),
   clearOverride: (slateId, playerId) =>
     api.delete(`/projections/${slateId}/overrides/${playerId}`),
+  // Projection sanity layer: { enabled, source, default, components: { fppm, blowout }, config }
+  getSanity: () => api.get('/projections/sanity'),
+  // { enabled?: boolean | null, components?: { fppm?, blowout? } | null } (null = back to the default)
+  setSanity: (body) => api.put('/projections/sanity', body),
 };
 
 // Late Swap API

@@ -4,6 +4,7 @@ import { Badge, Button, Card, DataTable, EmptyState, Input, Select, Stat, Tabs, 
 import { useSlate } from '../../context/SlateContext';
 import { Headshot } from '../chat/blocks/PlayerCard';
 import SlateModeSelect from '../slate/SlateModeSelect';
+import ProjectionCell from '../slate/ProjectionCell';
 import { ACTUAL_COLUMN, RESULT_COLUMN } from '../slate/backtestColumns';
 import useOpportunityRadar from './useOpportunityRadar';
 import {
@@ -70,8 +71,8 @@ function columnsFor({ isBacktest, weights }) {
     {
       accessorKey: 'projected_points',
       header: 'Proj',
-      meta: { numeric: true, label: 'Posted projection' },
-      cell: ({ getValue }) => (getValue() != null ? Number(getValue()).toFixed(1) : '—'),
+      meta: { numeric: true, label: 'Projection (RotoWire after the sanity layer)' },
+      cell: ({ getValue, row }) => (getValue() != null ? <ProjectionCell player={row.original} /> : '—'),
     },
     {
       accessorKey: 'score',

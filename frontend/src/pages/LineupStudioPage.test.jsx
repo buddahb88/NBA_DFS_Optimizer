@@ -3,7 +3,7 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import { MemoryRouter } from 'react-router-dom'
 import LineupStudioPage from './LineupStudioPage'
 import { useSlate } from '../context/SlateContext'
-import { exportAPI, lineupsAPI, optimizerAPI, playerSettingsAPI, playersAPI, portfolioAPI } from '../services/api'
+import { exportAPI, lineupsAPI, optimizerAPI, playerSettingsAPI, playersAPI, portfolioAPI, projectionsAPI } from '../services/api'
 import { FALLBACK_SITE } from '../features/lineupStudio/lineupMath'
 import { LIMITS, PRESETS, makeResult } from '../features/portfolio/fixtures'
 
@@ -15,6 +15,7 @@ vi.mock('../services/api', () => ({
   lineupsAPI: { create: vi.fn() },
   exportAPI: { lineups: vi.fn() },
   portfolioAPI: { getPresets: vi.fn(), build: vi.fn(), getJob: vi.fn(), cancel: vi.fn() },
+  projectionsAPI: { getSanity: vi.fn(), setSanity: vi.fn() },
 }))
 
 const POS = ['PG', 'SG', 'SF', 'PF', 'C', 'PG/SG', 'SF/PF', 'C']
@@ -60,6 +61,27 @@ beforeEach(() => {
 })
 
 describe('LineupStudioPage', () => {
+  it('projection sanity toggle: switching it reloads the pool; adjusted projections are marked with RotoWire vs adjusted', async () => {
+    const sanity = { enabled: true, source: 'default', default: true, components: { fppm: false, blowout: true } }
+    projectionsAPI.getSanity.mockResolvedValue({ data: sanity })
+    projectionsAPI.setSanity.mockResolvedValue({ data: { ...sanity, enabled: false, source: 'runtime' } })
+    const adjusted = { ...PLAYERS[0], projected_points: 37.5, projection_raw: 40, projection_adjustment: -2.5, projection_sanity: true,
+      projection_reasons: ['blowout +16.0: -1.4 min, -2.5 pts'] }
+    playersAPI.getBySlateId.mockResolvedValue({ data: [adjusted, ...PLAYERS.slice(1)] })
+
+    renderStudio()
+    const toggle = await screen.findByRole('switch', { name: /Projection sanity adjustments/ })
+    expect(toggle).toHaveAttribute('aria-checked', 'true')
+    fireEvent.click(await screen.findByRole('tab', { name: /Player pool/ }))
+    expect(await screen.findByLabelText(/RotoWire 40.0 -> adjusted 37.5 \(-2.5\): blowout/)).toBeInTheDocument()
+
+    const loads = playersAPI.getBySlateId.mock.calls.length
+    fireEvent.click(toggle)
+    await waitFor(() => expect(projectionsAPI.setSanity).toHaveBeenCalledWith({ enabled: false }))
+    await waitFor(() => expect(playersAPI.getBySlateId.mock.calls.length).toBe(loads + 1))
+    expect(toggle).toHaveAttribute('aria-checked', 'false')
+  })
+
   it('shows an empty state when no slate is selected', () => {
     renderStudio(null)
     expect(screen.getByText('No slate selected', { selector: 'h4' })).toBeInTheDocument()

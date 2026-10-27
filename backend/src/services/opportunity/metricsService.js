@@ -191,6 +191,13 @@ function buildRows(source, players, history) {
       salary: p.salary,
       projected_points: p.projected_points,
       projected_minutes: p.projected_minutes ?? null,
+      // Projection sanity layer (slateSource): the posted value and why it moved
+      ...(p.projection_sanity ? {
+        projection_raw: p.projection_raw,
+        projection_adjustment: p.projection_adjustment,
+        projection_reasons: p.projection_reasons,
+        projection_sanity: true
+      } : {}),
       rostership: p.rostership ?? null,
       floor: p.floor ?? null,
       ceiling: p.ceiling ?? null,

@@ -147,6 +147,17 @@ describe('loadSlatePlayers with the sanity layer', () => {
     assert.deepEqual(r.projection_reasons, []);
   });
 
+  test('Opportunity Radar rows carry the adjusted projection with the RotoWire value and reasons', async () => {
+    const { getOpportunityMetrics, clearOpportunityCache } = await import('../src/services/opportunity/metricsService.js');
+    clearOpportunityCache();
+    const { players } = await getOpportunityMetrics({ slateDate: SLATE_DATE, site: 'draftkings', now: NOW });
+    const big = players.find(p => p.name === 'Steady Big');
+    assert.ok(big.projected_points < 34);
+    assert.equal(big.projection_raw, 34);
+    assert.match(big.projection_reasons[0], /^blowout \+16\.0/);
+    assert.ok(big.projection_adjustment < 0);
+  });
+
   test('never writes the snapshot rows', async () => {
     setting.setProjectionSanityComponents({ fppm: true });
     await slateSource.loadSlatePlayers(await source(), { sanity: true });
