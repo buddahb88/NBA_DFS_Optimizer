@@ -18,7 +18,8 @@
  * Aggregates (overall, by salary tier, position and date) are per site, since
  * salary scales differ; tiers come from SALARY_TIERS_BY_SITE. When no slateId
  * is given, a player on several slates of the same site and date is scored
- * once, from the most recent snapshot.
+ * once: from the date's main slate (slate_catalog), else a live capture
+ * over a RotoWire backfill, else the most recent snapshot.
  */
 
 import db from '../config/database.js';
@@ -177,12 +178,15 @@ async function loadJoinedRows({ from, to, site, slateId }) {
     SELECT s.id AS snapshot_id, s.slate_id, s.site, s.game_date, s.player_key, s.player_name,
            s.team, s.opponent, s.position, s.salary, s.projected_points, s.projected_minutes,
            s.floor, s.ceiling, s.rostership, s.injury_status, s.captured_at,
+           CASE WHEN c.is_main = 1 THEN 1 ELSE 0 END AS is_main_slate,
+           CASE WHEN s.capture_source IS NULL THEN 1 ELSE 0 END AS is_live_capture,
            CASE WHEN h.id IS NULL THEN 0 ELSE 1 END AS has_box_row,
            h.minutes AS actual_minutes, h.dk_fantasy_points, h.fd_fantasy_points, h.yahoo_fantasy_points,
            g.status AS box_status, g.reason AS box_reason
     FROM slate_player_snapshots s
     LEFT JOIN historical_games h ON h.player_key = s.player_key AND h.game_date = s.game_date
     LEFT JOIN game_player_status g ON g.player_key = s.player_key AND g.game_date = s.game_date
+    LEFT JOIN slate_catalog c ON c.site = s.site AND c.slate_id = s.slate_id
     WHERE ${where}
   `, ...params);
 }
@@ -215,16 +219,19 @@ export async function getPlayerResults(options = {}) {
     if (!prev || (toNum(r.actual_minutes) ?? -1) > (toNum(prev.actual_minutes) ?? -1)) bySnapshot.set(r.snapshot_id, r);
   }
 
-  // Same player on several slates of one site/date: latest snapshot wins
+  // Same player on several slates of one site/date: main slate, then live capture, then latest snapshot
+  const preferred = (r, prev) => (Number(r.is_main_slate) - Number(prev.is_main_slate))
+    || (Number(r.is_live_capture) - Number(prev.is_live_capture))
+    || (toTime(r.captured_at) - toTime(prev.captured_at));
   let snapshots = [...bySnapshot.values()];
   if (!slateId) {
-    const latest = new Map();
+    const best = new Map();
     for (const r of snapshots) {
       const key = `${r.player_key}|${toDateStr(r.game_date)}`;
-      const prev = latest.get(key);
-      if (!prev || toTime(r.captured_at) > toTime(prev.captured_at)) latest.set(key, r);
+      const prev = best.get(key);
+      if (!prev || preferred(r, prev) > 0) best.set(key, r);
     }
-    snapshots = [...latest.values()];
+    snapshots = [...best.values()];
   }
 
   const dates = snapshots.map(r => toDateStr(r.game_date)).sort();

@@ -56,6 +56,10 @@ before(async () => {
   source.close();
   if (LIVE) (await import('dotenv')).config({ path: path.join(__dirname, '../.env') });
   db = (await import('../src/config/database.js')).default;
+  // The copy may predate the code's snapshot schema (startup runs these too)
+  const { migrateSlatePlayerSnapshots, migrateSlateCatalog } = await import('../src/config/snapshotMigrations.js');
+  await migrateSlatePlayerSnapshots(db);
+  await migrateSlateCatalog(db);
   service = (await import('../src/services/agenticChatService.js')).default;
 });
 
@@ -248,14 +252,21 @@ const CASES = [
           AVG(CASE WHEN h.minutes > 0 THEN ABS(s.projected_points - h.dk_fantasy_points) END) AS mae,
           AVG(CASE WHEN h.minutes > 0 THEN s.projected_points - h.dk_fantasy_points END) AS bias,
           AVG(CASE WHEN h.minutes > 0 THEN (CASE WHEN h.dk_fantasy_points >= 5 * s.salary / 1000.0 THEN 100.0 ELSE 0 END) END) AS hit5
-        FROM slate_player_snapshots s LEFT JOIN historical_games h ON h.player_key = s.player_key AND h.game_date = s.game_date
-        WHERE s.game_date = '2026-10-21' AND s.site = 'draftkings'`);
+        FROM (
+          -- one row per player: the main slate's, else a live capture's, else the latest
+          SELECT x.*, ROW_NUMBER() OVER (PARTITION BY x.player_key ORDER BY COALESCE(c.is_main, 0) DESC,
+            CASE WHEN x.capture_source IS NULL THEN 1 ELSE 0 END DESC, x.captured_at DESC) AS pick
+          FROM slate_player_snapshots x LEFT JOIN slate_catalog c ON c.site = x.site AND c.slate_id = x.slate_id
+          WHERE x.game_date = '2026-10-21' AND x.site = 'draftkings'
+        ) s LEFT JOIN historical_games h ON h.player_key = s.player_key AND h.game_date = s.game_date
+        WHERE s.pick = 1`);
       assert.equal(out.overall.players, sql.players);
       assert.equal(out.overall.played, sql.played);
       assert.equal(out.overall.projection.mae, round3(sql.mae));
       assert.equal(out.overall.projection.bias, round3(sql.bias));
       assert.equal(out.overall.hitRates['5x'], round1(sql.hit5));
-      return { numbers: [round2(out.overall.projection.mae)], names: [] };
+      // as the tool reports it (3 decimals), not re-rounded
+      return { numbers: [out.overall.projection.mae], names: [] };
     },
   },
 ];

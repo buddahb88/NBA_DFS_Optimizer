@@ -181,6 +181,23 @@ test('runProjectionBacktest scores snapshots after the live slate is gone, by pl
   assert.deepEqual(fd.bySalaryTier.map(t => t.group), ['9.6K+']); // $10,500 on FanDuel
 });
 
+test('runProjectionBacktest: a player on several slates of a date scores from the main slate, not a later RotoWire backfill', async () => {
+  await insertSnapshot('main', 'draftkings', '2025-10-28', 'Anthony Edwards', 'MIN', 'SG', 9000, 45, 35, 55);
+  await insertSnapshot('late', 'draftkings', '2025-10-28', 'Anthony Edwards', 'MIN', 'SG', 9000, 49, 39, 59);
+  await db.run(`UPDATE slate_player_snapshots SET captured_at = '2025-10-28T20:00:00Z' WHERE slate_id = 'main'`);
+  await db.run(`UPDATE slate_player_snapshots SET captured_at = '2025-10-31T12:00:00Z', capture_source = 'rotowire_backfill' WHERE slate_id = 'late'`);
+  await db.run(`INSERT INTO slate_catalog (site, slate_id, game_date, is_main) VALUES ('draftkings', 'main', '2025-10-28', 1)`);
+  await db.run(
+    `INSERT INTO historical_games (player_name, player_key, team, opponent, game_date, dk_fantasy_points, minutes)
+     VALUES ('Anthony Edwards', 'anthony edwards', 'MIN', 'BOS', '2025-10-28', 40, 36)`
+  );
+
+  const report = await svc.runProjectionBacktest({ from: '2025-10-28', to: '2025-10-28', includeFactors: false, includeSamples: true });
+  assert.equal(report.sample.playerGames, 1);
+  assert.equal(report.samples[0].slateId, 'main');
+  assert.equal(report.overall.mae, 5);
+});
+
 async function insertSnapshot(slateId, site, gameDate, name, team, position, salary, proj, floor, ceiling) {
   const { playerKey } = await import('../src/utils/playerKey.js');
   await db.run(

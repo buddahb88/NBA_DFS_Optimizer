@@ -29,6 +29,14 @@ describe('backtest helpers', () => {
     ])
   })
 
+  it('selector options: one per night, its main slate (listed first by the API)', () => {
+    const early = { ...BT, slateId: '29808', players: 102, isMain: false, name: 'Classic · 3 games · 7:30 PM ET' }
+    expect(backtestOptions([{ ...BT, isMain: true, name: 'Main · 11 games · 7:00 PM ET' }, early])).toEqual([
+      { value: '', label: 'Live' },
+      { value: '2026-10-21', label: 'Backtest: 2026-10-21 (242 players)' },
+    ])
+  })
+
   it('request params carry slateDate and ranges only for a backtest', () => {
     expect(slateRequestParams(null, 'model')).toEqual({})
     expect(slateRequestParams(BT, 'original')).toEqual({ slateDate: '2026-10-21', ranges: 'original' })

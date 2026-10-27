@@ -14,11 +14,16 @@ export const backtestLabel = (backtest) => (backtest ? `Backtest ${backtest.slat
 export const findBacktest = (backtests, slateDate) =>
   (slateDate && backtests?.find((b) => b.slateDate === slateDate)) || null
 
-/** Select options: Live, then each saved night newest first. */
+/**
+ * Select options: Live, then each saved night newest first. A night with
+ * several saved slates is listed once, as its first (main) slate: the API
+ * lists it first and resolves a bare slateDate to it.
+ */
 export function backtestOptions(backtests = []) {
+  const nights = backtests.filter((b, i) => backtests.findIndex((o) => o.slateDate === b.slateDate) === i)
   return [
     { value: '', label: 'Live' },
-    ...backtests.map((b) => ({ value: b.slateDate, label: `Backtest: ${b.slateDate} (${b.players} players)` })),
+    ...nights.map((b) => ({ value: b.slateDate, label: `Backtest: ${b.slateDate} (${b.players} players)` })),
   ]
 }
 

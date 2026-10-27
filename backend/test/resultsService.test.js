@@ -113,6 +113,28 @@ describe('getPlayerResults', () => {
     assert.deepEqual(jjj.hits, { '3x': true, '5x': false, '6x': false });
   });
 
+  test('several slates on a date: the main slate wins, then a live capture over a later RotoWire backfill', async () => {
+    const insert = (slate, name, proj, captured, source) => db.run(
+      `INSERT INTO slate_player_snapshots (snapshot_date, game_date, slate_id, site, player_key, player_name, team, opponent,
+         position, salary, projected_points, captured_at, capture_source)
+       VALUES ('2025-12-01', '2025-12-01', ?, 'draftkings', ?, ?, 'LAL', 'MEM', 'PG', 6000, ?, ?, ?)`,
+      slate, name.toLowerCase(), name, proj, captured, source);
+    await insert('main', 'Main Guy', 30, '2025-12-01T15:00:00Z', null);
+    await insert('late', 'Main Guy', 33, '2025-12-02T15:00:00Z', 'rotowire_backfill');
+    await insert('early', 'Live Guy', 20, '2025-12-01T15:00:00Z', null);
+    await insert('late', 'Live Guy', 22, '2025-12-02T15:00:00Z', 'rotowire_backfill');
+    await db.run(`INSERT INTO slate_catalog (site, slate_id, game_date, is_main) VALUES ('draftkings', 'main', '2025-12-01', 1),
+      ('draftkings', 'late', '2025-12-01', 0)`);
+    try {
+      const rows = byName(await results.getPlayerResults({ from: '2025-12-01', to: '2025-12-01' }));
+      assert.equal(rows['Main Guy'].slateId, 'main');
+      assert.equal(rows['Live Guy'].slateId, 'early');
+    } finally {
+      await db.run(`DELETE FROM slate_player_snapshots WHERE game_date = '2025-12-01'`);
+      await db.run(`DELETE FROM slate_catalog`);
+    }
+  });
+
   test('marks players missing from the box score as DNP / INACTIVE', async () => {
     const rows = byName(await results.getPlayerResults({ from: '2025-11-02', to: '2025-11-02' }));
     assert.equal(rows['Coach Guy'].status, 'DNP');

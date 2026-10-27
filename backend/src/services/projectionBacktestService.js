@@ -493,14 +493,17 @@ export async function runProjectionBacktest(options = {}) {
   if (to) { where += ' AND s.game_date <= ?'; params.push(to); }
   if (slateId) { where += ' AND s.slate_id = ?'; params.push(String(slateId)); }
 
-  // Latest capture first: a player on several slates of one date scores once
+  // A player on several slates of one date scores once: the main slate's row
+  // (slate_catalog), else a live capture over a RotoWire backfill, else the latest
   const snapshotRows = await db.all(`
     SELECT s.slate_id, s.site, s.game_date, s.player_key, s.player_name AS name, s.team, s.opponent,
            s.position, s.salary, s.projected_points, s.floor, s.ceiling, s.rostership,
            s.vegas_implied_total, s.vegas_spread, s.over_under AS vegas_over_under
     FROM slate_player_snapshots s
+    LEFT JOIN slate_catalog c ON c.site = s.site AND c.slate_id = s.slate_id
     WHERE ${where}
-    ORDER BY s.captured_at DESC
+    ORDER BY CASE WHEN c.is_main = 1 THEN 1 ELSE 0 END DESC,
+      CASE WHEN s.capture_source IS NULL THEN 1 ELSE 0 END DESC, s.captured_at DESC
   `, ...params);
 
   // Fields snapshots don't keep, from the live row while the slate is loaded
