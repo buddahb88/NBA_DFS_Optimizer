@@ -396,6 +396,25 @@ describe('getOpportunityMetrics: rate projection (backtest date)', () => {
     assert.equal(rows['Wing Man'].actual_points, 42);
   });
 
+  test('teammate-out fields (pre-lock outs): who is out, the split sample and the usage absorbed', async () => {
+    const rows = await load();
+    const wing = rows['Wing Man'];
+    assert.deepEqual(wing.teammate_out_names, ['Star Guard']);
+    assert.equal(wing.teammate_sample, 'confirmed');
+    assert.equal(wing.teammate_games_without, 6);
+    // 12 -> 18 FGA and 2 -> 3 TOV out of 115 team plays
+    close(wing.teammate_play_share_delta, (21 - 14) / 115, 0.002);
+    assert.ok(wing.teammate_absorbed_pct > 0);
+    close(wing.teammate_min_delta, 6, 0.05);
+    assert.ok(wing.team_vacated_usage > 0);
+    assert.deepEqual(wing.team_out_names, ['Star Guard']);
+    // Alpha's absence is only known after lock
+    assert.equal(rows['Charlie Nyk'].teammate_sample, null);
+    assert.deepEqual(rows['Charlie Nyk'].team_out_names, []);
+    // Slate ranges ride along for the radar
+    assert.ok('floor' in wing && 'ceiling' in wing);
+  });
+
   test('null rate with a reason when minutes or games are missing', async () => {
     const rows = await load();
     assert.equal(rows['No Minutes'].rate_projection, null);

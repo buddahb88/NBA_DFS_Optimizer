@@ -139,6 +139,9 @@ export async function computeHistory(source, players, { now = new Date(), all = 
     computeTeammateOpportunity(source, all, { now, prelockOnly: true })
   ]);
   const adjusted = new Map(teammates.players.map(p => [p.player_key, p.adjusted]));
+  const vacated = new Map(teammates.teams.map(t => [t.team, {
+    team_vacated_usage: t.vacated_usage, team_out_names: t.out.map(o => o.name)
+  }]));
 
   const teams = new Map(teamList.map(t => [t, computeTeamContext(schedules.get(t) ?? [], { season, slateDate })]));
   const byKey = new Map(players.map(p => {
@@ -150,7 +153,22 @@ export async function computeHistory(source, players, { now = new Date(), all = 
       adjusted: adjusted.get(keyOf(p)) ?? null
     }];
   }));
-  return { slateDate, season, signature: signature(players), leaguePace, players: byKey, teams };
+  return { slateDate, season, signature: signature(players), leaguePace, players: byKey, teams, vacated };
+}
+
+/** O2's combined split for the row: who is out, the sample, and what the player absorbs. */
+function teammateFields(adjusted) {
+  return {
+    teammate_out_names: adjusted?.out_names ?? [],
+    teammate_sample: adjusted?.sample ?? null,
+    teammate_games_without: adjusted?.games_without ?? null,
+    teammate_min_delta: adjusted?.min_delta ?? null,
+    teammate_usg_delta: adjusted?.usg_delta ?? null,
+    teammate_play_share_delta: adjusted && adjusted.play_share_without !== null && adjusted.play_share_with !== null
+      ? Number((adjusted.play_share_without - adjusted.play_share_with).toFixed(3)) + 0
+      : null,
+    teammate_absorbed_pct: adjusted?.absorbed_pct ?? null
+  };
 }
 
 /** Whether cached history still covers these slate players (same players, salaries and statuses). */
@@ -169,10 +187,13 @@ function buildRows(source, players, history) {
       team: p.team,
       opponent: p.opponent,
       position: p.position,
+      headshot: p.headshot ?? null,
       salary: p.salary,
       projected_points: p.projected_points,
       projected_minutes: p.projected_minutes ?? null,
       rostership: p.rostership ?? null,
+      floor: p.floor ?? null,
+      ceiling: p.ceiling ?? null,
       injury_status: p.injury_status ?? null,
       ...metrics,
       days_since_last_game: metrics.last_game_date ? daysBetween(metrics.last_game_date, history.slateDate) : null,
@@ -191,6 +212,8 @@ function buildRows(source, players, history) {
         adjusted
       }),
       ...salaryLag,
+      ...teammateFields(adjusted),
+      ...(history.vacated?.get(teamOf(p)) ?? { team_vacated_usage: 0, team_out_names: [] }),
       ...(source.isBacktest
         ? { actual_points: p.actualPoints ?? null, actual_minutes: p.actualMinutes ?? null, result_status: p.resultStatus ?? null }
         : {})

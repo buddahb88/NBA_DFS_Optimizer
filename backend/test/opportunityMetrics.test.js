@@ -87,6 +87,19 @@ describe('computePlayerMetrics', () => {
     assert.equal(settled.starter_change, null);
   });
 
+  test('starter streak: consecutive starts and the date the streak began after a bench game', () => {
+    assert.equal(m.starter_streak, 3);
+    assert.equal(m.starter_since, RISER[2].game_date);
+    // Started every game in the sample: a streak, but no "since"
+    const always = computePlayerMetrics(log(Array(4).fill(STARTER)), { season: '2026-27' });
+    assert.equal(always.starter_streak, 4);
+    assert.equal(always.starter_since, null);
+    const benched = computePlayerMetrics(log([STARTER, BENCH]), { season: '2026-27' });
+    assert.equal(benched.starter_streak, 0);
+    assert.equal(benched.starter_since, null);
+    assert.equal(computePlayerMetrics([], { season: '2026-27' }).starter_streak, null);
+  });
+
   test('usage L5 vs season uses the profile formula with team totals', () => {
     close(m.usg_l5, usage(l5), 0.0005);
     close(m.usg_season, usage(RISER), 0.0005);

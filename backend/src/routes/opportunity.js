@@ -8,6 +8,7 @@
 import express from 'express';
 import { getOpportunityMetrics } from '../services/opportunity/metricsService.js';
 import { getTeammateOpportunity } from '../services/opportunity/teammateService.js';
+import { getOpportunityRadar } from '../services/opportunity/radarService.js';
 import { sourceFields } from '../services/slateSource.js';
 
 const router = express.Router();
@@ -21,7 +22,10 @@ const truthy = (v) => v === '1' || v === 'true';
  * environment, and sample sizes (games_l3 / l5 / l10 / season,
  * season_fallback); the rate projection (projected minutes x blended FPPM x
  * environment x pre-lock teammate-out bump: rate_projection, rate_gap,
- * rate_gap_pct, rate_value, rate_* components, rate_reason when null); and
+ * rate_gap_pct, rate_value, rate_* components, rate_reason when null); O2's
+ * pre-lock teammate-out split (teammate_out_names / sample / games_without /
+ * min_delta / usg_delta / play_share_delta / absorbed_pct, team_vacated_usage,
+ * team_out_names); slate floor / ceiling; and
  * salary lag (salary_change_l1 / salary_change over the last 3 earlier
  * slates, fp_l5 vs fp_prior_l5, salary_lag, salary_lag_reason when null).
  * Only games and slates before the slate date count; backtest rows add
@@ -66,6 +70,32 @@ router.get('/teammates', async (req, res) => {
   } catch (error) {
     if (error.status) return res.status(error.status).json({ error: error.message });
     console.error('Teammate opportunity error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * GET /api/opportunity/radar
+ * The metrics rows scored 0-100 (score for the mode, cash_score, gpp_score,
+ * components, coverage) with a reason line, best score first. Backtest rows
+ * add actualPoints / actualMinutes / resultStatus, and `validation` reports
+ * per mode whether the top decile beat 5x salary more often than the slate.
+ *
+ * Query params:
+ *   slateId, slateDate (YYYY-MM-DD; a past date is a backtest), site
+ *   mode     cash (default) | gpp
+ *   refresh  1 | true: recompute the metrics
+ */
+router.get('/radar', async (req, res) => {
+  try {
+    const { slateId, slateDate, site, mode, refresh } = req.query;
+    const { source, players, ...rest } = await getOpportunityRadar({
+      slateId: slateId || null, slateDate: slateDate || null, site: site || null, mode: mode || 'cash', refresh: truthy(refresh)
+    });
+    res.json({ success: true, ...sourceFields(source), ...rest, count: players.length, players });
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message });
+    console.error('Opportunity radar error:', error);
     res.status(500).json({ error: error.message });
   }
 });

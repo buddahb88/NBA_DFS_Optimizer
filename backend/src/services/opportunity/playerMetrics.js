@@ -18,6 +18,8 @@
  *   at least TS_REGRESSION_GAP below it ('bounce_back') or above it ('fade').
  * - starter_change: the starter flag flipped between two games within the
  *   last 3; 'into' or 'out' of the lineup by the latest flip.
+ * - starter_streak: consecutive starts up to the last game; starter_since:
+ *   the streak's first game when a bench game precedes it in the sample.
  * - Value hit rates: share of L10 games scoring >= N x salary / 1000.
  * - min_sd_l10 is the population standard deviation of L10 minutes.
  * Deltas are recent minus baseline. Everything is null without the games.
@@ -85,6 +87,14 @@ function starterChange(recent) {
   return null;
 }
 
+function starterStreak(recent) {
+  if (!recent.length || recent[0].is_starter === null || recent[0].is_starter === undefined) return { streak: null, since: null };
+  let i = 0;
+  while (i < recent.length && n(recent[i].is_starter) === 1) i++;
+  const benchBefore = i > 0 && i < recent.length && recent[i].is_starter !== null && recent[i].is_starter !== undefined;
+  return { streak: i, since: benchBefore ? recent[i - 1].game_date : null };
+}
+
 function shootingFlag(l5, tsGap, tsaL5, tsaSeason) {
   if (l5.length < MIN_CURRENT_GAMES || tsGap === null || !(tsaL5 > 0) || !(tsaSeason > 0)) return null;
   if (Math.abs(tsaL5 / tsaSeason - 1) > VOLUME_STABLE_PCT) return null;
@@ -135,6 +145,7 @@ export function computePlayerMetrics(games, { season, salary = null } = {}) {
   }
 
   const last = recent[0];
+  const streak = starterStreak(recent);
   return {
     season_fallback: fallback,
     baseline_season: baselineSeason,
@@ -153,6 +164,8 @@ export function computePlayerMetrics(games, { season, salary = null } = {}) {
     started_last_game: last?.is_starter === null || last?.is_starter === undefined ? null : n(last.is_starter) === 1,
     starts_l5: l5.length ? l5.filter(g => n(g.is_starter) === 1).length : null,
     starter_change: starterChange(recent),
+    starter_streak: streak.streak,
+    starter_since: streak.since,
 
     usg_l5: r3(recentRates.usg),
     usg_season: r3(seasonRates.usg),
