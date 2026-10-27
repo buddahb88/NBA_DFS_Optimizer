@@ -16,25 +16,31 @@
  *    with underFraction (0 = off). Needs minSampleMinutes of L10 minutes and
  *    minMinutes projected.
  *
- * 2. Blowout minutes trim. A player projected for minMinutes+ on a team with
- *    |spread| >= threshold loses
- *      minutesPerPoint[favorite | underdog] x (|spread| - pivot)
- *    minutes (capped at maxMinutes); points follow at his (shrunk) FPPM.
- *    Spread is the team's own: negative = favorite.
+ * 2. Blowout trim. A player projected for minMinutes+ on a team with
+ *    |spread| >= threshold loses, per point of |spread| beyond the pivot,
+ *      minutesPerPoint[favorite | underdog] minutes   (capped at maxMinutes)
+ *      pointsPctPerPoint[favorite | underdog] of his projection (capped at maxPointsPct)
+ *    Points are fitted separately from minutes because blowouts move FPPM
+ *    too: favorites' starters sit late but score faster while on the floor
+ *    (points held), underdogs' lose minutes and rate. Spread is the team's
+ *    own: negative = favorite.
  *
- * SANITY_CONFIG values come from scripts/projection-sanity-report.js (see the
- * numbers there): blowout coefficients are the expected minutes lost by a
- * 28+ minute player vs a typical game, from final margins in 2024-25 and
- * 2025-26 integrated over a normal margin around the spread; the FPPM
- * threshold / fraction were checked on the saved main slates and on the
- * 2025-26 rate replay.
+ * SANITY_CONFIG values come from scripts/projection-sanity-report.js:
+ * blowout coefficients are the expected minutes / DK points lost by a 28+
+ * minute player vs a typical game (|spread| 6), from final margins in
+ * 2024-25 and 2025-26 (14.7k games) integrated over a normal margin (sd 12)
+ * around the spread: favorites 0.15 min and ~0 points per point, underdogs
+ * 0.14 min and 0.8% of points per point. The FPPM threshold / fraction were
+ * checked on the saved main slates (Oct 20-26 2026) and on the 2025-26
+ * replay (18k games: an L3-driven FPPM 30%+ above the own rate kept ~10% of
+ * the gap, so most of it is noise).
  */
 
 export const SANITY_CONFIG = Object.freeze({
   fppm: Object.freeze({
     enabled: true,
     overThreshold: 0.3,
-    overFraction: 0.5,
+    overFraction: 0.75,
     underThreshold: 0.3,
     underFraction: 0,
     ramp: 0.1,
@@ -46,8 +52,10 @@ export const SANITY_CONFIG = Object.freeze({
     threshold: 10,
     pivot: 6,
     minMinutes: 28,
-    minutesPerPoint: Object.freeze({ favorite: 0.15, underdog: 0.15 }),
-    maxMinutes: 3
+    minutesPerPoint: Object.freeze({ favorite: 0.15, underdog: 0.14 }),
+    pointsPctPerPoint: Object.freeze({ favorite: 0, underdog: 0.008 }),
+    maxMinutes: 3,
+    maxPointsPct: 0.1
   })
 });
 
@@ -80,7 +88,11 @@ export function fppmShrink({ points, minutes, ownFppm, sampleMinutes }, config =
   return { delta, reason: `FPPM ${posted.toFixed(2)} vs own ${own.toFixed(2)}: ${signed(delta)}` };
 }
 
-/** Blowout minutes trim. Returns { minutesDelta, pointsDelta, reason }. */
+/**
+ * Blowout trim. Returns { minutesDelta, pointsDelta, reason }: minutes and
+ * points each lose their side's per-point share beyond the pivot (points as
+ * a fraction of the projection), capped.
+ */
 export function blowoutTrim({ points, minutes, spread }, config = SANITY_CONFIG.blowout) {
   const zero = { minutesDelta: 0, pointsDelta: 0, reason: null };
   const pts = num(points);
@@ -89,13 +101,16 @@ export function blowoutTrim({ points, minutes, spread }, config = SANITY_CONFIG.
   if (config.enabled === false || s === null || !(pts > 0) || !(min >= config.minMinutes)) return zero;
   if (Math.abs(s) < config.threshold) return zero;
 
-  const perPoint = s < 0 ? config.minutesPerPoint.favorite : config.minutesPerPoint.underdog;
-  const trim = clamp(perPoint * (Math.abs(s) - config.pivot), 0, config.maxMinutes);
-  if (!(trim > 0)) return zero;
+  const side = s < 0 ? 'favorite' : 'underdog';
+  const excess = Math.abs(s) - config.pivot;
+  const trim = clamp((config.minutesPerPoint[side] ?? 0) * excess, 0, config.maxMinutes);
+  const pct = clamp((config.pointsPctPerPoint[side] ?? 0) * excess, 0, config.maxPointsPct);
+  if (!(trim > 0) && !(pct > 0)) return zero;
+  const pointsDelta = -pct * pts;
   return {
     minutesDelta: -trim,
-    pointsDelta: -trim * pts / min,
-    reason: `blowout ${signed(s)}: -${trim.toFixed(1)} min`
+    pointsDelta,
+    reason: `blowout ${signed(s)}: -${trim.toFixed(1)} min, ${pct > 0 ? `${signed(pointsDelta)} pts` : 'points held'}`
   };
 }
 

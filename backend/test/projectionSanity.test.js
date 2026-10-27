@@ -10,7 +10,11 @@ const close = (actual, expected, eps = 0.01) =>
   assert.ok(Math.abs(actual - expected) <= eps, `expected ${expected}, got ${actual}`);
 
 const fppmConfig = { overThreshold: 0.3, overFraction: 0.5, underThreshold: 0.3, underFraction: 0, ramp: 0.1, minSampleMinutes: 150, minMinutes: 10 };
-const blowoutConfig = { threshold: 10, pivot: 6, minMinutes: 28, minutesPerPoint: { favorite: 0.1, underdog: 0.2 }, maxMinutes: 3 };
+const blowoutConfig = {
+  threshold: 10, pivot: 6, minMinutes: 28, maxMinutes: 3, maxPointsPct: 0.1,
+  minutesPerPoint: { favorite: 0.1, underdog: 0.2 },
+  pointsPctPerPoint: { favorite: 0.002, underdog: 0.008 }
+};
 
 describe('fppmShrink', () => {
   test('posted FPPM far above own rate: shrinks a fraction of the gap to minutes x own rate', () => {
@@ -44,23 +48,29 @@ describe('fppmShrink', () => {
 });
 
 describe('blowoutTrim', () => {
-  test('a starter on a big underdog loses minutes beyond the pivot; points follow at his FPPM', () => {
+  test('a starter on a big underdog: minutes and points each lose their fitted share beyond the pivot', () => {
     const r = blowoutTrim({ points: 35.44, minutes: 33, spread: 16.5 }, blowoutConfig);
     close(r.minutesDelta, -0.2 * 10.5);
-    close(r.pointsDelta, -0.2 * 10.5 * 35.44 / 33);
-    assert.equal(r.reason, 'blowout +16.5: -2.1 min');
+    close(r.pointsDelta, -0.008 * 10.5 * 35.44);
+    assert.equal(r.reason, 'blowout +16.5: -2.1 min, -3.0 pts');
   });
 
-  test('favorites use their own coefficient (negative spread)', () => {
+  test('favorites use their own coefficients (negative spread); points can stay put while minutes drop', () => {
     const r = blowoutTrim({ points: 40, minutes: 34, spread: -12 }, blowoutConfig);
     close(r.minutesDelta, -0.1 * 6);
-    assert.equal(r.reason, 'blowout -12.0: -0.6 min');
+    close(r.pointsDelta, -0.002 * 6 * 40);
+    assert.equal(r.reason, 'blowout -12.0: -0.6 min, -0.5 pts');
+    const held = blowoutTrim({ points: 40, minutes: 34, spread: -12 },
+      { ...blowoutConfig, pointsPctPerPoint: { favorite: 0, underdog: 0.008 }, minutesPerPoint: { favorite: 0, underdog: 0.2 } });
+    assert.deepEqual([held.minutesDelta, held.pointsDelta, held.reason], [0, 0, null]);
   });
 
   test('only from the threshold, only high-minute players, capped', () => {
     assert.equal(blowoutTrim({ points: 30, minutes: 34, spread: 9.5 }, blowoutConfig).minutesDelta, 0);
     assert.equal(blowoutTrim({ points: 12, minutes: 20, spread: 18 }, blowoutConfig).minutesDelta, 0);
-    close(blowoutTrim({ points: 40, minutes: 36, spread: 25 }, blowoutConfig).minutesDelta, -3);
+    const capped = blowoutTrim({ points: 40, minutes: 36, spread: 25 }, blowoutConfig);
+    close(capped.minutesDelta, -3);
+    close(capped.pointsDelta, -4);
     assert.equal(blowoutTrim({ points: 40, minutes: 36, spread: null }, blowoutConfig).minutesDelta, 0);
   });
 });
@@ -68,10 +78,10 @@ describe('blowoutTrim', () => {
 describe('applySanity', () => {
   const config = { fppm: fppmConfig, blowout: blowoutConfig };
 
-  test('FPPM shrink then blowout trim at the shrunk FPPM; keeps raw values and reasons', () => {
+  test('FPPM shrink then blowout trim on the shrunk projection; keeps raw values and reasons', () => {
     const r = applySanity({ projectedPoints: 35.44, projectedMinutes: 33, spread: 16.5, ownFppm: 0.77, sampleMinutes: 300 }, config);
     const shrunk = 35.44 - 0.5 * ((35.44 / 33 / 0.77 - 1.3) / 0.1) * (35.44 - 33 * 0.77);
-    const trimmed = shrunk * (33 - 2.1) / 33;
+    const trimmed = shrunk * (1 - 0.008 * 10.5);
     close(r.projection, trimmed);
     close(r.minutes, 30.9);
     assert.equal(r.raw_projection, 35.44);
@@ -95,6 +105,7 @@ describe('applySanity', () => {
     assert.ok(SANITY_CONFIG.fppm.overThreshold >= 0.2);
     assert.ok(SANITY_CONFIG.fppm.overFraction <= 0.75);
     assert.ok(SANITY_CONFIG.blowout.maxMinutes <= 4);
+    assert.ok(SANITY_CONFIG.blowout.maxPointsPct <= 0.15);
   });
 
   test('zero / missing projection passes through', () => {

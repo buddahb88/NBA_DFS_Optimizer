@@ -21,6 +21,7 @@ import { playerKey, canonicalTeam } from '../../utils/playerKey.js';
 import { environmentFactor, teammateFactor } from '../opportunity/rateProjection.js';
 import { gameEnvironment } from '../opportunity/teamContext.js';
 import { SANITY_CONFIG, applySanity } from './sanityLayer.js';
+import { projectionSanityConfig } from '../../config/projectionSanity.js';
 
 const CACHE_LIMIT = 50;
 const cache = new Map();
@@ -35,7 +36,7 @@ const cacheKey = (source, now) => `${source.slateId}|${source.slateDate ?? easte
  * History for the slate (computeHistory), cached.
  * players: the slate's projected players; all: every slate player (outs).
  */
-async function slateHistory(source, players, { all = players, now = new Date() } = {}) {
+export async function slateHistory(source, players, { all = players, now = new Date() } = {}) {
   const key = cacheKey(source, now);
   const sig = signature(players);
   const hit = cache.get(key);
@@ -51,7 +52,7 @@ async function slateHistory(source, players, { all = players, now = new Date() }
 
 /** A player's own rate FPPM (O3 blend x environment x teammate) and its L10 minutes sample. */
 export function ownRate(player, history) {
-  const entry = history.players.get(keyOf(player));
+  const entry = history?.players.get(keyOf(player));
   if (!entry?.fppm || entry.fppm.fppm === null) return { ownFppm: null, sampleMinutes: 0 };
   const team = history.teams.get(canonicalTeam(player.team)) ?? null;
   const opp = history.teams.get(canonicalTeam(player.opponent)) ?? null;
@@ -73,6 +74,16 @@ export function adjustPlayer(player, history, config = SANITY_CONFIG) {
     ownFppm,
     sampleMinutes
   }, config);
+  const fields = {
+    projection_raw: player.projected_points,
+    projected_minutes_raw: player.projected_minutes,
+    projection_adjustment: round(r.adjustment),
+    projection_own_fppm: ownFppm === null ? null : round(ownFppm, 3),
+    projection_reasons: r.reasons.map(x => x.text),
+    projection_sanity: true
+  };
+  // Unadjusted: every number exactly as posted
+  if (r.reasons.length === 0) return { ...player, ...fields, projection_adjustment: 0 };
   const ratio = r.raw_projection > 0 ? r.projection / r.raw_projection : 1;
   return {
     ...player,
@@ -81,24 +92,21 @@ export function adjustPlayer(player, history, config = SANITY_CONFIG) {
     value: scaled(player.value, ratio),
     floor: scaled(player.floor, ratio),
     ceiling: scaled(player.ceiling, ratio),
-    projection_raw: player.projected_points,
-    projected_minutes_raw: player.projected_minutes,
-    projection_adjustment: round(r.adjustment),
-    projection_own_fppm: ownFppm === null ? null : round(ownFppm, 3),
-    projection_reasons: r.reasons.map(x => x.text),
-    projection_sanity: true
+    ...fields
   };
 }
 
 /**
  * The layer over `players` (any subset of the slate). projected: the slate's
  * projected players (the cached history's set); all: every slate player.
+ * config: defaults to the setting's components (config/projectionSanity.js);
+ * the game-log history is only loaded when the FPPM shrink is on.
  */
-export async function applyProjectionSanity(source, players, { projected, all, now = new Date(), config = SANITY_CONFIG } = {}) {
+export async function applyProjectionSanity(source, players, { projected, all, now = new Date(), config = projectionSanityConfig() } = {}) {
   if (!source || players.length === 0) return players;
   const pool = (projected ?? players).filter(p => Number(p.projected_points) > 0);
   if (pool.length === 0) return players;
-  const history = await slateHistory(source, pool, { all: all ?? players, now });
+  const history = config.fppm.enabled === false ? null : await slateHistory(source, pool, { all: all ?? players, now });
   return players.map(p => (Number(p.projected_points) > 0 ? adjustPlayer(p, history, config) : p));
 }
 
@@ -107,4 +115,4 @@ export function clearSanityCache() {
   cache.clear();
 }
 
-export default { applyProjectionSanity, adjustPlayer, ownRate, clearSanityCache };
+export default { applyProjectionSanity, adjustPlayer, ownRate, slateHistory, clearSanityCache };

@@ -115,10 +115,13 @@ const CASES = [
       const edges = out.players.map(p => p.adjustedEdge);
       assert.deepEqual(edges, [...edges].sort((a, b) => b - a), 'ranked by adjusted edge');
       for (const p of out.players) {
-        const row = await db.get('SELECT salary, projected_points FROM players WHERE slate_id = ? AND name = ?', out.slateId, p.name);
+        const row = await db.get('SELECT * FROM players WHERE slate_id = ? AND name = ?', out.slateId, p.name);
         assert.ok(row, `${p.name} not on slate ${out.slateId}`);
         assert.equal(p.salary, row.salary, p.name);
-        assert.equal(p.projectedPoints, row.projected_points, p.name);
+        // The projection after the sanity layer's default components (blowout trim)
+        const { adjustPlayer } = await import('../src/services/projections/sanityService.js');
+        const { projectionSanityConfig } = await import('../src/config/projectionSanity.js');
+        assert.equal(p.projectedPoints, adjustPlayer(row, null, projectionSanityConfig()).projected_points, p.name);
         const defense = await db.get(`SELECT fp_over_expectation AS fp,
             (SELECT COUNT(*) FROM team_archetype_defense o WHERE o.season = d.season AND o.site = d.site AND o.group_by = d.group_by
                AND o.group_key = d.group_key AND o.fp_over_expectation > d.fp_over_expectation) + 1 AS rank
@@ -330,7 +333,9 @@ describe.skipIf(!HAS_DB)('value-pick backtest (real DB, deterministic agent)', (
     const opp = d.methods.opportunity_top;
     assert.equal(opp.picks, 5);
     assert.ok(opp.players.every(p => p.salary >= 3500 && p.salary <= 6500));
-    assert.deepEqual(opp.names, ['Ayo Dosunmu', 'RJ Barrett', 'Ty Jerome', 'Jrue Holiday', 'Gui Santos']);
+    // Ranked on the sanity layer's projections: RJ Barrett (TOR -10.5) loses 0.7 projected minutes to the
+    // blowout trim (points held), which drops his radar score below Ty Jerome's
+    assert.deepEqual(opp.names, ['Ayo Dosunmu', 'Ty Jerome', 'RJ Barrett', 'Jrue Holiday', 'Gui Santos']);
     assert.equal(opp.totalDk, 161.75);
     assert.equal(opp.valuePer1k, 5.78);
   });
