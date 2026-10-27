@@ -1,4 +1,28 @@
 import { DATABASE_TYPE } from './database.js';
+import { dropSqliteForeignKeys } from './lineupMigrations.js';
+
+/**
+ * chat_sessions.slate_id foreign key migration (idempotent, runs on every startup)
+ *
+ * slates only holds the live slate (a sync deletes the rest), so a chat in
+ * backtest mode on a past slate (slate_catalog / slate_player_snapshots)
+ * failed its session insert, and every resync nulled old sessions' slate_id.
+ * slate_id stays as plain text. SQLite rebuilds the table without the key;
+ * Azure SQL never created one but drops it if present.
+ */
+export async function migrateChatSessionSlateFk(db) {
+  if (DATABASE_TYPE === 'azuresql') {
+    await db.exec(`
+      DECLARE @fk NVARCHAR(256) = (SELECT TOP 1 name FROM sys.foreign_keys
+        WHERE parent_object_id = OBJECT_ID('chat_sessions') AND referenced_object_id = OBJECT_ID('slates'));
+      IF @fk IS NOT NULL EXEC('ALTER TABLE chat_sessions DROP CONSTRAINT [' + @fk + ']');
+    `);
+    return;
+  }
+  if (!(await dropSqliteForeignKeys(db, { chat_sessions: 'slates' }))) return;
+  await db.exec(`CREATE INDEX IF NOT EXISTS idx_chat_sessions_slate_id ON chat_sessions(slate_id)`);
+  console.log(`✓ Chat sessions no longer reference the live slates table`);
+}
 
 /**
  * chat_messages.ui_blocks migration (idempotent, runs on every startup)

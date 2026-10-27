@@ -12,7 +12,7 @@ import { migrateSyncRuns } from './syncRunMigrations.js';
 import { migratePlayerArchetypes } from './archetypeMigrations.js';
 import { migrateTeamArchetypeDefense } from './archetypeDefenseMigrations.js';
 import { migrateAgentValueBacktests } from './agentEvalMigrations.js';
-import { migrateChatUiBlocks } from './chatMigrations.js';
+import { migrateChatSessionSlateFk, migrateChatUiBlocks } from './chatMigrations.js';
 
 /**
  * Create all database tables
@@ -67,6 +67,8 @@ export const createTables = async (db) => {
   await migrateAgentValueBacktests(db);
   // chat_messages.ui_blocks (typed result blocks streamed with assistant messages)
   await migrateChatUiBlocks(db);
+  // chat_sessions.slate_id is plain text (backtest chats use past slates not in slates)
+  await migrateChatSessionSlateFk(db);
 };
 
 /**
@@ -498,8 +500,7 @@ async function createSqliteTables(db) {
       title TEXT,
       slate_id TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (slate_id) REFERENCES slates(slate_id) ON DELETE SET NULL
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
 

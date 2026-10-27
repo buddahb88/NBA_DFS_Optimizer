@@ -62,8 +62,23 @@ const FK_CLAUSE = (parent) => new RegExp(
 
 /** Rebuild lineups / lineup_players without their slates / players foreign keys. */
 async function dropSqliteCascades(db) {
+  if (!(await dropSqliteForeignKeys(db, STALE_FKS))) return;
+  await db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_lineups_slate_id ON lineups(slate_id);
+    CREATE INDEX IF NOT EXISTS idx_lineup_players_lineup_id ON lineup_players(lineup_id);
+  `);
+  console.log(`✓ Saved lineups no longer cascade-delete on slate resync`);
+}
+
+/**
+ * SQLite: rebuild each table of { table: parent } that has a foreign key to
+ * parent without it, keeping its rows and other foreign keys (children's
+ * foreign keys to the table still point at it by name). Indexes go with the
+ * old table, so the caller recreates them. Returns whether anything was rebuilt.
+ */
+export async function dropSqliteForeignKeys(db, staleFks) {
   const rebuilds = [];
-  for (const [table, parent] of Object.entries(STALE_FKS)) {
+  for (const [table, parent] of Object.entries(staleFks)) {
     const fks = await db.all(`PRAGMA foreign_key_list(${table})`);
     if (!fks.some(fk => fk.table === parent)) continue;
     const [{ sql }] = await db.all(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?`, table);
@@ -78,7 +93,7 @@ async function dropSqliteCascades(db) {
       ALTER TABLE ${table}_rebuild RENAME TO ${table};
     `);
   }
-  if (rebuilds.length === 0) return;
+  if (rebuilds.length === 0) return false;
 
   // foreign_keys can't change inside a transaction, and must be off so the
   // DROP doesn't cascade into the rows being kept
@@ -91,11 +106,7 @@ async function dropSqliteCascades(db) {
   } finally {
     await db.exec(`PRAGMA foreign_keys = ON`);
   }
-  await db.exec(`
-    CREATE INDEX IF NOT EXISTS idx_lineups_slate_id ON lineups(slate_id);
-    CREATE INDEX IF NOT EXISTS idx_lineup_players_lineup_id ON lineup_players(lineup_id);
-  `);
-  console.log(`✓ Saved lineups no longer cascade-delete on slate resync`);
+  return true;
 }
 
 /**
