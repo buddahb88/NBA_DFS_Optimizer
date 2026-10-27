@@ -28,6 +28,8 @@ import { easternDate, rosterPositionsFor } from './slateSnapshotService.js';
 import { getSlateDate, slateDateFields } from './slateFreshness.js';
 import { getPlayerResultsOnDate } from './resultsService.js';
 import { playerKey } from '../utils/playerKey.js';
+import { projectionSanityEnabled } from '../config/projectionSanity.js';
+import { applyProjectionSanity } from './projections/sanityService.js';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -221,16 +223,11 @@ const matchesFilters = (p, filters) =>
   && (!filters.maxSalary || p.salary <= filters.maxSalary)
   && (!filters.team || p.team === filters.team);
 
-/**
- * Slate players for a resolved source, players-table shape, projected
- * players only, best value first (as playerModel.getBySlateId).
- * filters: { position, minSalary, maxSalary, team } (as getBySlateId).
- * includeZero: also players projected 0 (ruled out).
- * ranges: 'model' (default) | 'original' - which floor / ceiling / std_dev /
- * boom / bust a backtest uses (see rangeFields); live slates ignore it.
- */
-export async function loadSlatePlayers(source, { filters = {}, includeZero = false, ranges = 'model' } = {}) {
-  if (!source) return [];
+const byValue = (a, b) => (Number(b.value) || 0) - (Number(a.value) || 0)
+  || (Number(b.projected_points) || 0) - (Number(a.projected_points) || 0);
+
+/** loadSlatePlayers without the sanity layer: projections as posted / stored. */
+async function loadPostedPlayers(source, { filters = {}, includeZero = false, ranges = 'model' } = {}) {
   if (!source.isBacktest) {
     const rows = includeZero
       ? await db.all('SELECT * FROM players WHERE slate_id = ?', source.slateId)
@@ -244,8 +241,29 @@ export async function loadSlatePlayers(source, { filters = {}, includeZero = fal
   return rows
     .map(row => snapshotToPlayer(row, { ranges }))
     .filter(p => (includeZero || Number(p.projected_points) > 0) && matchesFilters(p, filters))
-    .sort((a, b) => (Number(b.value) || 0) - (Number(a.value) || 0)
-      || (Number(b.projected_points) || 0) - (Number(a.projected_points) || 0));
+    .sort(byValue);
+}
+
+/**
+ * Slate players for a resolved source, players-table shape, projected
+ * players only, best value first (as playerModel.getBySlateId).
+ * filters: { position, minSalary, maxSalary, team } (as getBySlateId).
+ * includeZero: also players projected 0 (ruled out).
+ * ranges: 'model' (default) | 'original' - which floor / ceiling / std_dev /
+ * boom / bust a backtest uses (see rangeFields); live slates ignore it.
+ * sanity: apply the projection sanity layer (projections/sanityService.js;
+ * computed on read, the posted value stays as projection_raw); default
+ * from config/projectionSanity.js.
+ */
+export async function loadSlatePlayers(source, { filters = {}, includeZero = false, ranges = 'model', sanity = null, now = new Date() } = {}) {
+  if (!source) return [];
+  const players = await loadPostedPlayers(source, { filters, includeZero, ranges });
+  if (!(sanity ?? projectionSanityEnabled()) || players.length === 0) return players;
+  // The history covers the whole slate, whatever subset was asked for
+  const all = await loadPostedPlayers(source, { includeZero: true, ranges });
+  const projected = all.filter(p => Number(p.projected_points) > 0);
+  const adjusted = await applyProjectionSanity(source, players, { projected, all, now });
+  return adjusted.sort(byValue);
 }
 
 /** resolveSlate + loadSlatePlayers. Returns { source, players }. */
