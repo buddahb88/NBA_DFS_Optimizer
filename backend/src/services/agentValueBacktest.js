@@ -11,6 +11,9 @@
  *                   agentValuePicks)
  *   baseline_value  top 5 by projected points per $1K, $3,500-6,500, not OUT
  *   band_average    the average player in the $4,500-6,500 band who played
+ *   opportunity_top top 5 by Opportunity Radar score (cash by default, or
+ *                   gpp) at $3,500-6,500, not OUT (opportunityPicker; the
+ *                   radar for that night only reads games before it)
  *
  * Per method: total DK, points per $1K, 5x hit rate (DK >= 5 x salary/1000)
  * and projected vs actual minutes per player. Pick methods use total DK /
@@ -31,12 +34,15 @@ import { createResearchTools } from './chatTools/researchTools.js';
 import { STAT_COLUMNS, buildTonight, getDefense, loadArchetypeLookup, previousSeason, weakTiers } from './archetypeDefenseService.js';
 import { loadEdgeContext } from './archetypeMatchupService.js';
 import { playerKey } from '../utils/playerKey.js';
+import { getOpportunityRadar } from './opportunity/radarService.js';
 
 export const PICKS = 5;
 export const AGENT_MAX_SALARY = 6500;
 export const BASELINE_BAND = { min: 3500, max: 6500 };
 export const AVERAGE_BAND = { min: 4500, max: 6500 };
-export const METHODS = ['agent', 'baseline_value', 'band_average'];
+export const METHODS = ['agent', 'baseline_value', 'band_average', 'opportunity_top'];
+// Methods with picks (band_average is a band, not picks)
+const PICK_METHODS = ['agent', 'baseline_value', 'opportunity_top'];
 const HIT_MULTIPLE = 5;
 
 const n = (v) => Number(v) || 0;
@@ -98,6 +104,30 @@ export function bandAverage(pool) {
     projectedMinutes: round2(band.reduce((s, p) => s + n(p.projectedMinutes), 0) / count),
     actualMinutes: round2(band.reduce((s, p) => s + n(p.actualMinutes), 0) / count),
   };
+}
+
+/**
+ * opportunity_top: top `count` pool players by Opportunity Radar score for
+ * `mode` (cash_score / gpp_score; radar rows matched by player key) in
+ * BASELINE_BAND, not OUT. Players without a score are left out.
+ */
+export function opportunityTopPicks(pool, radarRows, { mode = 'cash', count = PICKS } = {}) {
+  const field = mode === 'gpp' ? 'gpp_score' : 'cash_score';
+  const scoreOf = new Map(radarRows
+    .filter(r => r[field] !== null && r[field] !== undefined)
+    .map(r => [r.player_key ?? playerKey(r.name), Number(r[field])]));
+  const key = (p) => p.playerKey ?? playerKey(p.name);
+  return pool
+    .filter(p => n(p.salary) >= BASELINE_BAND.min && n(p.salary) <= BASELINE_BAND.max && !isOut(p) && scoreOf.has(key(p)))
+    .sort((a, b) => scoreOf.get(key(b)) - scoreOf.get(key(a))
+      || n(b.projectedPoints) - n(a.projectedPoints) || String(a.name).localeCompare(String(b.name)))
+    .slice(0, count);
+}
+
+/** Default opportunityPicker: the radar for that night's saved slate (no lookahead). */
+export async function deterministicOpportunityPicker({ date, slateId, site, pool, mode = 'cash' }) {
+  const radar = await getOpportunityRadar({ slateId: String(slateId), slateDate: date, site, mode });
+  return { source: `opportunity_radar:${mode}`, names: opportunityTopPicks(pool, radar.players, { mode }).map(p => p.name) };
 }
 
 /** Pool players the agent may pick: salary <= AGENT_MAX_SALARY, not OUT, with a projection. */
@@ -208,7 +238,7 @@ const incompleteDate = (d) => METHODS.some(method => d.methods[method]?.incomple
 export function summarize(allDates) {
   const dates = allDates.filter(d => !incompleteDate(d));
   const out = { excluded: allDates.filter(incompleteDate).map(d => d.date) };
-  for (const method of ['agent', 'baseline_value']) {
+  for (const method of PICK_METHODS) {
     const list = dates.map(d => d.methods[method]).filter(Boolean);
     const totalDk = list.reduce((s, m) => s + m.totalDk, 0);
     const totalSalary = list.reduce((s, m) => s + m.totalSalary, 0);
@@ -236,17 +266,20 @@ export function summarize(allDates) {
     actualMinutes: round2(bands.reduce((s, b) => s + b.actualMinutes * b.players, 0) / players),
   };
   out.agentBeatsBaseline = out.agent.valuePer1k > out.baseline_value.valuePer1k;
+  out.opportunityBeatsBaseline = out.opportunity_top.dates > 0 && out.opportunity_top.valuePer1k > out.baseline_value.valuePer1k;
   return out;
 }
 
 async function persist(runAt, site, d) {
   for (const method of METHODS) {
     const m = d.methods[method];
+    if (!m) continue;
+    const source = method === 'agent' ? d.source : method === 'opportunity_top' ? d.opportunitySource : method;
     await db.run(`
       INSERT INTO agent_value_backtests (run_at, game_date, site, slate_id, method, source, players, n_players,
         pick_count, incomplete, total_salary, total_dk, value_per_1k, hit_5x, projected_minutes, actual_minutes)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, runAt, d.date, site, d.slateId, method, method === 'agent' ? d.source : method,
+    `, runAt, d.date, site, d.slateId, method, source,
     JSON.stringify(method === 'band_average' ? [] : m.players), method === 'band_average' ? m.players : m.picks,
     method === 'band_average' ? null : m.picks, m.incomplete ? 1 : 0, m.totalSalary ?? null, m.totalDk, m.valuePer1k, m.hit5x, m.projectedMinutes, m.actualMinutes);
   }
@@ -254,28 +287,38 @@ async function persist(runAt, site, d) {
 
 /**
  * Run the backtest over every snapshot date (or from/to).
- * @param {Object} options - { site, from, to, agentPicker, persist, runAt }
+ * @param {Object} options - { site, from, to, agentPicker, opportunityPicker,
+ *   opportunityMode ('cash' | 'gpp', default cash), persist, runAt }
  * @returns {{ runAt, site, dates: Array, summary }}
  */
 export async function runValueBacktest(options = {}) {
-  const { site = 'draftkings', from, to, agentPicker = deterministicAgentPicker, runAt = new Date().toISOString() } = options;
+  const {
+    site = 'draftkings', from, to, agentPicker = deterministicAgentPicker, opportunityPicker = deterministicOpportunityPicker,
+    opportunityMode = 'cash', runAt = new Date().toISOString(),
+  } = options;
   const dates = [];
   for (const { date, slateId } of await backtestDates(site, { from, to })) {
     const pool = await getPlayerResults({ from: date, to: date, site, slateId });
     const picked = await agentPicker({ date, slateId, site, pool });
+    // A night the radar cannot score (e.g. no metrics) leaves the method incomplete
+    const opportunity = await opportunityPicker({ date, slateId, site, pool, mode: opportunityMode })
+      .catch(error => ({ source: `error: ${error.message}`, names: [] }));
     const byKey = new Map(pool.map(p => [p.playerKey, p]));
-    const agentPicks = picked.names.map(name => byKey.get(playerKey(name))).filter(Boolean);
-    const agent = scorePicks(agentPicks);
+    const picksOf = (names) => names.map(name => byKey.get(playerKey(name))).filter(Boolean);
+    const agent = scorePicks(picksOf(picked.names));
+    const opportunityTop = scorePicks(picksOf(opportunity.names));
     const baseline = scorePicks(topProjectedValue(pool));
     const band = bandAverage(pool);
     const row = {
       date,
       slateId,
       source: picked.source,
+      opportunitySource: opportunity.source,
       methods: {
         agent: { ...agent, eligible: picked.eligible ?? null, incomplete: agent.picks < PICKS },
         baseline_value: { ...baseline, incomplete: baseline.picks < PICKS },
         band_average: { ...band, incomplete: band.players === 0 },
+        opportunity_top: { ...opportunityTop, mode: opportunityMode, incomplete: opportunityTop.picks < PICKS },
       },
     };
     if (options.persist !== false) await persist(runAt, site, row);
@@ -284,4 +327,6 @@ export async function runValueBacktest(options = {}) {
   return { runAt, site, dates, summary: summarize(dates) };
 }
 
-export default { runValueBacktest, summarize, scorePicks, topProjectedValue, bandAverage, agentValuePicks, agentEligible };
+export default {
+  runValueBacktest, summarize, scorePicks, topProjectedValue, bandAverage, agentValuePicks, agentEligible, opportunityTopPicks,
+};

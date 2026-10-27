@@ -5,8 +5,9 @@
  *
  * For every past date with slate_player_snapshots, the chat agent's top 5
  * value plays at <= $6,500 vs (a) the top 5 by projected points per $1K
- * ($3,500-6,500, not OUT) and (b) the average played player at $4,500-6,500,
- * scored against historical_games (services/agentValueBacktest.js). Rows are
+ * ($3,500-6,500, not OUT), (b) the average played player at $4,500-6,500
+ * and (c) opportunity_top, the top 5 by Opportunity Radar score at
+ * $3,500-6,500 (cash score, or gpp with --opportunity-mode gpp), scored against historical_games (services/agentValueBacktest.js). Rows are
  * saved to agent_value_backtests so the trend can be tracked.
  *
  * The agent's picks come from the chat tool layer with no LLM: every eligible
@@ -18,7 +19,8 @@
  * chat orchestrator instead and the picks are read from its answer.
  *
  * Usage:
- *   node scripts/agent-value-backtest.js [--from 2026-10-20] [--to 2026-10-21] [--site draftkings] [--no-save]
+ *   node scripts/agent-value-backtest.js [--from 2026-10-20] [--to 2026-10-21] [--site draftkings]
+ *     [--opportunity-mode cash|gpp] [--no-save]
  */
 
 import path from 'path';
@@ -39,7 +41,7 @@ function arg(name) {
 }
 
 const LIVE = process.env.RUN_LIVE_AGENT_EVAL === '1';
-const LABELS = { agent: 'agent', baseline_value: '(a) top proj/1K', band_average: '(b) band avg' };
+const LABELS = { agent: 'agent', baseline_value: '(a) top proj/1K', band_average: '(b) band avg', opportunity_top: '(c) opportunity top' };
 const pct = (x) => `${Math.round(x * 100)}%`;
 
 const row = (date, method, m) => ({
@@ -63,6 +65,7 @@ try {
     from: arg('from'),
     to: arg('to'),
     agentPicker: LIVE ? liveAgentPicker : deterministicAgentPicker,
+    opportunityMode: arg('opportunity-mode') === 'gpp' ? 'gpp' : 'cash',
     persist: !process.argv.includes('--no-save'),
   });
 
@@ -84,12 +87,14 @@ try {
       console.warn(`\nWARNING: ${s.excluded.join(', ')} excluded from the cumulative comparison (a method returned fewer than 5 picks).`);
     }
     console.log(`\nCumulative over ${result.dates.length - s.excluded.length} complete date(s):`);
-    console.table(Object.fromEntries(['agent', 'baseline_value', 'band_average'].map(method => [LABELS[method], {
+    console.table(Object.fromEntries(['agent', 'baseline_value', 'opportunity_top', 'band_average'].map(method => [LABELS[method], {
       dk_per_player: s[method].avgDk, per_1k: s[method].valuePer1k, hit_5x: pct(s[method].hit5x),
       min_proj: s[method].projectedMinutes, min_actual: s[method].actualMinutes,
     }])));
     console.log(`Agent ${s.agentBeatsBaseline ? 'BEATS' : 'does NOT beat'} baseline (a) on points per $1K (${s.agent.valuePer1k} vs ${s.baseline_value.valuePer1k}; `
       + `DK per player ${s.agent.avgDk} vs ${s.baseline_value.avgDk}).`);
+    console.log(`Opportunity top (${result.dates[0]?.methods.opportunity_top.mode}) ${s.opportunityBeatsBaseline ? 'BEATS' : 'does NOT beat'} baseline (a) on points per $1K `
+      + `(${s.opportunity_top.valuePer1k} vs ${s.baseline_value.valuePer1k}; DK per player ${s.opportunity_top.avgDk} vs ${s.baseline_value.avgDk}).`);
     if (!process.argv.includes('--no-save')) console.log('Saved to agent_value_backtests.');
   }
 } finally {

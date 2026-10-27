@@ -208,6 +208,34 @@ const CASES = [
     },
   },
   {
+    id: 'opportunity-radar',
+    question: 'Who was in a good spot for cash under $6,500 on 2026-10-21?',
+    agent: 'research',
+    tool: 'get_opportunity_radar',
+    args: { slateDate: '2026-10-21', mode: 'cash', maxSalary: 6500, limit: 5 },
+    async verify(out) {
+      assert.equal(out.success, true, out.message);
+      assert.equal(out.backtest, true);
+      assert.equal(out.mode, 'cash');
+      assert.equal(out.players.length, 5);
+      const scores = out.players.map(p => p.score);
+      assert.deepEqual(scores, [...scores].sort((a, b) => b - a), 'ranked by score');
+      for (const p of out.players) {
+        assert.equal(p.score, p.cashScore, p.name);
+        assert.ok(p.salary <= 6500, p.name);
+        const snap = await db.get(`SELECT salary, projected_points FROM slate_player_snapshots
+          WHERE game_date = '2026-10-21' AND site = 'draftkings' AND slate_id = ? AND player_name = ?`, out.slateId, p.name);
+        assert.ok(snap, `${p.name} not on the saved slate`);
+        assert.equal(p.salary, snap.salary, p.name);
+        assert.equal(p.projectedPoints, snap.projected_points, p.name);
+        const game = await db.get(`SELECT dk_fantasy_points AS dk FROM historical_games
+          WHERE player_name = ? AND game_date = '2026-10-21'`, p.name);
+        if (game) assert.equal(p.actualPoints, game.dk, p.name);
+      }
+      return { numbers: [], names: [out.players[0].name] };
+    },
+  },
+  {
     id: 'projection-accuracy',
     question: 'How accurate were projections on 2026-10-21?',
     agent: 'research',
@@ -287,6 +315,13 @@ describe.skipIf(!HAS_DB)('value-pick backtest (real DB, deterministic agent)', (
     assert.equal(d.methods.baseline_value.hits5x, 3);
     assert.equal(d.methods.band_average.valuePer1k, 4.14);
     assert.equal(d.methods.band_average.hit5x, 0.31);
+    // opportunity_top: radar cash score, $3,500-6,500, games before 10/21 only
+    const opp = d.methods.opportunity_top;
+    assert.equal(opp.picks, 5);
+    assert.ok(opp.players.every(p => p.salary >= 3500 && p.salary <= 6500));
+    assert.deepEqual(opp.names, ['Ayo Dosunmu', 'RJ Barrett', 'Ty Jerome', 'Jrue Holiday', 'Gui Santos']);
+    assert.equal(opp.totalDk, 161.75);
+    assert.equal(opp.valuePer1k, 5.78);
   });
 
   test('a slate no longer loaded is replayed from its snapshot', async () => {

@@ -128,6 +128,28 @@ describe('agent value ranking', () => {
   });
 });
 
+describe('opportunity_top ranking', () => {
+  const pool = (rows) => rows.map(([name, salary, injuryStatus = null]) => ({ name, playerKey: playerKey(name), salary, projectedPoints: 20, injuryStatus }));
+  const radar = (rows) => rows.map(([name, cash, gpp]) => ({ name, player_key: playerKey(name), cash_score: cash, gpp_score: gpp }));
+
+  test('top 5 by the mode score at 3500-6500, not OUT, players without a score left out', () => {
+    const players = pool([
+      ['Star', 9000], ['Cheap', 3000], ['Hurt', 5000, 'OUT'], ['A', 4000], ['B', 4500], ['C', 5000], ['D', 5500],
+      ['E', 6000], ['F', 6500], ['No Score', 5000],
+    ]);
+    const rows = radar([
+      ['Star', 99, 99], ['Cheap', 98, 98], ['Hurt', 97, 97], ['A', 60, 10], ['B', 70, 20], ['C', 50, 90],
+      ['D', 80, 30], ['E', 40, 80], ['F', 65, 70],
+    ]);
+    assert.deepEqual(bt.opportunityTopPicks(players, rows).map(p => p.name), ['D', 'B', 'F', 'A', 'C']);
+    assert.deepEqual(bt.opportunityTopPicks(players, rows, { mode: 'gpp' }).map(p => p.name), ['C', 'E', 'F', 'D', 'B']);
+  });
+
+  test('is one of the methods', () => {
+    assert.ok(bt.METHODS.includes('opportunity_top'));
+  });
+});
+
 describe('live answers', () => {
   test('namesFromAnswer reads pool players in order of first mention, at most 5', () => {
     const text = `1. **Grayson Allen** ($4,300)
@@ -161,6 +183,22 @@ describe('summary', () => {
     assert.equal(s.band_average.valuePer1k, 4);
     assert.equal(s.band_average.hit5x, 0.3);
     assert.equal(s.agentBeatsBaseline, false);
+  });
+});
+
+describe('summary: opportunity_top', () => {
+  test('cumulative totals and whether it beats baseline (a)', () => {
+    const m = (totalDk, totalSalary, hits5x) => ({ totalDk, totalSalary, hits5x, picks: 5, projectedMinutes: 28, actualMinutes: 27 });
+    const band = { totalDk: 100, avgDk: 20, valuePer1k: 4, hit5x: 0.3, players: 10, hits5x: 3, valueSum: 40, projectedMinutes: 25, actualMinutes: 24 };
+    const s = bt.summarize([
+      { date: '2026-10-20', methods: { agent: m(100, 25000, 1), baseline_value: m(100, 22000, 1), band_average: band, opportunity_top: m(130, 24000, 3) } },
+      { date: '2026-10-21', methods: { agent: m(100, 25000, 1), baseline_value: m(133, 22200, 3), band_average: band, opportunity_top: m(110, 24000, 2) } },
+    ]);
+    assert.equal(s.opportunity_top.dates, 2);
+    assert.equal(s.opportunity_top.totalDk, 240);
+    assert.equal(s.opportunity_top.valuePer1k, 5); // 240 / 48
+    assert.equal(s.opportunity_top.hit5x, 0.5);
+    assert.equal(s.opportunityBeatsBaseline, false); // baseline 233 / 44.2 = 5.27
   });
 });
 
@@ -217,6 +255,8 @@ describe('runValueBacktest (sqlite)', () => {
       runAt,
       // Deterministic stand-in for the chat agent's picks
       agentPicker: async ({ pool }) => ({ source: 'test', names: pool.filter(p => p.salary >= 5000).map(p => p.name) }),
+      // Stand-in for the radar ranking
+      opportunityPicker: async ({ mode }) => ({ source: `test_${mode}`, names: ['Golf Seven', 'Bravo Two', 'Delta Four', 'Foxtrot Six', 'Alpha One'] }),
     });
 
     assert.equal(result.dates.length, 1);
@@ -229,9 +269,16 @@ describe('runValueBacktest (sqlite)', () => {
     assert.deepEqual(d.methods.baseline_value.names, ['Alpha One', 'Charlie Three', 'Bravo Two', 'Echo Five', 'Delta Four']);
     assert.equal(d.methods.baseline_value.totalDk, 141);
     assert.equal(d.methods.band_average.players, 5);
+    assert.deepEqual(d.methods.opportunity_top.names, ['Golf Seven', 'Bravo Two', 'Delta Four', 'Foxtrot Six', 'Alpha One']);
+    assert.equal(d.methods.opportunity_top.totalDk, 111); // 10 + 20 + 25 + 26 + 30
+    assert.equal(d.methods.opportunity_top.incomplete, false);
 
     const rows = await db.all('SELECT * FROM agent_value_backtests WHERE run_at = ? ORDER BY method', runAt);
-    assert.deepEqual(rows.map(r => r.method), ['agent', 'band_average', 'baseline_value']);
+    assert.deepEqual(rows.map(r => r.method), ['agent', 'band_average', 'baseline_value', 'opportunity_top']);
+    assert.equal(rows.find(r => r.method === 'opportunity_top').source, 'test_cash');
+    // The agent returned 4 picks, so the date is out of the cumulative comparison
+    assert.equal(result.summary.opportunity_top.dates, 0);
+    assert.equal(result.summary.opportunityBeatsBaseline, false);
     const agent = rows.find(r => r.method === 'agent');
     assert.equal(agent.game_date, DATE);
     assert.equal(agent.total_dk, 117);
@@ -258,7 +305,17 @@ describe('runValueBacktest (sqlite)', () => {
 
     const rows = await db.all('SELECT method, pick_count, incomplete FROM agent_value_backtests WHERE run_at = ? ORDER BY method', runAt);
     assert.deepEqual(rows.map(r => [r.method, r.pick_count, Number(r.incomplete)]),
-      [['agent', 1, 1], ['band_average', null, 0], ['baseline_value', 5, 0]]);
+      [['agent', 1, 1], ['band_average', null, 0], ['baseline_value', 5, 0], ['opportunity_top', 5, 0]]);
+  });
+
+  test('deterministic opportunity picker: radar top 5 for that night in the band, not OUT', async () => {
+    const pool = await (await import('../src/services/resultsService.js')).getPlayerResults({ from: DATE, to: DATE, site: 'draftkings', slateId: 'past1' });
+    for (const mode of ['cash', 'gpp']) {
+      const picked = await bt.deterministicOpportunityPicker({ date: DATE, slateId: 'past1', site: 'draftkings', pool, mode });
+      assert.equal(picked.source, `opportunity_radar:${mode}`);
+      assert.equal(picked.names.length, 5);
+      assert.ok(!picked.names.includes('Hotel Out'));
+    }
   });
 
   test('deterministic picker: no weak-tier matchups on the slate still gives 5 picks from the pool', async () => {

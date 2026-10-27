@@ -35,10 +35,11 @@ This suite sends six fixed questions through the real chat path: `agenticChatSer
 
 ## Value-pick backtest: `agentValueBacktest.test.js` and `scripts/agent-value-backtest.js`
 
-The backtest compares the agent's top 5 value plays (salary up to $6,500) with two baselines:
+The backtest compares the agent's top 5 value plays (salary up to $6,500) with two baselines and the Opportunity Radar:
 
 - **(a)** the top 5 by projected points per $1K, at $3,500–6,500 and not OUT;
-- **(b)** the average player at $4,500–6,500 who played.
+- **(b)** the average player at $4,500–6,500 who played;
+- **(c) `opportunity_top`**: the top 5 by Opportunity Radar score at $3,500–6,500, not OUT (cash score by default, `--opportunity-mode gpp` for GPP). The radar for a date reads only games before it.
 
 Picks are scored against `historical_games`. Logic lives in `src/services/agentValueBacktest.js`.
 
