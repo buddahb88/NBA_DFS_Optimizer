@@ -158,3 +158,31 @@ test('GET /status reports the ESPN load', async () => {
   assert.deepEqual(body.espn, { source: 'espn', loadedGames: 1, latestGameDate: '2025-01-15' });
   assert.equal(body.totalGames, 26);
 });
+
+test('POST /sync rebuilds the derived season tables before the run finishes', async () => {
+  await db.run('DELETE FROM player_season_profiles');
+  await db.run(`INSERT INTO historical_games (player_key, player_name, team, opponent, position, game_date, season, season_type,
+      game_id, is_starter, minutes, points, rebounds, assists, dk_fantasy_points, fd_fantasy_points)
+    VALUES ('alpha guard', 'Alpha Guard', 'BOS', 'NYK', 'G', '2026-10-21', ?, 'regular', 'g1', 1, 34, 24, 6, 7, 45.5, 42.1)`, currentSeason);
+
+  await post('/sync', {});
+  await waitForSync();
+
+  const row = await db.get('SELECT games FROM player_season_profiles WHERE season = ? AND player_key = ?', currentSeason, 'alpha guard');
+  assert.equal(row?.games, 1);
+  assert.ok((await db.get('SELECT COUNT(*) AS n FROM player_archetypes WHERE season = ?', currentSeason)).n >= 1);
+});
+
+test('POST /sync with start/end rebuilds the seasons in that range', async () => {
+  vi.spyOn(espn, 'syncDates').mockResolvedValue(result());
+  await db.run('DELETE FROM player_season_profiles');
+  await db.run(`INSERT INTO historical_games (player_key, player_name, team, opponent, position, game_date, season, season_type,
+      game_id, is_starter, minutes, points, rebounds, assists, dk_fantasy_points, fd_fantasy_points)
+    VALUES ('beta wing', 'Beta Wing', 'BOS', 'NYK', 'F', '2026-03-01', '2025-26', 'regular', 'g9', 1, 30, 20, 5, 3, 35, 33)`);
+
+  await post('/sync', { start: '2026-03-01', end: '2026-03-02' });
+  await waitForSync();
+
+  const row = await db.get(`SELECT games FROM player_season_profiles WHERE season = '2025-26' AND player_key = 'beta wing'`);
+  assert.equal(row?.games, 1);
+});

@@ -96,8 +96,8 @@ async function startServer() {
     const interrupted = await syncRunService.failInterrupted();
     if (interrupted) console.warn(`⚠️ Marked ${interrupted} interrupted historical sync run(s) as failed`);
 
-    // Nightly ESPN catch-up of historical_games (off unless HISTORICAL_SYNC_CRON is set)
-    startHistoricalSyncScheduler();
+    // ESPN catch-up of historical_games now and on HISTORICAL_SYNC_CRON (hourly by default, 'off' disables)
+    startHistoricalSyncScheduler({ runOnStart: true });
 
     // Start server
     app.listen(PORT, '0.0.0.0', () => {

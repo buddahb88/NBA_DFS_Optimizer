@@ -10,7 +10,7 @@ import nbaStatsService from '../services/nbaStatsService.js';
 import espnBoxScoreService from '../services/espnBoxScoreService.js';
 import syncRunService from '../services/syncRunService.js';
 import dataStatusService from '../services/dataStatusService.js';
-import { runIncrementalSync } from '../services/historicalSyncScheduler.js';
+import { runIncrementalSync, refreshSeasonDerived } from '../services/historicalSyncScheduler.js';
 import insightsService, { InsightsError } from '../services/insightsService.js';
 import { resolveSite } from '../utils/resolveSite.js';
 import { getCurrentSeason, getSeasonsInfo, seasonForDate } from '../utils/season.js';
@@ -172,6 +172,12 @@ router.post('/sync', async (req, res) => {
             onProgress
           }));
         }
+      }
+
+      // Rebuild profiles, archetypes and archetype defense from the new games
+      const synced = start && end ? [...new Set([seasonForDate(start), seasonForDate(end)])] : seasons;
+      for (const s of synced) {
+        await refreshSeasonDerived(s).catch(error => console.error(`❌ Derived table refresh ${s} failed:`, error.message));
       }
 
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);

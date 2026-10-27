@@ -5,7 +5,7 @@
  *
  * Recomputes how each defense performs against each archetype and G/F/C
  * position, relative to expectation, for each season from --from (default
- * 2024-25) through the current one. The nightly historical sync refreshes
+ * 2024-25) through the current one. The scheduled historical sync refreshes
  * the seasons it loads; run this after rebuilding archetypes
  * (scripts/build-player-archetypes.js) or to backfill past seasons.
  *

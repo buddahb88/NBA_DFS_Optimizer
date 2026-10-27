@@ -166,17 +166,26 @@ describe('runIncrementalSync', () => {
     assert.ok(run.finished_at);
   });
 
-  test('refreshes team_archetype_defense for each synced season, even after a failure', async () => {
+  test('refreshes the derived season tables for each synced season, even after a failure', async () => {
     vi.spyOn(espn, 'syncDates').mockRejectedValueOnce(new Error('ESPN down')).mockResolvedValueOnce(result());
-    const refreshDefense = vi.fn().mockRejectedValueOnce(new Error('db busy')).mockResolvedValue({});
+    const refreshDerived = vi.fn().mockRejectedValueOnce(new Error('db busy')).mockResolvedValue({});
 
-    const runs = await scheduler.runIncrementalSync({ now: at('2026-10-22'), refreshDefense });
+    const runs = await scheduler.runIncrementalSync({ now: at('2026-10-22'), refreshDerived });
     assert.equal(runs.length, 1);
-    assert.deepEqual(refreshDefense.mock.calls, [['2026-27']]);
+    assert.deepEqual(refreshDerived.mock.calls, [['2026-27']]);
 
     await db.run(`INSERT INTO historical_games (player_name, team, opponent, game_date) VALUES ('A', 'BOS', 'NYK', '2026-06-10')`);
-    await scheduler.runIncrementalSync({ now: at('2026-10-22'), refreshDefense });
-    assert.deepEqual(refreshDefense.mock.calls.slice(1), [['2025-26'], ['2026-27']]);
+    await scheduler.runIncrementalSync({ now: at('2026-10-22'), refreshDerived });
+    assert.deepEqual(refreshDerived.mock.calls.slice(1), [['2025-26'], ['2026-27']]);
+  });
+
+  test('skips the derived refresh when a season sync loaded no new games', async () => {
+    await db.run(`INSERT INTO historical_games (player_name, team, opponent, game_date) VALUES ('A', 'BOS', 'NYK', '2026-10-21')`);
+    vi.spyOn(espn, 'syncDates').mockResolvedValue(result({ games: 0 }));
+    const refreshDerived = vi.fn().mockResolvedValue({});
+
+    await scheduler.runIncrementalSync({ now: at('2026-10-22'), refreshDerived });
+    assert.equal(refreshDerived.mock.calls.length, 0);
   });
 
   test('skips when another sync is running', async () => {
@@ -195,15 +204,36 @@ describe('runIncrementalSync', () => {
   });
 });
 
-describe('startHistoricalSyncScheduler', () => {
-  test('is off unless an expression is configured', () => {
-    const saved = process.env.HISTORICAL_SYNC_CRON;
-    delete process.env.HISTORICAL_SYNC_CRON;
-    try {
-      assert.equal(scheduler.startHistoricalSyncScheduler(), null);
-    } finally {
-      if (saved !== undefined) process.env.HISTORICAL_SYNC_CRON = saved;
+describe('refreshSeasonDerived', () => {
+  test('rebuilds profiles, archetypes and team_archetype_defense for the season from historical_games', async () => {
+    for (const t of ['player_season_profiles', 'player_archetypes', 'team_archetype_defense']) await db.run(`DELETE FROM ${t}`);
+    const insert = `INSERT INTO historical_games (player_key, player_name, team, opponent, position, game_date, season, season_type,
+        game_id, is_starter, minutes, points, rebounds, assists, steals, blocks, turnovers, fg3_made, dk_fantasy_points, fd_fantasy_points)
+      VALUES (?, ?, ?, ?, ?, ?, '2026-27', 'regular', ?, 1, 34, 24, 6, 7, 1, 1, 3, 2, 45.5, 42.1)`;
+    const games = [['2026-10-21', 'g1', 'BOS', 'NYK'], ['2026-10-23', 'g2', 'BOS', 'PHI'], ['2026-10-25', 'g3', 'BOS', 'MIA']];
+    for (const [date, id, team, opp] of games) {
+      await db.run(insert, 'alpha guard', 'Alpha Guard', team, opp, 'G', date, id);
+      await db.run(insert, 'beta big', 'Beta Big', opp, team, 'C', date, id);
     }
+
+    await scheduler.refreshSeasonDerived('2026-27');
+
+    const count = async t => (await db.get(`SELECT COUNT(*) AS n FROM ${t} WHERE season = '2026-27'`)).n;
+    assert.equal(await count('player_season_profiles'), 2);
+    assert.equal(await count('player_archetypes'), 2);
+    const profile = await db.get(`SELECT games FROM player_season_profiles WHERE player_key = 'alpha guard'`);
+    assert.equal(profile.games, 3);
+    assert.ok(await count('team_archetype_defense') > 0);
+  });
+});
+
+describe('startHistoricalSyncScheduler', () => {
+  test('resolves the schedule from HISTORICAL_SYNC_CRON, defaulting to on', () => {
+    assert.equal(scheduler.scheduleExpression({}), scheduler.DEFAULT_SYNC_CRON);
+    assert.equal(scheduler.scheduleExpression({ HISTORICAL_SYNC_CRON: '' }), scheduler.DEFAULT_SYNC_CRON);
+    assert.equal(scheduler.scheduleExpression({ HISTORICAL_SYNC_CRON: ' 0 7 * * * ' }), '0 7 * * *');
+    assert.equal(scheduler.scheduleExpression({ HISTORICAL_SYNC_CRON: 'off' }), null);
+    assert.equal(scheduler.scheduleExpression({ HISTORICAL_SYNC_CRON: 'OFF' }), null);
   });
 
   test('is off in tests even when the env var is set', () => {
@@ -212,6 +242,32 @@ describe('startHistoricalSyncScheduler', () => {
       assert.equal(scheduler.startHistoricalSyncScheduler(), null);
     } finally {
       delete process.env.HISTORICAL_SYNC_CRON;
+    }
+  });
+
+  test('catches up once at startup when runOnStart is set', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-21T10:00:00'));
+    const run = vi.fn().mockResolvedValue([]);
+    const task = scheduler.startHistoricalSyncScheduler({ expression: '30 6 * * *', run, runOnStart: true });
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      assert.equal(run.mock.calls.length, 1);
+    } finally {
+      task?.stop();
+    }
+  });
+
+  test('a failing startup catch-up is logged, not thrown', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const run = vi.fn().mockRejectedValue(new Error('boom'));
+    const task = scheduler.startHistoricalSyncScheduler({ expression: '30 6 * * *', run, runOnStart: true });
+    try {
+      await new Promise(resolve => setImmediate(resolve));
+      assert.equal(run.mock.calls.length, 1);
+      assert.equal(console.error.mock.calls.length, 1);
+    } finally {
+      task?.stop();
     }
   });
 

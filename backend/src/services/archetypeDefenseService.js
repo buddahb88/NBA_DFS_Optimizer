@@ -25,7 +25,7 @@
  * coarse G/F/C, so the position grouping is 3-bucket DvP, not 5-position.
  *
  * Full-season results are stored in team_archetype_defense (refreshed after
- * the nightly historical sync); date / lastNGames windows and the per-game
+ * the scheduled historical sync); date / lastNGames windows and the per-game
  * drill-down are computed on request.
  */
 
