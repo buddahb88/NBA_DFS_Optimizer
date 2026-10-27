@@ -15,6 +15,7 @@ delete process.env.PROJECTION_MINUTES_WEIGHT;
 
 const { default: db } = await import('../src/config/database.js');
 const { createTables } = await import('../src/config/schema.js');
+const { backfillPlayerKeys } = await import('../src/config/playerKeyMigrations.js');
 const { default: projectionsRouter } = await import('../src/routes/projections.js');
 const { default: projectionService } = await import('../src/services/projectionService.js');
 
@@ -70,6 +71,8 @@ before(async () => {
       `, name, team, opponent, gameId, date, minutes, pts, reb, ast, pts + reb * 1.25 + ast * 1.5 + 2 - 0.5 + 0.5);
     }
   }
+  // As startup does: history lookups match by player_key
+  await backfillPlayerKeys(db);
 
   const app = express();
   app.use(express.json());
