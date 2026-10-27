@@ -134,6 +134,12 @@ export const historicalAPI = {
     api.post('/historical/missing-players', { players, minGames, minAvgDk, ...params }),
 };
 
+// Opportunity Radar (O1-O3 metrics scored for Cash / GPP)
+export const opportunityAPI = {
+  // params: slateId, slateDate (backtest), site, mode (cash | gpp)
+  getRadar: (params = {}) => api.get('/opportunity/radar', { params }),
+};
+
 // Player archetypes and team defense vs archetype (or G/F/C)
 export const archetypesAPI = {
   getDefinitions: () => api.get('/archetypes/definitions'),

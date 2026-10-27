@@ -1,28 +1,7 @@
 import { useState } from 'react';
 import { Badge, DataTable, Tabs, Tooltip } from '../../components/ui';
 import { TONIGHT_SORTS, edgeBadges, edgeExplanation, formatDelta, statFor, tonightSorting } from './archetypes';
-import { formatActual } from '../slate/backtest';
-import ResultBadge from '../slate/ResultBadge';
-
-// Backtest only: what the player actually scored that night
-const ACTUAL_COLUMN = {
-  id: 'actual',
-  accessorFn: (p) => p.actualPoints ?? null,
-  header: 'Actual',
-  meta: { numeric: true, label: 'Actual DK points' },
-  sortUndefined: 'last',
-  cell: ({ getValue }) => <span className="font-semibold">{formatActual(getValue())}</span>,
-};
-
-// Backtest only: played (with actual minutes) / DNP / inactive / pending
-const RESULT_COLUMN = {
-  id: 'result',
-  accessorFn: (p) => p.resultStatus ?? null,
-  header: 'Result',
-  meta: { label: 'Result that night' },
-  sortUndefined: 'last',
-  cell: ({ row }) => <ResultBadge player={row.original} />,
-};
+import { ACTUAL_COLUMN, RESULT_COLUMN } from '../slate/backtestColumns';
 
 function columnsFor(stat, edgeConfig, isBacktest) {
   const { unit } = statFor(stat);

@@ -4,6 +4,7 @@ import { Button, Card, EmptyState, IconChart, Tabs } from '../../components/ui';
 import { useSlate } from '../../context/SlateContext';
 import InsightsFilters from './InsightsFilters';
 import LeagueTrendsTab from './LeagueTrendsTab';
+import OpportunityRadarTab from './OpportunityRadarTab';
 import SlateInsightsTab from './SlateInsightsTab';
 import useInsights from './useInsights';
 import { DEFAULT_WINDOW, hasHistory } from './insights';
@@ -11,6 +12,7 @@ import { DATA_STATUS_PATH } from '../dataStatus/dataStatus';
 
 const TABS = [
   { value: 'slate', label: 'Tonight’s slate' },
+  { value: 'radar', label: 'Opportunity Radar' },
   { value: 'league', label: 'League trends' },
 ];
 
@@ -60,6 +62,12 @@ export default function InsightsPage() {
     leagueEnabled: leagueOpened,
   });
   const { summary, league, reload } = insights;
+  // The radar tab refetches on Refresh too
+  const [radarReload, setRadarReload] = useState(0);
+  const refresh = () => {
+    reload();
+    setRadarReload((t) => t + 1);
+  };
 
   const selectTab = (next) => {
     setTab(next);
@@ -77,18 +85,23 @@ export default function InsightsPage() {
           <Link to={DATA_STATUS_PATH} className="text-xs font-medium text-fg-muted hover:text-fg hover:underline">
             Data status &amp; sync
           </Link>
-          <Button variant="secondary" size="sm" onClick={reload}>
+          <Button variant="secondary" size="sm" onClick={refresh}>
             Refresh
           </Button>
         </div>
       </div>
 
-      <InsightsFilters value={dateWindow} onChange={setDateWindow} siteName={siteConfig?.name} range={summary.data?.dateRange} />
+      {/* The radar reads games before its slate date, not the date window */}
+      {tab !== 'radar' && (
+        <InsightsFilters value={dateWindow} onChange={setDateWindow} siteName={siteConfig?.name} range={summary.data?.dateRange} />
+      )}
 
       <Tabs tabs={TABS} value={tab} onChange={selectTab} />
 
       {summary.status === 'ready' && !hasHistory(summary.data) ? (
         <NoHistory />
+      ) : tab === 'radar' ? (
+        <OpportunityRadarTab reloadToken={radarReload} />
       ) : tab === 'slate' ? (
         <SlateInsightsTab noSlate={!loadingSlates && !slate} sections={insights} onRetry={reload} />
       ) : (
