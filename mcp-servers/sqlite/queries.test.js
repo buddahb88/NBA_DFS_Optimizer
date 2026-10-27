@@ -105,10 +105,11 @@ function seedSlates() {
   db.exec(`
     CREATE TABLE slates (slate_id TEXT, name TEXT, site TEXT, start_time TEXT, created_at TEXT);
     CREATE TABLE players (id INTEGER PRIMARY KEY, slate_id TEXT, name TEXT, position TEXT, team TEXT, opponent TEXT,
-      salary INTEGER, projected_points REAL, floor REAL, ceiling REAL, rostership REAL, leverage_score REAL, boom_probability REAL);
+      salary INTEGER, projected_points REAL, projected_minutes REAL, vegas_spread REAL, floor REAL, ceiling REAL, rostership REAL,
+      leverage_score REAL, boom_probability REAL);
     CREATE TABLE slate_player_snapshots (id INTEGER PRIMARY KEY, game_date TEXT, slate_id TEXT, site TEXT, player_key TEXT,
-      player_name TEXT, position TEXT, team TEXT, opponent TEXT, salary INTEGER, projected_points REAL, floor REAL, ceiling REAL,
-      rostership REAL, leverage_score REAL, boom_probability REAL);
+      player_name TEXT, position TEXT, team TEXT, opponent TEXT, salary INTEGER, projected_points REAL, projected_minutes REAL,
+      vegas_spread REAL, floor REAL, ceiling REAL, rostership REAL, leverage_score REAL, boom_probability REAL);
     CREATE TABLE historical_games (player_key TEXT, game_date TEXT, minutes REAL, dk_fantasy_points REAL);
   `);
   db.prepare(`INSERT INTO slates VALUES ('live', 'Main', 'draftkings', NULL, '2026-10-23')`).run();
@@ -137,4 +138,33 @@ test('gppPlays reads the live slate, or a past date\'s saved slate with actual p
   assert.deepEqual(gppPlays(db, {}).plays.map(p => p.name), ['Cheap Live']);
   const past = gppPlays(db, { slateDate: '2026-10-21' });
   assert.deepEqual(past.plays.map(p => [p.name, p.actual_points]), [['Cheap Past', 31.5]]);
+});
+
+test('valuePlays / gppPlays use the projection sanity layer (blowout trim, env setting); the posted value is kept', () => {
+  const db = seedSlates();
+  const add = db.prepare(`INSERT INTO players (slate_id, name, position, team, opponent, salary, projected_points, projected_minutes,
+    vegas_spread, ceiling, rostership, leverage_score) VALUES ('live', ?, 'SF', ?, ?, 5000, ?, ?, ?, 50, 3, ?)`);
+  // 6.8 / $1K posted, but a 16-point underdog starter: trimmed below Steady Wing's 6.4
+  add.run('Dog Starter', 'WAS', 'BOS', 34, 34, 16, 2);
+  add.run('Steady Wing', 'NYK', 'MIA', 32, 30, -2, 1);
+
+  const on = valuePlays(db, {}).plays;
+  assert.deepEqual(on.map(p => p.name), ['Steady Wing', 'Dog Starter', 'Cheap Live']);
+  const dog = on.find(p => p.name === 'Dog Starter');
+  assert.equal(dog.projection_raw, 34);
+  assert.ok(dog.projected_points < 34);
+  assert.equal(dog.value, Math.round(dog.projected_points / 5000 * 1000 * 100) / 100);
+  assert.match(dog.projection_reasons[0], /^blowout \+16\.0: /);
+  assert.deepEqual(on.find(p => p.name === 'Steady Wing').projection_reasons, []);
+  assert.ok(gppPlays(db, {}).plays.find(p => p.name === 'Dog Starter').projected_points < 34);
+
+  process.env.PROJECTION_SANITY = 'off';
+  try {
+    const off = valuePlays(db, {}).plays;
+    assert.deepEqual(off.map(p => p.name), ['Dog Starter', 'Steady Wing', 'Cheap Live']);
+    assert.equal(off[0].projected_points, 34);
+    assert.equal(off[0].projection_sanity, undefined);
+  } finally {
+    delete process.env.PROJECTION_SANITY;
+  }
 });

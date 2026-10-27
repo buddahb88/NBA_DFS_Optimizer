@@ -171,7 +171,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'value_plays',
-        description: 'Find value plays on current slate (high projection per dollar). slate_date (YYYY-MM-DD) backtests a past night\'s saved slate and adds actual DK points',
+        description: 'Find value plays on current slate (high projection per dollar). Projections carry the app\'s projection sanity layer (blowout trim; projection_raw = RotoWire, projection_reasons = why it moved). slate_date (YYYY-MM-DD) backtests a past night\'s saved slate and adds actual DK points',
         inputSchema: {
           type: 'object',
           properties: {
@@ -194,7 +194,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'gpp_plays',
-        description: 'Find GPP leverage plays (low ownership, high ceiling). slate_date (YYYY-MM-DD) backtests a past night\'s saved slate and adds actual DK points',
+        description: 'Find GPP leverage plays (low ownership, high ceiling). Projections carry the app\'s projection sanity layer (projection_raw = RotoWire, projection_reasons). slate_date (YYYY-MM-DD) backtests a past night\'s saved slate and adds actual DK points',
         inputSchema: {
           type: 'object',
           properties: {

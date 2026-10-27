@@ -5,6 +5,9 @@ import projectionOverrideModel from '../models/projectionOverrideModel.js';
 import projectionService from '../services/projectionService.js';
 import { recomputeSlateRanges } from '../services/variance/outcomeRangeService.js';
 import { DEFAULT_SITE, isValidSite } from '../config/sites.js';
+import {
+  projectionSanityConfig, projectionSanityStatus, setProjectionSanity, setProjectionSanityComponents
+} from '../config/projectionSanity.js';
 
 const router = express.Router();
 
@@ -48,6 +51,38 @@ function parseOptional(value, { min, max }, field) {
   }
   return { value: n };
 }
+
+const sanityResponse = () => ({ ...projectionSanityStatus(), config: projectionSanityConfig() });
+const boolOrNull = (v) => v === undefined || v === null || typeof v === 'boolean';
+
+/**
+ * GET /api/projections/sanity
+ * Projection sanity layer setting (config/projectionSanity.js): { enabled,
+ * source, default, components: { fppm, blowout }, componentDefaults, config }.
+ */
+router.get('/sanity', (req, res) => {
+  res.json(sanityResponse());
+});
+
+/**
+ * PUT /api/projections/sanity
+ * Body { enabled?: boolean | null, components?: { fppm?, blowout? } | null }:
+ * runtime override until the server restarts (Lineup Studio toggle); null
+ * resets to the env / default. Every slate read (optimizer, portfolio, chat,
+ * radar, player tables) follows it.
+ */
+router.put('/sanity', (req, res) => {
+  const { enabled, components } = req.body || {};
+  if (!boolOrNull(enabled)) return res.status(400).json({ error: 'enabled must be true, false or null' });
+  if (components !== undefined && components !== null) {
+    const bad = typeof components !== 'object' || Object.entries(components)
+      .some(([k, v]) => !['fppm', 'blowout'].includes(k) || !boolOrNull(v));
+    if (bad) return res.status(400).json({ error: 'components: { fppm, blowout } with true, false or null' });
+  }
+  if (enabled !== undefined) setProjectionSanity(enabled);
+  if (components !== undefined) setProjectionSanityComponents(components);
+  res.json(sanityResponse());
+});
 
 /**
  * Minutes x FPPM projections for a slate

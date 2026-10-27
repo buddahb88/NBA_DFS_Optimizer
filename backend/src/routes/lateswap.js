@@ -1,7 +1,7 @@
 import express from 'express';
-import db from '../config/database.js';
 import slateModel from '../models/slateModel.js';
 import { runLateSwap } from '../services/lateSwap/index.js';
+import { loadSlatePlayers, resolveSlate } from '../services/slateSource.js';
 
 const router = express.Router();
 
@@ -23,8 +23,9 @@ router.post('/', async (req, res) => {
   if (!options.csv) return res.status(400).json({ error: 'csv (entries file contents) is required' });
 
   try {
-    // All rows, including zero-projection ones, so OUT players are still recognized
-    const dbPlayers = await db.all(`SELECT * FROM players WHERE slate_id = ?`, slateId);
+    // All rows, including zero-projection ones, so OUT players are still recognized;
+    // projections after the sanity layer when it is on
+    const dbPlayers = await loadSlatePlayers(await resolveSlate({ slateId }), { includeZero: true });
     if (!dbPlayers || dbPlayers.length === 0) {
       return res.status(404).json({ error: 'No players found for this slate' });
     }

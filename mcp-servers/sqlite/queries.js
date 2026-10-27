@@ -7,6 +7,8 @@
  */
 
 import { playerKey } from '../../backend/src/utils/playerKey.js';
+import { applySanity } from '../../backend/src/services/projections/sanityLayer.js';
+import { projectionSanityEnabled, projectionSanityConfig } from '../../backend/src/config/projectionSanity.js';
 
 // Matchup season = latest with this many defenses at this many games, as the
 // Archetypes page's Tonight view does (archetypeDefenseService.TONIGHT_MIN_SEASON)
@@ -181,26 +183,59 @@ function slateRows(db, slateDate) {
   };
 }
 
-/** Value plays (projection per $1K) under maxSalary. */
+/**
+ * The backend's projection sanity layer on tool rows (rows need
+ * projected_points, projected_minutes, vegas_spread), as the app's slate reads
+ * apply it: switched by PROJECTION_SANITY / PROJECTION_SANITY_BLOWOUT (this
+ * process has no runtime toggle). The FPPM shrink needs game-log history the
+ * MCP server does not load, so only the blowout trim runs here. Adjusted rows
+ * keep the posted value (projection_raw) with the reasons.
+ */
+function withSanity(rows) {
+  if (!projectionSanityEnabled()) return rows;
+  const config = projectionSanityConfig();
+  config.fppm.enabled = false;
+  return rows.map(r => {
+    const a = applySanity({ projectedPoints: r.projected_points, projectedMinutes: r.projected_minutes, spread: r.vegas_spread }, config);
+    const reasons = a.reasons.map(x => x.text);
+    if (!reasons.length) return { ...r, projection_raw: r.projected_points, projection_reasons: [], projection_sanity: true };
+    const ratio = a.projection / a.raw_projection;
+    return {
+      ...r,
+      projected_points: round2(a.projection),
+      projected_minutes: Math.round(a.minutes * 10) / 10,
+      floor: r.floor == null ? r.floor : round2(r.floor * ratio),
+      ceiling: r.ceiling == null ? r.ceiling : round2(r.ceiling * ratio),
+      projection_raw: r.projected_points,
+      projection_reasons: reasons,
+      projection_sanity: true
+    };
+  });
+}
+
+/** Value plays (projection per $1K) under maxSalary, on the sanity-adjusted projection. */
 export function valuePlays(db, { maxSalary = 5500, limit = 15, slateDate = null } = {}) {
   const s = slateRows(db, slateDate);
-  const plays = db.prepare(
-    `SELECT ${s.name} AS name, p.position, p.team, p.opponent, p.salary, p.projected_points,
-            ROUND(p.projected_points / p.salary * 1000, 2) AS value, p.floor, p.ceiling${s.actual}
-     ${s.from} AND p.salary < ? AND p.salary > 0
-     ORDER BY value DESC LIMIT ?`
-  ).all(...s.params, maxSalary, limit);
+  const rows = db.prepare(
+    `SELECT ${s.name} AS name, p.position, p.team, p.opponent, p.salary, p.projected_points, p.projected_minutes, p.vegas_spread,
+            p.floor, p.ceiling${s.actual}
+     ${s.from} AND p.salary < ? AND p.salary > 0 AND p.projected_points > 0`
+  ).all(...s.params, maxSalary);
+  const plays = withSanity(rows)
+    .map(p => ({ ...p, value: round2(p.projected_points / p.salary * 1000) }))
+    .sort((a, b) => b.value - a.value || b.projected_points - a.projected_points)
+    .slice(0, limit);
   return { slateId: s.slateId, slateDate: s.slateDate, backtest: s.backtest, plays };
 }
 
-/** GPP leverage plays: low ownership, high ceiling. */
+/** GPP leverage plays: low ownership, high ceiling (projection / ceiling after the sanity layer). */
 export function gppPlays(db, { maxRostership = 12, minCeiling = 40, limit = 15, slateDate = null } = {}) {
   const s = slateRows(db, slateDate);
-  const plays = db.prepare(
-    `SELECT ${s.name} AS name, p.position, p.team, p.opponent, p.salary, p.projected_points,
+  const plays = withSanity(db.prepare(
+    `SELECT ${s.name} AS name, p.position, p.team, p.opponent, p.salary, p.projected_points, p.projected_minutes, p.vegas_spread,
             p.rostership, p.ceiling, p.leverage_score, p.boom_probability${s.actual}
      ${s.from} AND p.rostership < ? AND p.ceiling > ?
      ORDER BY p.leverage_score DESC LIMIT ?`
-  ).all(...s.params, maxRostership, minCeiling, limit);
+  ).all(...s.params, maxRostership, minCeiling, limit));
   return { slateId: s.slateId, slateDate: s.slateDate, backtest: s.backtest, plays };
 }

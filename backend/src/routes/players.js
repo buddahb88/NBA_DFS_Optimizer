@@ -32,6 +32,9 @@ async function withMatchups(slateId, players, query) {
 // today) returns that night's saved slate read-only (services/slateSource.js),
 // each player with actualPoints / actualMinutes / resultStatus; ranges=original
 // shows its pre-lock floor / ceiling instead of the outcome-model ones.
+// Projections carry the sanity layer when it is on (config/projectionSanity.js):
+// projection_raw / projected_minutes_raw keep the posted values and
+// projection_reasons say why they moved.
 router.get('/:slateId', async (req, res) => {
   try {
     const { slateId } = req.params;
@@ -51,7 +54,8 @@ router.get('/:slateId', async (req, res) => {
       return res.json(await withMatchups(source.slateId, players, req.query));
     }
 
-    const players = await playerModel.getBySlateId(slateId, filters);
+    // Live: projections after the sanity layer (projection_raw = as synced)
+    const players = await loadSlatePlayers(await resolveSlate({ slateId }), { filters });
     res.json(await withMatchups(slateId, players, req.query));
   } catch (error) {
     res.status(error.status || 500).json({ error: error.message });

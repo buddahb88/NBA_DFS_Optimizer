@@ -5,7 +5,7 @@
  * scoreLineups(lineups, sims)                     -> per-lineup distribution summaries
  */
 
-import playerModel from '../../models/playerModel.js';
+import { getSlatePlayers } from '../slateSource.js';
 import { fetchHistoricalStats } from './historyRepository.js';
 import { runSimulation, summarizePlayers, scoreLineups, playerSamples, DEFAULTS } from './engine.js';
 import { randomSeed } from './rng.js';
@@ -21,7 +21,8 @@ export async function simulatePlayers(slateId, { iterations = DEFAULTS.iteration
   const iters = Math.min(MAX_ITERATIONS, Math.max(1, Math.floor(Number(iterations) || DEFAULTS.iterations)));
   const runSeed = seed ?? randomSeed();
 
-  const rows = await playerModel.getBySlateId(slateId);
+  // Projections after the sanity layer when it is on (as the optimizer sees them)
+  const { players: rows } = await getSlatePlayers({ slateId });
   // Stable input order so a given seed always reproduces the same samples
   const players = [...(rows || [])].sort((a, b) => (a.id ?? 0) - (b.id ?? 0));
 
