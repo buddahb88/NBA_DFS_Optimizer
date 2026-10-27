@@ -308,15 +308,16 @@ export async function computeTeammateOpportunity(source, all, { now = new Date()
  * Teammate-out opportunity for a slate: { source, slateDate, season, teams,
  * players }. Slate selection as slateSource.resolveSlate (slateId,
  * slateDate - a past date is a backtest - and site). Backtest player rows
- * carry actual_points / actual_minutes / result_status.
+ * carry actual_points / actual_minutes / result_status. prelockOnly: only
+ * outs known before lock (as computeTeammateOpportunity).
  * Throws SlateSourceError (404 when no slate matches).
  */
-export async function getTeammateOpportunity({ slateId = null, slateDate = null, site = null, now = new Date() } = {}) {
+export async function getTeammateOpportunity({ slateId = null, slateDate = null, site = null, prelockOnly = false, now = new Date() } = {}) {
   const source = await resolveSlate({ slateId, slateDate, site, now });
   if (!source) throw new SlateSourceError('No slate synced', 404);
   let all = await loadSlatePlayers(source, { includeZero: true });
   if (source.isBacktest) all = await withActuals(source, all);
-  return { source, ...await computeTeammateOpportunity(source, all, { now }) };
+  return { source, ...await computeTeammateOpportunity(source, all, { now, prelockOnly }) };
 }
 
 export default { getTeammateOpportunity, computeTeammateOpportunity };

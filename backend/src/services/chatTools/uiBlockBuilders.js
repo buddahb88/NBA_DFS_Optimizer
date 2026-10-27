@@ -312,7 +312,67 @@ async function buildLineup(r) {
   });
 }
 
+/** player_list row for an opportunity player: score for the mode, reason, key metrics as stats. */
+function opportunityCard(p, { score, reason, metrics, actualPoints }, extra = {}) {
+  return {
+    name: p.name,
+    player_key: keyOf(p.name),
+    team: p.team ?? null,
+    opponent: p.opponent ?? null,
+    position: p.position ?? null,
+    headshot: extra.headshot ?? null,
+    salary: val(p.salary),
+    projection: val(p.projectedPoints),
+    projected_minutes: val(metrics.minutes?.projected),
+    ownership: val(p.ownership),
+    injury_status: p.injuryStatus ?? null,
+    flags: [],
+    opportunity_score: val(score),
+    reason: reason || null,
+    stats: {
+      min_delta_l3: val(metrics.minutes?.deltaL3),
+      usg_delta: val(metrics.usage?.delta),
+      rate_projection: val(metrics.rateProjection?.projection),
+      rate_gap: val(metrics.rateProjection?.gap),
+      hit5x_l10: val(metrics.hit5xL10 ?? metrics.valueHitRates?.hit5x),
+      absorbed_pct: val(metrics.teammateOut?.absorbedPct),
+      implied_total: val(metrics.impliedTotal ?? metrics.environment?.impliedTotal),
+      ...(actualPoints === undefined ? {} : { actual_points: val(actualPoints) }),
+    },
+  };
+}
+
+const modeLabel = (mode) => (mode === 'gpp' ? 'GPP' : 'Cash');
+
+async function opportunityRadar(r) {
+  const { byKey } = await slateExtras(r.slateId);
+  return uiBlock('player_list', {
+    title: `Opportunity Radar (${modeLabel(r.mode)})`,
+    note: r.backtest ? r.label : undefined,
+    context: { slate_id: r.slateId, site: r.site, season: r.season, date: r.slateDate ?? null },
+    players: r.players.map(p => opportunityCard(p, p, byKey.get(keyOf(p.name)))),
+  });
+}
+
+async function playerOpportunity(r) {
+  const { byKey } = await slateExtras(r.slateId);
+  const p = r.player;
+  return uiBlock('player_list', {
+    title: `${p.name} opportunity`,
+    note: r.backtest ? r.label : undefined,
+    context: { slate_id: r.slateId, site: r.site, season: r.season, date: r.slateDate ?? null },
+    players: [opportunityCard(p, {
+      score: r.scores.cash.score, reason: r.reason, metrics: r.metrics, actualPoints: r.actual?.points,
+    }, byKey.get(keyOf(p.name)))].map(card => ({
+      ...card,
+      stats: { ...card.stats, cash_score: val(r.scores.cash.score), gpp_score: val(r.scores.gpp.score) },
+    })),
+  });
+}
+
 export const UI_BLOCK_BUILDERS = {
+  get_opportunity_radar: opportunityRadar,
+  get_player_opportunity: playerOpportunity,
   get_archetype_matchups: archetypeMatchups,
   get_player_profile: playerProfile,
   get_team_defense_profile: teamDefense,

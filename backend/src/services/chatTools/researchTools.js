@@ -12,6 +12,8 @@
  * - get_usage_bumps / get_missing_players / get_streaks_and_consistency  insightsService
  * - score_lineup              resultsService.getPlayerResultsOnDate
  * - get_projection_results    resultsService.getResults / getPlayerResults
+ * - get_opportunity_radar     opportunity/radarService.getOpportunityRadar
+ * - get_player_opportunity    one radar row in full + teammateService splits (pre-lock outs)
  *
  * Slate tools default to the latest slate and return its slateDate / isStale
  * (staleWarning when it is not tonight's). Rates are fractions (0.31 = 31%).
@@ -26,12 +28,17 @@ import { getTonight, getDefense, rankDefenses } from '../archetypeDefenseService
 import { getPlayerProfiles, getSeasonToDate } from '../playerProfileService.js';
 import { getResults, getPlayerResults, getPlayerResultsOnDate } from '../resultsService.js';
 import { resolvePlayer } from './historyTools.js';
-import { canonicalTeam } from '../../utils/playerKey.js';
+import { canonicalTeam, playerKey } from '../../utils/playerKey.js';
 import { getCurrentSeason } from '../../utils/season.js';
 import { resolveSite } from '../../utils/resolveSite.js';
 import { withUiBlocks } from './uiBlockBuilders.js';
 import { slateDateFields } from '../slateFreshness.js';
 import { chatSlate } from '../slateSource.js';
+import { getOpportunityRadar } from '../opportunity/radarService.js';
+import { opportunityScore } from '../opportunity/radarScore.js';
+import { getTeammateOpportunity } from '../opportunity/teammateService.js';
+import { RADAR_MODES } from '../opportunity/radarConfig.js';
+import { isOutStatus } from '../minutesModel.js';
 
 export const RESEARCH_TOOL_NAMES = Object.freeze([
   'get_archetype_matchups',
@@ -42,6 +49,8 @@ export const RESEARCH_TOOL_NAMES = Object.freeze([
   'get_streaks_and_consistency',
   'score_lineup',
   'get_projection_results',
+  'get_opportunity_radar',
+  'get_player_opportunity',
 ]);
 
 const SITES = ['draftkings', 'fanduel', 'yahoo'];
@@ -403,6 +412,195 @@ async function getProjectionResults({ date, startDate, endDate, site, slateId })
   };
 }
 
+// ── Opportunity Radar ────────────────────────────────────────────────
+
+/**
+ * The radar for a chat request: { source, dateFields, radar } or { error }.
+ * A past slateDate is a backtest (no lookahead: metrics use games before it).
+ */
+async function radarFor({ slateId, slateDate, site, mode = 'cash' }) {
+  const m = String(mode || 'cash').toLowerCase();
+  if (!RADAR_MODES.includes(m)) return { error: `mode must be one of: ${RADAR_MODES.join(', ')}` };
+  const slate = await chatSlate({ slateId, slateDate });
+  if (slate.error) return { error: slate.error };
+  const { source, dateFields } = slate;
+  const radar = await getOpportunityRadar({
+    slateId: source.slateId, slateDate: source.isBacktest ? source.slateDate : null, site: site || source.site, mode: m,
+  });
+  return { source, dateFields, radar };
+}
+
+const radarSlateFields = ({ source, dateFields, radar }) => ({
+  slateId: source.slateId,
+  ...dateFields,
+  site: radar.source.site,
+  season: radar.season,
+  mode: radar.mode,
+});
+
+const actualFields = (p) => (p.actualPoints === undefined
+  ? {}
+  : { actualPoints: p.actualPoints, actualMinutes: p.actualMinutes, resultStatus: p.resultStatus });
+
+/** Every O1-O3 metric of a radar row, grouped. */
+const fullMetrics = (p) => ({
+  minutes: {
+    projected: p.projected_minutes, l3: p.min_l3, l5: p.min_l5, l10: p.min_l10, season: p.min_season,
+    deltaL3: p.min_delta_l3, deltaL5: p.min_delta_l5, sdL10: p.min_sd_l10, under20L10: p.under20_l10,
+  },
+  usage: { l5: p.usg_l5, season: p.usg_season, delta: p.usg_delta },
+  fppm: { l10: p.fppm_l10, season: p.fppm_season, delta: p.fppm_delta },
+  shotVolume: { tsa36L5: p.tsa36_l5, tsa36Season: p.tsa36_season, tsa36Delta: p.tsa36_delta, fg3a36L5: p.fg3a36_l5, fg3a36Delta: p.fg3a36_delta },
+  shooting: { tsL5: p.ts_l5, tsSeason: p.ts_season, tsGap: p.ts_gap, flag: p.shooting_flag },
+  role: {
+    startedLastGame: p.started_last_game, startsL5: p.starts_l5, starterChange: p.starter_change,
+    starterStreak: p.starter_streak, starterSince: p.starter_since,
+  },
+  valueHitRates: { games: p.value_games_l10, hit4x: p.hit4x_l10, hit5x: p.hit5x_l10, hit6x: p.hit6x_l10 },
+  rateProjection: {
+    projection: p.rate_projection, posted: p.projected_points, gap: p.rate_gap, gapPct: p.rate_gap_pct,
+    value: p.rate_value, teammateFactor: p.rate_teammate_factor, envFactor: p.rate_env_factor, reason: p.rate_reason,
+  },
+  salaryLag: {
+    lagging: p.salary_lag, salaryChange: p.salary_change, salaryChangeL1: p.salary_change_l1,
+    fpL5: p.fp_l5, fpPriorL5: p.fp_prior_l5, reason: p.salary_lag_reason,
+  },
+  teammateOut: {
+    names: p.teammate_out_names, sample: p.teammate_sample, gamesWithout: p.teammate_games_without,
+    minDelta: p.teammate_min_delta, usgDelta: p.teammate_usg_delta, playShareDelta: p.teammate_play_share_delta,
+    absorbedPct: p.teammate_absorbed_pct, teamVacatedUsage: p.team_vacated_usage, teamOutNames: p.team_out_names,
+  },
+  environment: {
+    impliedTotal: p.implied_total, overUnder: p.over_under, spread: p.spread, blowout: p.blowout,
+    paceProxy: p.pace_proxy, restDays: p.rest_days, backToBack: p.back_to_back,
+  },
+  sample: { gamesL5: p.games_l5, gamesSeason: p.games_season, seasonFallback: p.season_fallback },
+});
+
+/** The few metrics a radar list row carries. */
+const keyMetrics = (p) => ({
+  minutes: { projected: p.projected_minutes, deltaL3: p.min_delta_l3, sdL10: p.min_sd_l10 },
+  usage: { delta: p.usg_delta },
+  rateProjection: { projection: p.rate_projection, gap: p.rate_gap },
+  hit5xL10: p.hit5x_l10,
+  teammateOut: { names: p.teammate_out_names, sample: p.teammate_sample, absorbedPct: p.teammate_absorbed_pct },
+  impliedTotal: p.implied_total,
+  salaryLag: p.salary_lag,
+});
+
+const radarRow = (p) => ({
+  name: p.name,
+  team: p.team,
+  opponent: p.opponent,
+  position: p.position,
+  salary: p.salary,
+  projectedPoints: p.projected_points,
+  ownership: p.rostership,
+  injuryStatus: p.injury_status,
+  score: p.score,
+  cashScore: p.cash_score,
+  gppScore: p.gpp_score,
+  coverage: p.coverage,
+  reason: p.reason,
+  metrics: keyMetrics(p),
+  ...actualFields(p),
+});
+
+const RADAR_HOW_TO_READ = 'score = Opportunity Score 0-100 for the mode (50 = neutral), opportunity over results: minutes and usage trends, '
+  + 'usage vacated by OUT teammates, rate projection vs posted, value hit rates at tonight\'s salary, role stability and '
+  + 'game environment; cash adds floor, gpp adds ceiling and leverage vs ownership. Usage deltas are fractions (0.03 = +3 pts). '
+  + 'Metrics only use games before the slate date.';
+
+async function getOpportunityRadarTool({ slateId, slateDate, site, mode = 'cash', minSalary, maxSalary, position, limit = 15 }) {
+  const r = await radarFor({ slateId, slateDate, site, mode });
+  if (r.error) return { success: false, message: r.error };
+  const pos = position ? String(position).toUpperCase() : null;
+  const min = Number(minSalary) || null;
+  const max = Number(maxSalary) || null;
+  const matches = r.radar.players.filter(p => !isOutStatus(p.injury_status)
+    && (min === null || Number(p.salary) >= min)
+    && (max === null || Number(p.salary) <= max)
+    && (!pos || String(p.position || '').toUpperCase().split('/').includes(pos)));
+  return {
+    success: true,
+    ...radarSlateFields(r),
+    filters: { minSalary: min, maxSalary: max, position: pos },
+    slatePlayers: r.radar.players.length,
+    totalMatches: matches.length,
+    players: matches.slice(0, clampLimit(limit, 15)).map(radarRow),
+    ...(r.radar.validation ? { validation: r.radar.validation } : {}),
+    howToRead: RADAR_HOW_TO_READ,
+  };
+}
+
+const splitRow = (s) => ({
+  outName: s.out_name,
+  sample: s.sample,
+  gamesWith: s.games_with,
+  gamesWithout: s.games_without,
+  minutesWith: s.min_with,
+  minutesWithout: s.min_without,
+  minDelta: s.min_delta,
+  usgWith: s.usg_with,
+  usgWithout: s.usg_without,
+  usgDelta: s.usg_delta,
+  fppmDelta: s.fppm_delta,
+  fptsWith: s.fpts_with,
+  fptsWithout: s.fpts_without,
+  fptsDelta: s.fpts_delta,
+  absorbedPct: s.absorbed_pct,
+});
+
+/** Slate players sharing a name word with the query. */
+function slateSuggestions(rows, name) {
+  const words = new Set((playerKey(name) || String(name).toLowerCase()).split(/\s+/).filter(w => w.length > 1));
+  return rows.filter(p => (p.player_key || '').split(/\s+/).some(w => words.has(w))).map(p => p.name).slice(0, 5);
+}
+
+async function getPlayerOpportunity({ name, slateDate, slateId, site }) {
+  if (!name) return { success: false, message: 'name is required' };
+  const r = await radarFor({ slateId, slateDate, site, mode: 'cash' });
+  if (r.error) return { success: false, message: r.error };
+  const rows = r.radar.players;
+  const key = playerKey(name);
+  const p = rows.find(x => x.player_key === key);
+  if (!p) {
+    const closestMatches = slateSuggestions(rows, name);
+    return {
+      success: false,
+      message: `"${name}" is not on the ${r.source.label} slate (projected players only).${closestMatches.length ? ` Closest matches: ${closestMatches.join(', ')}.` : ''}`,
+      closestMatches,
+    };
+  }
+
+  // Pre-lock outs only, as the radar's own teammate fields (no lookahead in a backtest)
+  const teammates = await getTeammateOpportunity({
+    slateId: r.source.slateId, slateDate: r.source.isBacktest ? r.source.slateDate : null, site: r.radar.source.site, prelockOnly: true,
+  });
+  const splits = teammates.players.find(x => x.player_key === p.player_key)?.splits ?? [];
+  const rankOf = (field) => 1 + rows.filter(x => (x[field] ?? -1) > (p[field] ?? -1)).length;
+  const gpp = opportunityScore(p, 'gpp');
+
+  return {
+    success: true,
+    ...radarSlateFields(r),
+    player: {
+      name: p.name, key: p.player_key, team: p.team, opponent: p.opponent, position: p.position,
+      salary: p.salary, projectedPoints: p.projected_points, ownership: p.rostership, injuryStatus: p.injury_status,
+      floor: p.floor, ceiling: p.ceiling,
+    },
+    scores: {
+      cash: { score: p.cash_score, rank: rankOf('cash_score'), of: rows.length, components: p.components, coverage: p.coverage },
+      gpp: { score: gpp.score, rank: rankOf('gpp_score'), of: rows.length, components: gpp.components, coverage: gpp.coverage },
+    },
+    reason: p.reason,
+    metrics: fullMetrics(p),
+    teammateSplits: splits.map(splitRow),
+    ...(p.actualPoints === undefined ? {} : { actual: { points: p.actualPoints, minutes: p.actualMinutes, status: p.resultStatus } }),
+    howToRead: `${RADAR_HOW_TO_READ} Components are 0-1 (0.5 = neutral). teammateSplits: this player with each pre-lock OUT teammate off vs on the floor.`,
+  };
+}
+
 // ── Definitions ──────────────────────────────────────────────────────
 
 const DEFINITIONS = [
@@ -511,6 +709,39 @@ const DEFINITIONS = [
       },
     },
     handler: getProjectionResults,
+  },
+  {
+    name: 'get_opportunity_radar',
+    description: 'FIRST CHOICE for "who is in a good spot tonight", value plays, a cash core and usage / role-change questions: slate players ranked by Opportunity Score (0-100, cash or gpp) from minutes and usage trends, usage vacated by OUT teammates, rate projection vs posted, value hit rates at tonight\'s salary, role stability and game environment (gpp adds ceiling and leverage). Each row has a reason line and key metrics. Filter by salary band and position. A past slateDate is a backtest with actual points and a top-decile check.',
+    parameters: {
+      type: 'object',
+      properties: {
+        slateId: SLATE_PROP,
+        slateDate: { type: 'string', description: 'YYYY-MM-DD, only for an explicit backtest of a past night: that night\'s saved slate, metrics from games before it, plus actual points' },
+        site: SITE_PROP,
+        mode: { type: 'string', enum: RADAR_MODES, description: 'cash (default: minutes, stability, floor) or gpp (ceiling, leverage)' },
+        minSalary: { type: 'number', description: 'Minimum salary (e.g. 3500)' },
+        maxSalary: { type: 'number', description: 'Maximum salary (e.g. 6500 for value plays)' },
+        position: { type: 'string', description: 'Only this position (PG, SG, SF, PF, C)' },
+        limit: { type: 'number', description: 'Max players (default 15, max 50)' },
+      },
+    },
+    handler: getOpportunityRadarTool,
+  },
+  {
+    name: 'get_player_opportunity',
+    description: 'One slate player\'s full Opportunity Radar breakdown: cash and gpp scores with rank and every component, the reason line, minutes / usage / FPPM / shot volume / shooting trends, role, value hit rates at tonight\'s salary, rate projection vs posted, salary lag, game environment, and his splits with each OUT teammate off the floor. Use for "is X in a good spot" or "why is X ranked there".',
+    parameters: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Player name (must be on the slate)' },
+        slateDate: { type: 'string', description: 'YYYY-MM-DD, only for an explicit backtest of a past night' },
+        slateId: SLATE_PROP,
+        site: SITE_PROP,
+      },
+      required: ['name'],
+    },
+    handler: getPlayerOpportunity,
   },
 ];
 

@@ -33,7 +33,7 @@ Your role is to:
 
 Available Agents:
 - **optimizer**: Build and validate DFS lineups (use for: "build me a lineup", "optimize", "lock player X")
-- **research**: Slate data and research tools (use for: "who are the top...", "best matchups tonight", "who's missing / usage bumps", "how did this lineup score on <date>", "how accurate were projections", "what's the slate")
+- **research**: Slate data and research tools (use for: "who's in a good spot tonight", value plays, cash core and usage questions -> get_opportunity_radar first, get_player_opportunity for one player; "who are the top...", "best matchups tonight", "who's missing / usage bumps", "how did this lineup score on <date>", "how accurate were projections", "what's the slate")
 - **analyst**: Player-level history and context (use for: "how does X perform against...", "X's role / usage / archetype", "X without teammate Y", "how does <team> defend <archetype>", trends)
 
 In the task, name the tool to use when one fits (see TOOL OWNERSHIP); raw SQL is only a fallback.

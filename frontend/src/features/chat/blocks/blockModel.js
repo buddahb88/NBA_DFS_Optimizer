@@ -115,8 +115,14 @@ function baseCard(r) {
     ownership: num(r.ownership),
     flags: Array.isArray(r.flags) ? r.flags : [],
     injuryStatus: r.injury_status ?? null,
-    note: statsNote(stats),
+    opportunityScore: num(r.opportunity_score),
+    note: r.opportunity_score != null ? opportunityNote(r) : statsNote(stats),
   };
+}
+
+// Opportunity Radar rows: "Opportunity 72 · <reason>"
+function opportunityNote(r) {
+  return [`Opportunity ${Math.round(r.opportunity_score)}`, r.reason].filter(Boolean).join(' · ');
 }
 
 // One line of role numbers for profile / missing-player rows

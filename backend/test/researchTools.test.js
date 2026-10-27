@@ -405,7 +405,7 @@ describe('get_projection_results', () => {
 describe('wiring', () => {
   test('research tools are on ResearchAgent, AnalystAgent and aiChatService; sql is a fallback', async () => {
     const { RESEARCH_TOOL_NAMES } = await import('../src/services/chatTools/researchTools.js');
-    assert.equal(RESEARCH_TOOL_NAMES.length, 8);
+    assert.equal(RESEARCH_TOOL_NAMES.length, 10);
     const aiChatService = (await import('../src/services/aiChatService.js')).default;
     const ResearchAgent = (await import('../src/agents/ResearchAgent.js')).default;
     const AnalystAgent = (await import('../src/agents/AnalystAgent.js')).default;

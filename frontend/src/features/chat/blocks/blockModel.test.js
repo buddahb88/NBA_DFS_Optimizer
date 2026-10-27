@@ -80,6 +80,16 @@ describe('cardPlayers', () => {
     expect(p.note).toBe('USG 31% · 42.5 DK avg')
   })
 
+  it('shows the opportunity score and reason as the note', () => {
+    const [p] = cardPlayers('player_list', {
+      players: [{ name: 'Wing Man', opportunity_score: 72.4, reason: '+6.0 min L3, starter since 12/16', stats: { min_delta_l3: 6, dk_avg: 30 } }],
+    })
+    expect(p.opportunityScore).toBe(72.4)
+    expect(p.note).toBe('Opportunity 72 · +6.0 min L3, starter since 12/16')
+    const [bare] = cardPlayers('player_list', { players: [{ name: 'Q', opportunity_score: 41, reason: '' }] })
+    expect(bare.note).toBe('Opportunity 41')
+  })
+
   it('maps usage bumps with the bumped projection and minutes without / with', () => {
     const [p] = cardPlayers('usage_bumps', {
       bumps: [

@@ -40,6 +40,7 @@ ROLE AND MATCHUP TABLES (join on player_key and season):
 - slate_player_snapshots: past slates per (game_date, site, slate_id, player_key) - salary, projected_points, rostership (projected ownership)
 
 TOOLS FIRST (query_historical_data only for what they do not cover):
+- Who's in a good spot / value / cash core / usage risers tonight: get_opportunity_radar first (mode cash or gpp); one player's opportunity in full: get_player_opportunity
 - Tonight's archetype matchups: get_archetype_matchups; one defense: get_team_defense_profile
 - Role / usage / archetype by season: get_player_profile (rates are fractions)
 - Teammate out: get_usage_without_teammate, analyze_roster_context; slate-wide: get_usage_bumps, get_missing_players

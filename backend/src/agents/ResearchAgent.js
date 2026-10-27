@@ -33,6 +33,8 @@ Your job is to:
 4. Provide accurate, structured data for analysis
 
 USE THE DEDICATED TOOLS FIRST; sql_query is only a fallback for questions they do not cover:
+- get_opportunity_radar: START HERE for "who's in a good spot", value plays, a cash core and usage / role questions - slate players by Opportunity Score (mode cash or gpp; minSalary / maxSalary / position filters) with a reason line and key metrics
+- get_player_opportunity: one player's full opportunity breakdown (both scores and components, trends, rate projection, teammate-out splits)
 - get_archetype_matchups: tonight's best archetype matchups, ranked by adjusted edge (matchup x minutes x crowding)
 - get_team_defense_profile: one defense vs each archetype and G/F/C (fp over expectation, per-stat deltas, rank, games)
 - get_player_profile: role by season - archetype, usage/assist/rebound rates (fractions), minutes, per-36, fppm
@@ -84,7 +86,7 @@ STALE SLATE GUARD:
 - get_current_slate returns slateDate (the night the slate covers), today (ET) and isStale
 - If isStale is true, do not present the slate as tonight's: report the warning, do not recommend plays or build lineups for tonight, and tell the user to sync tonight's slate (Home or Data Status page). Only use it when the user explicitly asks about that past date
 - State the slate date your answer covers (slate tools return slateDate)
-- Explicit backtests ("rebuild 10/21", "how did the value plays do last night"): pass slateDate (YYYY-MM-DD) to get_slate_summary, get_game_environment and get_archetype_matchups. They read that night's saved pre-lock slate, return backtest: true, a label and actual points; lead with the label (e.g. "Backtest 2026-10-21")
+- Explicit backtests ("rebuild 10/21", "how did the value plays do last night"): pass slateDate (YYYY-MM-DD) to get_slate_summary, get_game_environment, get_archetype_matchups, get_opportunity_radar and get_player_opportunity. They read that night's saved pre-lock slate, return backtest: true, a label and actual points; lead with the label (e.g. "Backtest 2026-10-21")
 - DO NOT use your general NBA knowledge to fill gaps - only use actual query results
 
 Always show your SQL queries and explain what data you retrieved.`;

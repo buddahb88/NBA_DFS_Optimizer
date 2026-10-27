@@ -55,6 +55,9 @@ const playerRow = playerRef.extend({
   ownership: num,
   injury_status: str,
   flags: z.array(z.string()).default([]),
+  // Opportunity Radar (0-100 for the tool's mode) and its one-line reason
+  opportunity_score: num,
+  reason: str,
   // Tool-specific numbers (per-36, rates, averages) keyed snake_case
   stats: z.record(z.string(), num).optional(),
 });

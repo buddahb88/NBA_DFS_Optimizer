@@ -113,6 +113,7 @@ describe('tool ownership map', () => {
 describe('orchestrator calling an agent\'s tool is routed to that agent', () => {
   const cases = [
     { tool: 'get_usage_bumps', args: {}, agent: 'research' },
+    { tool: 'get_opportunity_radar', args: { mode: 'gpp', maxSalary: 6500 }, agent: 'research' },
     { tool: 'build_lineup', args: { slateId: '29805', minSalary: 0 }, agent: 'optimizer' },
     { tool: 'get_player_history', args: { playerName: 'Nobody Atall' }, agent: 'analyst' },
   ];

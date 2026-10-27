@@ -229,6 +229,7 @@ ${schemaDoc}
 - Include strategic rationale: WHY you made certain selections
 
 **Tool Choice (dedicated tools first, sql_query only as a fallback):**
+- Who's in a good spot, value plays, cash core, usage / role changes: get_opportunity_radar FIRST (mode cash or gpp, salary band, position); one player in full: get_player_opportunity
 - Tonight's best matchups: get_archetype_matchups (adjusted edge = matchup x minutes x crowding)
 - A defense's strengths/weaknesses: get_team_defense_profile
 - A player's role, usage, archetype: get_player_profile (rates are fractions: 0.28 = 28%)
