@@ -68,14 +68,18 @@ const backtestSource = ({ slate_id: slateId, site, game_date: gameDate, players 
   };
 };
 
-/** Saved slates on a date: [{ slate_id, site, game_date, players }], biggest first. */
+// slate_catalog main flag and name of a saved slate (catalog rows exist for slates found on RotoWire)
+const CATALOG_JOIN = 'LEFT JOIN slate_catalog c ON c.site = s.site AND c.slate_id = s.slate_id';
+const IS_MAIN = 'MAX(CAST(COALESCE(c.is_main, 0) AS INT))';
+
+/** Saved slates on a date: [{ slate_id, site, game_date, players, is_main }], the main slate first, then biggest. */
 async function snapshotSlatesOn(slateDate, { slateId, site } = {}) {
-  let sql = `SELECT slate_id, site, game_date, COUNT(*) AS players
-    FROM slate_player_snapshots WHERE game_date = ?`;
+  let sql = `SELECT s.slate_id, s.site, s.game_date, COUNT(*) AS players, ${IS_MAIN} AS is_main
+    FROM slate_player_snapshots s ${CATALOG_JOIN} WHERE s.game_date = ?`;
   const params = [slateDate];
-  if (slateId) { sql += ' AND slate_id = ?'; params.push(String(slateId)); }
-  if (site) { sql += ' AND site = ?'; params.push(site); }
-  sql += ' GROUP BY slate_id, site, game_date ORDER BY COUNT(*) DESC, slate_id DESC';
+  if (slateId) { sql += ' AND s.slate_id = ?'; params.push(String(slateId)); }
+  if (site) { sql += ' AND s.site = ?'; params.push(site); }
+  sql += ` GROUP BY s.slate_id, s.site, s.game_date ORDER BY ${IS_MAIN} DESC, COUNT(*) DESC, s.slate_id DESC`;
   return db.all(sql, ...params);
 }
 
@@ -361,18 +365,23 @@ export async function chatSlate({ slateId = null, slateDate = null } = {}) {
 }
 
 /**
- * Saved past slates for the backtest picker, newest first:
- * [{ slateDate, slateId, site, players, label }].
+ * Saved past slates for the backtest picker, newest first (each date's main
+ * slate first): [{ slateDate, slateId, site, players, label, isMain, name }].
+ * isMain / name come from slate_catalog (false / null when not cataloged).
  */
 export async function listBacktestSlates({ site = null, now = new Date(), limit = 60 } = {}) {
-  let sql = `SELECT game_date, slate_id, site, COUNT(*) AS players FROM slate_player_snapshots WHERE game_date < ?`;
+  let sql = `SELECT s.game_date, s.slate_id, s.site, COUNT(*) AS players, ${IS_MAIN} AS is_main, MAX(c.name) AS name
+    FROM slate_player_snapshots s ${CATALOG_JOIN} WHERE s.game_date < ?`;
   const params = [easternDate(now)];
-  if (site) { sql += ' AND site = ?'; params.push(site); }
-  sql += ' GROUP BY game_date, slate_id, site ORDER BY game_date DESC, COUNT(*) DESC';
+  if (site) { sql += ' AND s.site = ?'; params.push(site); }
+  sql += ` GROUP BY s.game_date, s.slate_id, s.site ORDER BY s.game_date DESC, ${IS_MAIN} DESC, COUNT(*) DESC`;
   const rows = await db.all(sql, ...params);
   return rows.slice(0, limit).map(r => {
     const s = backtestSource(r);
-    return { slateDate: s.slateDate, slateId: s.slateId, site: s.site, players: s.playerCount, label: s.label };
+    return {
+      slateDate: s.slateDate, slateId: s.slateId, site: s.site, players: s.playerCount, label: s.label,
+      isMain: Number(r.is_main) === 1, name: r.name ?? null
+    };
   });
 }
 

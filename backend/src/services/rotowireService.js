@@ -159,38 +159,43 @@ class RotowireService {
     return { risk: absSpread > 10 ? (absSpread - 10) * 0.1 : 0 };
   }
 
+  /** Raw players.php entries for a slate id (past slates are still served by id). */
+  async fetchRawPlayers(slateId) {
+    const url = `${this.baseUrl}/players.php?slateID=${slateId}`;
+    console.log(`🌐 Fetching from RotoWire: ${url}`);
+
+    const response = await fetch(url, {
+      headers: {
+        'accept': 'application/json, text/plain, */*',
+        'accept-language': 'en-US,en;q=0.9',
+        'priority': 'u=1, i',
+        'sec-ch-ua': '"Google Chrome";v="141", "Not?A_Brand";v="8", "Chromium";v="141"',
+        'sec-ch-ua-mobile': '?0',
+        'sec-ch-ua-platform': '"Windows"',
+        'sec-fetch-dest': 'empty',
+        'sec-fetch-mode': 'cors',
+        'sec-fetch-site': 'same-origin',
+        'cookie': this.cookie,
+        'Referer': 'https://www.rotowire.com/daily/nba/optimizer.php'
+      },
+      method: 'GET'
+    });
+
+    console.log(`📡 RotoWire Response: ${response.status} ${response.statusText}`);
+
+    if (!response.ok) {
+      // Get response body for debugging
+      const errorBody = await response.text();
+      console.error(`❌ RotoWire Error Body:`, errorBody.substring(0, 500));
+      throw new Error(`RotoWire API error: ${response.status} ${response.statusText}`);
+    }
+
+    return response.json();
+  }
+
   async fetchPlayers(slateId) {
     try {
-      const url = `${this.baseUrl}/players.php?slateID=${slateId}`;
-      console.log(`🌐 Fetching from RotoWire: ${url}`);
-
-      const response = await fetch(url, {
-        headers: {
-          'accept': 'application/json, text/plain, */*',
-          'accept-language': 'en-US,en;q=0.9',
-          'priority': 'u=1, i',
-          'sec-ch-ua': '"Google Chrome";v="141", "Not?A_Brand";v="8", "Chromium";v="141"',
-          'sec-ch-ua-mobile': '?0',
-          'sec-ch-ua-platform': '"Windows"',
-          'sec-fetch-dest': 'empty',
-          'sec-fetch-mode': 'cors',
-          'sec-fetch-site': 'same-origin',
-          'cookie': this.cookie,
-          'Referer': 'https://www.rotowire.com/daily/nba/optimizer.php'
-        },
-        method: 'GET'
-      });
-
-      console.log(`📡 RotoWire Response: ${response.status} ${response.statusText}`);
-
-      if (!response.ok) {
-        // Get response body for debugging
-        const errorBody = await response.text();
-        console.error(`❌ RotoWire Error Body:`, errorBody.substring(0, 500));
-        throw new Error(`RotoWire API error: ${response.status} ${response.statusText}`);
-      }
-
-      const data = await response.json();
+      const data = await this.fetchRawPlayers(slateId);
       const lookups = await this.loadDefenseLookups();
       const players = this.transformPlayerData(data, lookups);
       return await applyRangesToPlayers(players, { site: 'draftkings' });

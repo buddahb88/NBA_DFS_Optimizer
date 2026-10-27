@@ -126,6 +126,24 @@ export function parseScoreboard(scoreboard, date) {
 }
 
 /**
+ * Vegas lines per team from a summary's pickcenter (the sportsbook's line as
+ * of tip-off): Map(team -> { vegas_implied_total, vegas_spread, over_under }).
+ * pickcenter spread is the home team's; each team gets its own (favorite
+ * negative). Empty when the game has no line.
+ */
+export function parseGameOdds(summary, game) {
+  const odds = new Map();
+  const line = (summary?.pickcenter || []).find(p => p?.spread != null && p?.overUnder != null
+    && Number.isFinite(Number(p.spread)) && Number.isFinite(Number(p.overUnder)));
+  if (!line) return odds;
+  const spread = Number(line.spread);
+  const total = Number(line.overUnder);
+  odds.set(game.home_team, { vegas_implied_total: (total - spread) / 2, vegas_spread: spread, over_under: total });
+  odds.set(game.away_team, { vegas_implied_total: (total + spread) / 2, vegas_spread: spread === 0 ? 0 : -spread, over_under: total });
+  return odds;
+}
+
+/**
  * historical_games rows, game_player_status rows and team_game_stats rows
  * from a summary response. `game` is the scoreboard entry for the event.
  */
@@ -276,6 +294,16 @@ class EspnBoxScoreService {
 
   async fetchGame(game) {
     return parseSummary(await this.request(SUMMARY_URL, { event: game.game_id }), game);
+  }
+
+  /** Vegas lines for every completed game on a date: Map(team -> parseGameOdds values). */
+  async fetchOdds(date) {
+    const odds = new Map();
+    for (const game of await this.fetchScoreboard(date)) {
+      const summary = await this.request(SUMMARY_URL, { event: game.game_id });
+      for (const [team, line] of parseGameOdds(summary, game)) odds.set(team, line);
+    }
+    return odds;
   }
 
   /** game_ids among `gameIds` with both team_game_stats rows stored */

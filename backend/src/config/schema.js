@@ -5,7 +5,7 @@ import { migrateProjectionOverrides } from './projectionOverrideMigrations.js';
 import { migratePlayerSettings } from './playerSettingsMigrations.js';
 import { migratePlayerKey } from './playerKeyMigrations.js';
 import { migrateLineupPersistence } from './lineupMigrations.js';
-import { migrateSlatePlayerSnapshots } from './snapshotMigrations.js';
+import { migrateSlatePlayerSnapshots, migrateSlateCatalog } from './snapshotMigrations.js';
 import { migrateEspnBoxScores } from './espnMigrations.js';
 import { migratePlayerSeasonProfiles } from './playerProfileMigrations.js';
 import { migrateSyncRuns } from './syncRunMigrations.js';
@@ -57,6 +57,7 @@ export const createTables = async (db) => {
 
   // slate_player_snapshots (salary/projection/ownership/Vegas history across syncs)
   await migrateSlatePlayerSnapshots(db);
+  await migrateSlateCatalog(db);
 
   // projection_overrides (manual minutes/points per slate)
   await migrateProjectionOverrides(db);

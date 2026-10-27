@@ -66,6 +66,16 @@ export const RANGE_MODEL_COLUMNS = [
 ];
 
 /**
+ * Where a row came from: NULL for a live capture (slate sync / salary
+ * import), 'rotowire_backfill' for a past slate rebuilt from RotoWire after
+ * the fact (services/rotowireSlateBackfillService.js). A backfill never
+ * overwrites live rows unless forced. Never written by a slate sync.
+ */
+export const CAPTURE_SOURCE_COLUMNS = [
+  { name: 'capture_source', sqlite: 'TEXT', azure: 'NVARCHAR(40)' },
+];
+
+/**
  * slate_player_snapshots migration (idempotent, runs on every startup)
  *
  * A slate sync wipes players and slates, so every sync / salary import first
@@ -108,7 +118,7 @@ export async function migrateSlatePlayerSnapshots(db) {
       IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_snapshots_player_key_date')
         CREATE INDEX idx_snapshots_player_key_date ON slate_player_snapshots(player_key, game_date);
     `);
-    for (const { name, azure } of [...SNAPSHOT_DETAIL_COLUMNS, ...RANGE_MODEL_COLUMNS]) {
+    for (const { name, azure } of [...SNAPSHOT_DETAIL_COLUMNS, ...RANGE_MODEL_COLUMNS, ...CAPTURE_SOURCE_COLUMNS]) {
       await db.exec(`
         IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('slate_player_snapshots') AND name = '${name}')
           ALTER TABLE slate_player_snapshots ADD [${name}] ${azure};
@@ -148,9 +158,62 @@ export async function migrateSlatePlayerSnapshots(db) {
       CREATE INDEX IF NOT EXISTS idx_snapshots_player_key_date ON slate_player_snapshots(player_key, game_date);
     `);
     const existing = new Set((await db.all(`PRAGMA table_info(slate_player_snapshots)`)).map(c => c.name));
-    for (const { name, sqlite } of [...SNAPSHOT_DETAIL_COLUMNS, ...RANGE_MODEL_COLUMNS]) {
+    for (const { name, sqlite } of [...SNAPSHOT_DETAIL_COLUMNS, ...RANGE_MODEL_COLUMNS, ...CAPTURE_SOURCE_COLUMNS]) {
       if (!existing.has(name)) await db.exec(`ALTER TABLE slate_player_snapshots ADD COLUMN ${name} ${sqlite}`);
     }
     await db.exec(`CREATE INDEX IF NOT EXISTS idx_snapshots_slate ON slate_player_snapshots(slate_id, game_date)`);
+  }
+}
+
+/**
+ * slate_catalog migration (idempotent): every RotoWire slate id we know for
+ * a past or present date (site, contest type, game count, first lock), with
+ * is_main marking the main slate of the date (most games, earliest lock).
+ * Kept apart from slates, which holds only the one synced live slate and is
+ * wiped by every sync. Backtests use is_main to pick a date's default slate.
+ */
+export async function migrateSlateCatalog(db) {
+  if (DATABASE_TYPE === 'azuresql') {
+    await db.exec(`
+      IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='slate_catalog' AND xtype='U')
+      CREATE TABLE slate_catalog (
+        id INT IDENTITY(1,1) PRIMARY KEY,
+        site NVARCHAR(20) NOT NULL,
+        slate_id NVARCHAR(100) NOT NULL,
+        game_date DATE NOT NULL,
+        name NVARCHAR(255),
+        contest_type NVARCHAR(20),
+        games INT,
+        players INT,
+        first_game_time NVARCHAR(40),
+        is_main BIT NOT NULL DEFAULT 0,
+        source NVARCHAR(40),
+        updated_at NVARCHAR(40),
+        CONSTRAINT UQ_slate_catalog UNIQUE (site, slate_id)
+      )
+    `);
+    await db.exec(`
+      IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_slate_catalog_date')
+        CREATE INDEX idx_slate_catalog_date ON slate_catalog(game_date, site);
+    `);
+  } else {
+    await db.exec(`
+      CREATE TABLE IF NOT EXISTS slate_catalog (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        site TEXT NOT NULL,
+        slate_id TEXT NOT NULL,
+        game_date TEXT NOT NULL,
+        name TEXT,
+        contest_type TEXT,
+        games INTEGER,
+        players INTEGER,
+        first_game_time TEXT,
+        is_main INTEGER NOT NULL DEFAULT 0,
+        source TEXT,
+        updated_at TEXT,
+        UNIQUE(site, slate_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_slate_catalog_date ON slate_catalog(game_date, site);
+    `);
   }
 }

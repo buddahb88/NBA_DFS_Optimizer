@@ -239,6 +239,19 @@ export function snapshotRowFor(p, { slate, site, now, archetype = null, matchup 
   };
 }
 
+/**
+ * Upsert one snapshotRowFor row. locked: only fill detail columns that are
+ * still NULL and never write the range columns (see the header comment).
+ */
+export async function upsertSnapshotRow(row, { locked = false } = {}) {
+  const { sql, cols } = upsertSql(locked);
+  if (DATABASE_TYPE === 'azuresql') {
+    await db.run(sql, Object.fromEntries(cols.map(c => [c, row[c]])));
+  } else {
+    await db.run(sql, ...cols.map(c => row[c]));
+  }
+}
+
 // (player_key, game date) -> archetype for the game's season (prior season fallback)
 async function archetypeLookup() {
   const { loadArchetypeLookup } = await import('./archetypeDefenseService.js');
@@ -284,14 +297,7 @@ export async function snapshotSlate(slateId, { now = new Date() } = {}) {
     let matchup = matchups.get(String(p.player_id))?.matchup ?? null;
     // A grid rebuilt after lock already holds this slate's games, unless it is a prior season's
     if (matchup && locked && !(matchup.season < seasonForDate(base.game_date))) matchup = null;
-    const row = snapshotRowFor(p, { slate, site, now, archetype, matchup });
-
-    const { sql, cols } = upsertSql(locked);
-    if (DATABASE_TYPE === 'azuresql') {
-      await db.run(sql, Object.fromEntries(cols.map(c => [c, row[c]])));
-    } else {
-      await db.run(sql, ...cols.map(c => row[c]));
-    }
+    await upsertSnapshotRow(snapshotRowFor(p, { slate, site, now, archetype, matchup }), { locked });
     written++;
   }
   return written;

@@ -215,10 +215,12 @@ export async function liveAgentPicker({ date, slateId, site, pool }) {
   return { source: 'live_llm', names: namesFromAnswer(response.message, pool), eligible: agentEligible(pool).length, answer: response.message };
 }
 
-const DATES_SQL = `SELECT game_date, slate_id, COUNT(*) AS players FROM slate_player_snapshots
-  WHERE site = ? GROUP BY game_date, slate_id ORDER BY game_date, players DESC`;
+const DATES_SQL = `SELECT s.game_date, s.slate_id, COUNT(*) AS players
+  FROM slate_player_snapshots s LEFT JOIN slate_catalog c ON c.site = s.site AND c.slate_id = s.slate_id
+  WHERE s.site = ? GROUP BY s.game_date, s.slate_id
+  ORDER BY s.game_date, MAX(CAST(COALESCE(c.is_main, 0) AS INT)) DESC, COUNT(*) DESC`;
 
-/** Past dates with snapshots and their largest slate. */
+/** Past dates with snapshots and their main slate (slate_catalog), else their largest. */
 export async function backtestDates(site, { from, to } = {}) {
   const byDate = new Map();
   for (const r of await db.all(DATES_SQL, site)) {
