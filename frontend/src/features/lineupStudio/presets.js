@@ -4,6 +4,8 @@ import { createRule } from './stackRules';
 // every setting below it; the user can still tweak each value afterwards.
 // Pool filters (minProjection, minMinutes, maxOwnership) feed the optimizer's
 // legacy filters. minSalaryPct is a share of the site's salary cap so presets work on DK, FD and Yahoo.
+// opportunityWeight (0-1, off in every preset) nudges projections by the
+// Opportunity Radar score for the mode (backend optimizerNudge.js).
 
 export const CONTEST_PRESETS = {
   cash: {
@@ -18,6 +20,7 @@ export const CONTEST_PRESETS = {
     minProjection: 25,
     minMinutes: 28,
     maxOwnership: 100,
+    opportunityWeight: 0,
     stackRules: [],
   },
   se: {
@@ -32,6 +35,7 @@ export const CONTEST_PRESETS = {
     minProjection: 20,
     minMinutes: 20,
     maxOwnership: 100,
+    opportunityWeight: 0,
     stackRules: [{ kind: 'gameStack', min: 3, bringBack: 1 }],
   },
   max20: {
@@ -46,6 +50,7 @@ export const CONTEST_PRESETS = {
     minProjection: 20,
     minMinutes: 20,
     maxOwnership: 100,
+    opportunityWeight: 0,
     stackRules: [{ kind: 'gameStack', min: 3, bringBack: 1, percentOfLineups: 60 }],
   },
   max150: {
@@ -60,6 +65,7 @@ export const CONTEST_PRESETS = {
     minProjection: 20,
     minMinutes: 20,
     maxOwnership: 100,
+    opportunityWeight: 0,
     stackRules: [
       { kind: 'preset:shootout', min: 3, bringBack: 1, topGames: 2, maxSpread: 6, percentOfLineups: 50 },
       { kind: 'teamStack', min: 3, percentOfLineups: 30 },

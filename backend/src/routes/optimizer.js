@@ -7,6 +7,7 @@ import { validateStackRules, STACK_PRESETS } from '../services/optimizer/constra
 import {
   RANGE_OPTIONS, SlateSourceError, loadSlatePlayers, resolveSlate, scoreLineups, sourceFields, withActuals
 } from '../services/slateSource.js';
+import { withOpportunity, validateOpportunityWeight } from '../services/opportunity/optimizerNudge.js';
 
 const router = express.Router();
 
@@ -45,7 +46,11 @@ async function requestSlate(body = {}) {
  * each lineup differs from every earlier lineup in the request), stackRules
  * (team/game stack rules and presets, see services/optimizer/constraints/stacking.js;
  * teamStacks is an alias), slateDate (YYYY-MM-DD: before today rebuilds that
- * night's saved slate; lineups then carry actual points per player and in total)
+ * night's saved slate; lineups then carry actual points per player and in total),
+ * opportunityWeight (0-1, default 0 = off: projections nudged by the
+ * Opportunity Radar score for the mode, services/opportunity/optimizerNudge.js;
+ * the response then carries `opportunity` and nudged players their
+ * opportunity_score / base_projected_points)
  */
 router.post('/generate', async (req, res) => {
   try {
@@ -54,6 +59,9 @@ router.post('/generate', async (req, res) => {
       numLineups = 1,
       teamStacks = []
     } = req.body;
+
+    const weightError = validateOpportunityWeight(req.body.opportunityWeight);
+    if (weightError) return res.status(400).json({ error: weightError });
 
     const stackErrors = [
       ...validateStackRules(req.body.stackRules),
@@ -67,10 +75,11 @@ router.post('/generate', async (req, res) => {
     if (slate.error) {
       return res.status(slate.status).json({ error: slate.error });
     }
-    const { source, site, players } = slate;
+    const { source, site } = slate;
+    const { players, opportunity } = await withOpportunity(source, slate.players, { weight: req.body.opportunityWeight, mode, site });
 
     console.log(`🎯 Optimizing ${numLineups} lineup(s) for slate ${source.slateId} (${site}, ${mode} mode, ${source.label})`);
-    console.log(`📊 Found ${players.length} active players`);
+    console.log(`📊 Found ${players.length} active players${opportunity ? `, opportunity weight ${opportunity.weight}` : ''}`);
 
     // Exposure / uniqueness / randomness are hard constraints across the batch
     // (request contract documented in services/optimizer/constraints/exposure.js);
@@ -87,6 +96,7 @@ router.post('/generate', async (req, res) => {
       count: lineups.length,
       exposureStats: result.exposureStats,
       exposureSummary: result.exposureSummary,
+      ...(opportunity ? { opportunity } : {}),
       warnings: result.warnings,
       error: result.error,
       settings: result.settings

@@ -108,6 +108,21 @@ export default function SettingsPanel({
         />
       </Section>
 
+      <Section title="Projection">
+        <Slider
+          label="Opportunity factor"
+          min={0}
+          max={100}
+          step={5}
+          value={Math.round((settings.opportunityWeight ?? 0) * 100)}
+          format={(v) => (v === 0 ? 'Off' : `${v}%`)}
+          onChange={(v) => onChange({ opportunityWeight: v / 100 })}
+        />
+        <p className="-mt-1.5 text-2xs text-fg-subtle">
+          Nudges projections up to ±10% by the Opportunity Radar {settings.mode === 'gpp' ? 'GPP' : 'Cash'} score. Off leaves them unchanged.
+        </p>
+      </Section>
+
       <Section>
         <StackRuleBuilder
           rules={settings.stackRules}

@@ -110,6 +110,12 @@ describe('presets', () => {
     expect(body.stackRules[0]).toMatchObject({ preset: 'shootout', percentOfLineups: 50 })
   })
 
+  it('presets leave the opportunity factor off; the request carries the weight', () => {
+    for (const key of Object.keys(CONTEST_PRESETS)) expect(settingsFromPreset(key, 50000).opportunityWeight).toBe(0)
+    const settings = { ...settingsFromPreset('cash', 50000), opportunityWeight: 0.4 }
+    expect(buildOptimizerRequest({ slateId: 's', site: 'draftkings', settings }).opportunityWeight).toBe(0.4)
+  })
+
   it('single-lineup requests ignore exposure and uniqueness', () => {
     const settings = { ...settingsFromPreset('cash', 50000), maxExposure: 30, minUniqueness: 4 }
     expect(buildOptimizerRequest({ slateId: 's', site: 'draftkings', settings })).toMatchObject({ maxExposure: 100, minUniqueness: 1, stackRules: [] })

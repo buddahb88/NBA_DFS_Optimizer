@@ -88,7 +88,7 @@ describe('LineupStudioPage', () => {
     expect(await screen.findByText('#1')).toBeInTheDocument()
     expect(screen.getByText('#2')).toBeInTheDocument()
     const request = optimizerAPI.generate.mock.calls[0][0]
-    expect(request).toMatchObject({ slateId: '42', site: 'draftkings', numLineups: 20, maxExposure: 60, minUniqueness: 2, randomness: 15 })
+    expect(request).toMatchObject({ slateId: '42', site: 'draftkings', numLineups: 20, maxExposure: 60, minUniqueness: 2, randomness: 15, opportunityWeight: 0 })
     expect(request.stackRules).toEqual([{ type: 'gameStack', min: 3, bringBack: 1, percentOfLineups: 60 }])
 
     // Salary used / projection / ownership sum on the card
@@ -122,6 +122,16 @@ describe('LineupStudioPage', () => {
     expect(body.players).toHaveLength(8)
     expect(body.players[5]).toMatchObject({ id: 6, positionSlot: 'G', projectedPoints: 35 })
     expect(await within(card).findByRole('button', { name: 'Saved' })).toBeDisabled()
+  })
+
+  it('sends the opportunity weight from its slider', async () => {
+    optimizerAPI.generate.mockResolvedValue({ data: { lineups: [lineupOf(1, [1, 2, 3, 4, 5, 6, 7, 8])] } })
+    renderStudio()
+    await screen.findByText('No lineups yet')
+    fireEvent.change(screen.getByLabelText('Opportunity factor'), { target: { value: '40' } })
+    fireEvent.click(screen.getByRole('button', { name: /Generate lineup/ }))
+    await waitFor(() => expect(optimizerAPI.generate).toHaveBeenCalled())
+    expect(optimizerAPI.generate.mock.calls.at(-1)[0].opportunityWeight).toBe(0.4)
   })
 
   it('shows the optimizer error with details', async () => {

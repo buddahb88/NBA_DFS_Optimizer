@@ -12,6 +12,7 @@ import optimizerService from '../services/optimizerService.js';
 import { resolveSite } from '../utils/resolveSite.js';
 import { withUiBlocks } from '../services/chatTools/uiBlockBuilders.js';
 import { chatSlate, loadSlatePlayers, scoreLineups, withActuals, lineupActualTotal } from '../services/slateSource.js';
+import { withOpportunity, validateOpportunityWeight } from '../services/opportunity/optimizerNudge.js';
 
 const SLATE_DATE_PROP = {
   type: 'string',
@@ -98,31 +99,38 @@ class OptimizerAgent extends BaseAgent {
             randomness: {
               type: 'number',
               description: 'Randomness 0-100 for GPP variance (default 0)'
+            },
+            opportunityWeight: {
+              type: 'number',
+              description: 'Opportunity factor 0-1 (default 0 = off): nudges projections up to +-10% by the Opportunity Radar score for the mode (cash or gpp). Use when the task asks to lean into players in a good spot.'
             }
           },
           required: []
         },
-        execute: async ({ slateId, slateDate, lockedPlayerIds = [], excludedPlayerIds = [], mode = 'cash', numLineups = 1, minSalary = 49000, randomness = 0 }) => {
+        execute: async ({ slateId, slateDate, lockedPlayerIds = [], excludedPlayerIds = [], mode = 'cash', numLineups = 1, minSalary = 49000, randomness = 0, opportunityWeight = 0 }) => {
           console.log(`\n🏀 [OptimizerAgent] Building ${numLineups} ${mode.toUpperCase()} lineup(s)`);
           if (lockedPlayerIds.length > 0) {
             console.log(`🔒 Locked players: ${lockedPlayerIds.join(', ')}`);
           }
+          const weightError = validateOpportunityWeight(opportunityWeight);
+          if (weightError) return { success: false, error: weightError };
 
           const slate = await chatSlate({ slateId, slateDate });
           if (slate.error) return { success: false, error: slate.error };
           const { source, dateFields } = slate;
 
           // Get all players for this slate (live table, or the saved slate for a backtest)
-          const players = await loadSlatePlayers(source, { includeZero: true });
+          const loaded = await loadSlatePlayers(source, { includeZero: true });
 
-          if (players.length === 0) {
+          if (loaded.length === 0) {
             return { success: false, error: `No players found for slate ${source.slateId}` };
           }
 
-          console.log(`✅ Found ${players.length} players for slate (${source.label})`);
+          console.log(`✅ Found ${loaded.length} players for slate (${source.label})`);
 
           // Use optimizer service (site rules follow the slate's site)
           const { site } = source.isBacktest ? { site: source.site } : await resolveSite(undefined, source.slateId);
+          const { players, opportunity } = await withOpportunity(source, loaded, { weight: opportunityWeight, mode, site });
           const { lineups: built } = optimizerService.optimize(players, {
             site,
             mode,
@@ -151,6 +159,7 @@ class OptimizerAgent extends BaseAgent {
                 ownership: slot.player.rostership,
                 floor: slot.player.floor,
                 ceiling: slot.player.ceiling,
+                ...(opportunity ? { opportunityScore: slot.player.opportunity_score ?? null, baseProjectedPoints: slot.player.base_projected_points ?? null } : {}),
                 ...actualOf(slot.player),
               } : null,
             })),
@@ -166,6 +175,7 @@ class OptimizerAgent extends BaseAgent {
             count: formattedLineups.length,
             mode,
             slateId: source.slateId,
+            ...(opportunity ? { opportunityWeight: opportunity.weight, opportunityNote: 'Projections nudged by the Opportunity Radar score (projectedPoints; baseProjectedPoints is the posted one).' } : {}),
             ...dateFields,
           };
           return withUiBlocks('build_lineup', result);

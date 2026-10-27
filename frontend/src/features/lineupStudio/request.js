@@ -14,6 +14,7 @@ export function buildOptimizerRequest({ slateId, site, settings, locked = [], ex
     numLineups: settings.numLineups,
     minSalary: settings.minSalary,
     randomness: settings.randomness,
+    opportunityWeight: settings.opportunityWeight ?? 0,
     maxExposure: multi ? settings.maxExposure : 100,
     minUniqueness: multi ? settings.minUniqueness : 1,
     stackRules: toRequestRules(settings.stackRules),
