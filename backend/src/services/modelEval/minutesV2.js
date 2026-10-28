@@ -236,7 +236,7 @@ function solve(A, b) {
   return x;
 }
 
-function weightedLeastSquares(X, y, w, ridge = 1e-3) {
+export function weightedLeastSquares(X, y, w, ridge = 1e-3) {
   const k = X[0].length;
   const A = Array.from({ length: k }, () => new Array(k).fill(0));
   const b = new Array(k).fill(0);

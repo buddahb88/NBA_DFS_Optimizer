@@ -37,6 +37,39 @@ export function coverage(samples) {
 }
 
 export const STATS = ['pts', 'reb', 'ast', 'stl', 'blk', 'tov', 'fg3m'];
+export const PROBABILITY_BUCKETS = [0, 0.05, 0.1, 0.2, 0.3, 0.5, 1.0001];
+const DOUBLE_DIGIT = ['pts', 'reb', 'ast', 'stl', 'blk'];
+
+/**
+ * Reliability of probability forecasts: samples [{ p, hit }] bucketed by p
+ * (PROBABILITY_BUCKETS) with the mean forecast vs the observed frequency, the
+ * Brier score and the base rate. Returns null without samples.
+ */
+export function probabilityCalibration(samples, buckets = PROBABILITY_BUCKETS) {
+  const valid = samples.filter(s => finite(s.p));
+  if (!valid.length) return null;
+  const out = [];
+  for (let i = 0; i < buckets.length - 1; i++) {
+    const inBucket = valid.filter(s => s.p >= buckets[i] && s.p < buckets[i + 1]);
+    if (!inBucket.length) continue;
+    out.push({
+      bucket: `${buckets[i]}-${Math.min(1, buckets[i + 1])}`,
+      n: inBucket.length,
+      predicted: round(inBucket.reduce((t, s) => t + s.p, 0) / inBucket.length),
+      observed: round(inBucket.filter(s => s.hit).length / inBucket.length)
+    });
+  }
+  return {
+    n: valid.length,
+    predicted: round(valid.reduce((t, s) => t + s.p, 0)),
+    observed: valid.filter(s => s.hit).length,
+    brier: round(valid.reduce((t, s) => t + (s.p - (s.hit ? 1 : 0)) ** 2, 0) / valid.length, 4),
+    baseRate: round(valid.filter(s => s.hit).length / valid.length),
+    buckets: out
+  };
+}
+
+const doubleDigits = (a) => DOUBLE_DIGIT.filter(s => (a[s] ?? 0) >= 10).length;
 
 /** Metrics of one projector over rows (rows it returned null for are skipped). */
 export function scoreProjector(rows, name) {
@@ -58,7 +91,12 @@ export function scoreProjector(rows, name) {
       : null,
     coverage: coverage(withPred.map(r => ({ p10: r.preds[name].p10, p90: r.preds[name].p90, actual: r.actual.dk }))),
     minutesCoverage: coverage(withPred.map(r => ({ p10: r.preds[name].minutes_p10, p90: r.preds[name].minutes_p90, actual: r.actual.minutes }))),
-    stats: Object.keys(stats).length ? stats : null
+    stats: Object.keys(stats).length ? stats : null,
+    // Probability forecasts: boom (DK >= the prediction's boom_at), double- / triple-double
+    boom: probabilityCalibration(withPred.filter(r => finite(r.preds[name].boom_at))
+      .map(r => ({ p: r.preds[name].p_boom, hit: r.actual.dk >= r.preds[name].boom_at }))),
+    doubleDouble: probabilityCalibration(withPred.map(r => ({ p: r.preds[name].p_dd, hit: doubleDigits(r.actual) >= 2 }))),
+    tripleDouble: probabilityCalibration(withPred.map(r => ({ p: r.preds[name].p_td, hit: doubleDigits(r.actual) >= 3 })))
   };
 }
 
@@ -186,4 +224,4 @@ export function breakdown(rows, keyFn, names, order = null) {
   });
 }
 
-export default { quantile, coverage, scoreProjector, pairedBootstrap, valueHitRate, baseHitRate, breakdown, mulberry32 };
+export default { quantile, coverage, scoreProjector, pairedBootstrap, valueHitRate, baseHitRate, breakdown, mulberry32, probabilityCalibration };

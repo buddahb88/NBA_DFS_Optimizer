@@ -13,7 +13,9 @@
  * Tags (breakdowns): minutesBucket (as-of last-5 average minutes), role
  * (started the game; DNPs are bench), archetype (as-of), rest (team rest
  * days), teammateOut (an OUT teammate averaging 20+ minutes), blowout
- * (|expected margin|: -spread on slates, as-of rating gap in replay), salaryTier (slates).
+ * (|expected margin|: -spread on slates, as-of rating gap in replay), pace
+ * (the two teams' as-of shrunk pace vs the league: slow / average / fast,
+ * +-1.5 possessions), salaryTier (slates).
  */
 
 import { salaryTier, SALARY_TIERS } from '../projectionBacktestService.js';
@@ -59,6 +61,17 @@ function minutesBucket(view, key) {
 }
 
 export const BLOWOUT_BUCKETS = ['<5', '5-10', '10+'];
+export const PACE_BUCKETS = ['slow', 'average', 'fast'];
+const PACE_BAND = 1.5;
+
+function paceBucket(view, player) {
+  const a = view.teamRatings(player.team)?.pace;
+  const b = view.teamRatings(player.opponent)?.pace;
+  const league = view.league()?.pace;
+  if (![a, b, league].every(Number.isFinite)) return null;
+  const d = (a + b) / 2 - league;
+  return d < -PACE_BAND ? 'slow' : d > PACE_BAND ? 'fast' : 'average';
+}
 
 function blowoutBucket(view, player, spread) {
   const m = Math.abs(view.expectedMargin(player.team, player.opponent, player.isHome, Number.isFinite(spread) ? spread : null));
@@ -69,6 +82,7 @@ function tagsFor(outcome, player, view, salary, spread = null) {
   const r = player.restDays;
   return {
     blowout: blowoutBucket(view, player, spread),
+    pace: paceBucket(view, player),
     minutesBucket: minutesBucket(view, player.key),
     role: outcome.isStarter ? 'starter' : 'bench',
     archetype: view.archetype(player.key).archetype,
@@ -231,7 +245,7 @@ export function segmentBySeason(rows, { train = [], validation = [] } = {}) {
  * options: { baseline, iterations, seed, cluster(row) for the bootstrap,
  *   minutesReference: projector whose minutes define the "beat projection by 3+" breakdown }
  */
-export function summarizeRows(rows, names, { baseline = null, iterations = 1000, seed = 1, cluster = null, minutesReference = null } = {}) {
+export function summarizeRows(rows, names, { baseline = null, iterations = 1000, seed = 1, cluster = null, minutesReference = null, comparisons = [] } = {}) {
   const summarize = (subset) => {
     const common = subset.filter(r => names.every(name => r.preds[name]));
     const leaderboard = names.map(name => ({ projector: name, ...scoreProjector(common, name) }))
@@ -239,6 +253,11 @@ export function summarizeRows(rows, names, { baseline = null, iterations = 1000,
     const paired = baseline && names.includes(baseline)
       ? names.filter(name => name !== baseline).map(name => ({ projector: name, vs: baseline, ...pairedBootstrap(common, name, baseline, { iterations, seed, cluster }) }))
       : [];
+    // Extra pairs ([a, b]) beyond the baseline, e.g. rates_v1 vs minutes_v2
+    for (const [a, b] of comparisons) {
+      if (!names.includes(a) || !names.includes(b) || b === baseline) continue;
+      paired.push({ projector: a, vs: b, ...pairedBootstrap(common, a, b, { iterations, seed, cluster }) });
+    }
     const hasMinutes = (name) => common.some(r => finite(r.preds[name]?.minutes));
     const pairedMinutes = baseline && names.includes(baseline) && hasMinutes(baseline)
       ? names.filter(name => name !== baseline && hasMinutes(name))
@@ -251,7 +270,8 @@ export function summarizeRows(rows, names, { baseline = null, iterations = 1000,
       archetype: by(r => r.tags.archetype),
       rest: by(r => r.tags.rest, REST_BUCKETS),
       teammateOut: by(r => r.tags.teammateOut, ['teammate out', 'none out']),
-      blowout: by(r => r.tags.blowout, BLOWOUT_BUCKETS)
+      blowout: by(r => r.tags.blowout, BLOWOUT_BUCKETS),
+      pace: by(r => r.tags.pace, PACE_BUCKETS)
     };
     // The players hindsight-optimal lineups are made of: 3+ minutes over the reference projection
     if (minutesReference && names.includes(minutesReference)) {

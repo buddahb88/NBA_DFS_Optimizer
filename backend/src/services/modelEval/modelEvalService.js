@@ -20,6 +20,9 @@
  * archetype, rest, teammate out, blowout, salary tier on slates, and players
  * who beat the reference projection's minutes by 3+: RotoWire on slates,
  * minutes_model in replay) and, on slates, the top-20 value hit rate (5x).
+ * Extra paired comparisons (options.comparisons, [a, b] pairs) and
+ * projector analyses (projector.analyze(rows): e.g. rates_v1's rate quality
+ * at actual minutes) are added per segment / for the slates.
  *
  * Predictions of cacheable projectors are cached on disk per projector
  * version and data signature (cacheDir/predictions), so a re-run only
@@ -59,7 +62,13 @@ export const DEFAULTS = Object.freeze({
   seed: 1,
   valueTop: 20,
   valueMultiple: 5,
-  cache: true
+  cache: true,
+  comparisons: [
+    ['rates_v1', 'minutes_v2'],
+    ['rates_v1', 'rotowire_raw'],
+    ['rates_v1_rotowire_minutes', 'rotowire_raw'],
+    ['rates_v1_rotowire_minutes', 'rotowire_minutes_x_fppm']
+  ]
 });
 
 export const LOOKAHEAD_NOTES = Object.freeze([
@@ -187,6 +196,7 @@ const ms = (t0) => Date.now() - t0;
  * @param {string[]} [options.slateDates] - limit slate mode to these dates
  * @param {string} [options.replayBaseline='legacy'] / [options.slateBaseline='rotowire_raw']
  * @param {string[]} [options.trainSeasons=['2024-25']] / [options.validationSeasons=['2025-26']]
+ * @param {Array<string[]>} [options.comparisons] - extra paired bootstraps [a, b] (skipped when either is not run)
  * @param {number} [options.iterations=1000] - bootstrap resamples
  * @param {boolean} [options.cache=true] - reuse / save cached predictions
  * @param {string} [options.cacheDir]
@@ -236,12 +246,22 @@ export async function runModelEval(options = {}) {
     options: {
       mode: o.mode, projectors: names, seasons: o.seasons ?? null, from: o.from ?? null, to: o.to ?? null,
       slateDates: o.slateDates ?? null, trainSeasons: o.trainSeasons, validationSeasons: o.validationSeasons,
-      replayBaseline: o.replayBaseline, slateBaseline: o.slateBaseline, iterations: o.iterations, seed: o.seed,
+      replayBaseline: o.replayBaseline, slateBaseline: o.slateBaseline, iterations: o.iterations, seed: o.seed, comparisons: o.comparisons,
       sanityConfig: projectionSanityConfig()
     },
     projectors: listProjectors().filter(p => names.includes(p.name)),
     notes: LOOKAHEAD_NOTES,
     timings
+  };
+
+  const analyze = async (rows, names, cluster) => {
+    const out = {};
+    for (const p of projectors) {
+      if (!p.analyze || !names.includes(p.name)) continue;
+      const a = await p.analyze(rows, { name: p.name, site, cluster, iterations: o.iterations, seed: o.seed });
+      if (a) out[p.name] = a;
+    }
+    return Object.keys(out).length ? out : undefined;
   };
 
   try {
@@ -253,19 +273,20 @@ export async function runModelEval(options = {}) {
         onDate: (date, i, total) => { if (i % 25 === 0) progress(`replay ${date} (${i + 1}/${total})`); }
       });
       const baseline = replayNames.includes(o.replayBaseline) ? o.replayBaseline : null;
-      report.replay = {
-        dates,
-        baseline,
-        segments: segmentBySeason(rows, { train: o.trainSeasons, validation: o.validationSeasons }).map(seg => ({
+      const segments = [];
+      for (const seg of segmentBySeason(rows, { train: o.trainSeasons, validation: o.validationSeasons })) {
+        segments.push({
           season: seg.season,
           role: seg.role,
           dates: new Set(seg.rows.map(r => r.date)).size,
           ...summarizeRows(seg.rows, replayNames, {
-            baseline, iterations: o.iterations, seed: o.seed, cluster: r => r.date,
+            baseline, iterations: o.iterations, seed: o.seed, cluster: r => r.date, comparisons: o.comparisons,
             minutesReference: replayNames.includes('minutes_model') ? 'minutes_model' : null
-          })
-        }))
-      };
+          }),
+          analysis: await analyze(seg.rows, replayNames, r => r.date)
+        });
+      }
+      report.replay = { dates, baseline, segments };
       if (o.includeRows) report.replay.rows = rows;
       timings.replay = { totalMs: ms(t0), perProjectorMs: per };
     }
@@ -281,9 +302,10 @@ export async function runModelEval(options = {}) {
       const { rows, timings: per } = await runSlates(store, projectors, slates, { onSlate: s => progress(`slate ${s.date} (${s.slateId})`) });
       const baseline = slateNames.includes(o.slateBaseline) ? o.slateBaseline : null;
       const summary = summarizeRows(rows, slateNames, {
-        baseline, iterations: o.iterations, seed: o.seed,
+        baseline, iterations: o.iterations, seed: o.seed, comparisons: o.comparisons,
         minutesReference: slateNames.includes('rotowire_raw') ? 'rotowire_raw' : null
       });
+      summary.analysis = await analyze(rows, slateNames, null);
       const common = rows.filter(r => slateNames.every(name => r.preds[name]));
       report.slate = {
         baseline,

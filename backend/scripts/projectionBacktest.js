@@ -25,7 +25,7 @@
  *   node scripts/projectionBacktest.js --model [--mode replay|slate|both]
  *     [--projectors season_avg,legacy,...] [--seasons 2025-26,2026-27] [--from ...] [--to ...]
  *     [--slate-dates 2026-10-21,...] [--baseline legacy] [--slate-baseline rotowire_raw]
- *     [--iterations 1000] [--no-cache] [--out report.json] [--rows] [--json] [--list]
+ *     [--iterations 1000] [--compare rates_v1:minutes_v2,...] [--no-cache] [--out report.json] [--rows] [--json] [--list]
  *   The JSON report goes to backend/.cache/model-eval/reports/ (gitignored) unless --out.
  *
  * Works with SQLite (default) or Azure SQL (DATABASE_TYPE=azuresql in backend/.env).
@@ -146,6 +146,33 @@ function printBoard(title, summary, baseline) {
   }
 }
 
+function printExtraPaired(summary, baseline) {
+  for (const p of summary.paired.filter(x => x.vs !== baseline)) {
+    console.log(`  DK ${p.projector.padEnd(32)} vs ${p.vs}: ${fmt(p.diff, 3)} [${fmt(p.ci[0], 3)}, ${fmt(p.ci[1], 3)}]`);
+  }
+}
+
+function printCalibration(summary) {
+  for (const r of summary.leaderboard) {
+    const parts = [['boom', r.boom], ['DD', r.doubleDouble], ['TD', r.tripleDouble]].filter(([, c]) => c && c.predicted > 0);
+    if (!parts.length) continue;
+    console.log(`  ${r.projector.padEnd(32)} ${parts.map(([k, c]) => `${k} pred ${fmt(c.predicted, 0)} / act ${c.observed} (Brier ${fmt(c.brier, 4)})`).join(', ')}`);
+    if (r.boom?.buckets?.length) console.log(`    boom reliability: ${r.boom.buckets.map(b => `${b.bucket}: ${fmt(b.predicted, 3)}->${fmt(b.observed, 3)} (${b.n})`).join('  ')}`);
+  }
+}
+
+function printRateQuality(analysis) {
+  for (const [name, a] of Object.entries(analysis ?? {})) {
+    const q = a.rateQuality;
+    if (!q?.n) continue;
+    console.log(`  RATE QUALITY at actual minutes (${name}, ${q.n} played rows)`);
+    for (const r of q.leaderboard) console.log(`    ${r.projector.padEnd(8)} MAE ${fmt(r.mae, 3)}  bias ${fmt(r.bias, 3)}  per-minute ${fmt(r.perMinuteError, 4)}`);
+    for (const p of q.paired) console.log(`    ${p.projector} vs ${p.vs}: ${fmt(p.diff, 3)} [${fmt(p.ci[0], 3)}, ${fmt(p.ci[1], 3)}]`);
+    console.log(`    per-stat MAE (rates / naive): ${Object.entries(q.stats).map(([s, v]) => `${s} ${fmt(v.rates, 3)}/${fmt(v.naive, 3)}`).join('  ')}`);
+    console.log(`    <p10 ${fmt(q.coverage.belowP10, 1)}%  >p90 ${fmt(q.coverage.aboveP90, 1)}%  DD ${q.doubles.ddPredicted}/${q.doubles.ddActual}  TD ${q.doubles.tdPredicted}/${q.doubles.tdActual} (pred/actual)`);
+  }
+}
+
 function printMinutesPaired(summary) {
   if (!summary.pairedMinutes?.length) return;
   for (const p of summary.pairedMinutes) {
@@ -159,17 +186,25 @@ function printModelEval(report, file) {
   console.log('═══════════════════════════════════════════════════════════════');
   for (const seg of report.replay?.segments ?? []) {
     printBoard(`REPLAY ${seg.season} [${seg.role}] ${seg.dates} dates, played`, seg.played, report.replay.baseline);
+    printExtraPaired(seg.played, report.replay.baseline);
     printMinutesPaired(seg.played);
     printBoard(`REPLAY ${seg.season} [${seg.role}] incl. DNP`, seg.withDnp, report.replay.baseline);
+    printExtraPaired(seg.withDnp, report.replay.baseline);
     printMinutesPaired(seg.withDnp);
+    printCalibration(seg.withDnp);
+    printRateQuality(seg.analysis);
   }
   if (report.slate) {
     const s = report.slate;
     console.log(`\nSLATES: ${s.slates.map(x => `${x.date} (${x.played}/${x.players})`).join(', ')}`);
     printBoard('SLATES incl. DNP (0 pts)', s.withDnp, s.baseline);
+    printExtraPaired(s.withDnp, s.baseline);
     printMinutesPaired(s.withDnp);
     printBoard('SLATES played only', s.played, s.baseline);
+    printExtraPaired(s.played, s.baseline);
     printMinutesPaired(s.played);
+    printCalibration(s.withDnp);
+    printRateQuality(s.analysis);
     console.log(`\nTOP-${s.valueHit.top} VALUE HIT RATE (>= ${s.valueHit.multiple}x; base rate ${fmt(s.valueHit.baseRate, 3)})`);
     for (const v of s.valueHit.projectors) console.log(`${v.projector.padEnd(34)}${pad(`${v.hits}/${v.picks}`, 9)}${pad(fmt(v.rate, 3), 8)}  avg ${fmt(v.avgActualValue)}x`);
   }
@@ -198,6 +233,7 @@ try {
       replayBaseline: argValue('--baseline') || undefined,
       slateBaseline: argValue('--slate-baseline') || undefined,
       iterations: argValue('--iterations') ? Number(argValue('--iterations')) : undefined,
+      comparisons: list('--compare')?.map(pair => pair.split(':')),
       cache: !args.includes('--no-cache'),
       includeRows: args.includes('--rows'),
       onProgress: (m) => process.stderr.write(`  ${m}\n`)

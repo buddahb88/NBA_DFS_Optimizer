@@ -23,9 +23,11 @@
  *                    (playerProfileService.computeProfiles on games before D)
  *   archetype        classifyProfile on that profile; below the sample minimum,
  *                    last season's label (from last season's full profile)
- *   dvpContext       archetype / G-F-C defense (team_archetype_defense shape)
- *                    aggregated over this season's games before D with the
- *                    as-of labels; last season's table before the first game
+ *   archetypeDefense archetype / G-F-C defense rows (team_archetype_defense
+ *                    shape, per-stat deltas included) aggregated over this
+ *                    season's games before D with the as-of labels; last
+ *                    season's table before the first game
+ *   dvpContext       the same as a dvpAdjustment context
  *
  * The stored player_season_profiles / player_archetypes / team_archetype_defense
  * rows for a season are full-season (lookahead) and are never read here: the
@@ -38,8 +40,9 @@
  *            15+ min over the team's last 5 games). Coach's-decision DNPs are
  *            not OUT: nobody knew before the game.
  *   players  the evaluation universe with outcomes: everyone with a box score
- *            row plus coach's-decision DNPs (0 points). The evaluator keeps the
- *            outcome fields away from projectors.
+ *            row plus coach's-decision DNPs (0 points); box is the raw row
+ *            (fitting only). The evaluator keeps the outcome fields away from
+ *            projectors.
  */
 
 import { computeProfiles } from '../playerProfileService.js';
@@ -365,9 +368,14 @@ export function createFeatureStore(data) {
         return { archetype: 'unclassified', source: 'none' };
       },
 
-      /** dvpAdjustment context (buildDvpContext) from defense before the date, as-of labels. */
-      dvpContext() {
-        return lazy('dvp', () => {
+      /**
+       * Archetype / G-F-C defense rows (team_archetype_defense shape, with the
+       * per-stat deltas) from this season's games before the date with as-of
+       * labels; last season's full table before the season's first game.
+       * Returns { season, rows, cell(groupBy, team, groupKey) }.
+       */
+      archetypeDefense() {
+        return lazy('defense', () => {
           const { current, prior: last } = view.archetypeMaps();
           const rows = seasonExpectations(season);
           let before = rows.slice(0, lowerBound(rows, date));
@@ -385,7 +393,17 @@ export function createFeatureStore(data) {
           }
           const relabeled = before.map(g => ({ ...g, archetype: labels(g.player_key) }));
           const defenseRows = GROUPINGS.flatMap(grouping => aggregateDefense(relabeled, { site, grouping }));
-          return buildDvpContext({ defenseRows, archetypes: current, priorArchetypes: last, season: used, site });
+          const cells = new Map(defenseRows.map(r => [`${r.group_by}|${r.team}|${r.group_key}`, r]));
+          return { season: used, rows: defenseRows, cell: (groupBy, team, groupKey) => cells.get(`${groupBy}|${team}|${groupKey}`) ?? null };
+        });
+      },
+
+      /** dvpAdjustment context (buildDvpContext) from defense before the date, as-of labels. */
+      dvpContext() {
+        return lazy('dvp', () => {
+          const { current, prior: last } = view.archetypeMaps();
+          const { season: used, rows } = view.archetypeDefense();
+          return buildDvpContext({ defenseRows: rows, archetypes: current, priorArchetypes: last, season: used, site });
         });
       }
     };
@@ -453,7 +471,8 @@ export function createFeatureStore(data) {
       isStarter: n(r.is_starter) === 1,
       played: n(r.minutes) > 0,
       status: n(r.minutes) > 0 ? 'PLAYED' : 'DNP',
-      actual: actualStats(r, fpColumn)
+      actual: actualStats(r, fpColumn),
+      box: r
     }));
     const inBox = new Set(rows.map(r => `${r.team}|${r.player_key}`));
     for (const s of listed) {
@@ -473,7 +492,8 @@ export function createFeatureStore(data) {
         isStarter: false,
         played: false,
         status: 'DNP',
-        actual: { dk: 0, minutes: 0, ...Object.fromEntries(Object.keys(STAT_FIELDS).map(k => [k, 0])) }
+        actual: { dk: 0, minutes: 0, ...Object.fromEntries(Object.keys(STAT_FIELDS).map(k => [k, 0])) },
+        box: null
       });
     }
     return { date, season: view.season, teams, players };
