@@ -24,6 +24,11 @@
  *     The archetype DVP is point-in-time: team_archetype_defense is rebuilt
  *     for each date from that season's games before it (the prior season's
  *     full table before the first game). Archetype labels are season-level.
+ *
+ * The model evaluation harness (services/modelEval, npm run backtest:model)
+ * reuses this module's OUT inference and removes the two lookahead sources
+ * above: archetype labels are rebuilt as-of each date and the current-only
+ * defense rankings are excluded from the legacy model.
  */
 
 import db from '../config/database.js';

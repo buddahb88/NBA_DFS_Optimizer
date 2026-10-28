@@ -19,6 +19,15 @@
  *   --dvp also re-runs the legacy model with DVP off, the old points-allowed
  *   DVP and the archetype DVP at each weight, to compare the DVP signals.
  *
+ * Model evaluation harness (services/modelEval; npm run backtest:model): every
+ * registered projector, point-in-time features, replay by season (train /
+ * validation / holdout) and the saved main slates head to head with RotoWire:
+ *   node scripts/projectionBacktest.js --model [--mode replay|slate|both]
+ *     [--projectors season_avg,legacy,...] [--seasons 2025-26,2026-27] [--from ...] [--to ...]
+ *     [--slate-dates 2026-10-21,...] [--baseline legacy] [--slate-baseline rotowire_raw]
+ *     [--iterations 1000] [--no-cache] [--out report.json] [--rows] [--json] [--list]
+ *   The JSON report goes to backend/.cache/model-eval/reports/ (gitignored) unless --out.
+ *
  * Works with SQLite (default) or Azure SQL (DATABASE_TYPE=azuresql in backend/.env).
  */
 
@@ -33,6 +42,8 @@ dotenv.config({ path: path.join(__dirname, '../.env') });
 const { runProjectionBacktest } = await import('../src/services/projectionBacktestService.js');
 const { runReplayBacktest } = await import('../src/services/projectionReplayBacktest.js');
 const { default: db } = await import('../src/config/database.js');
+const modelEval = await import('../src/services/modelEval/modelEvalService.js');
+const { listProjectors } = await import('../src/services/modelEval/projectors.js');
 
 const args = process.argv.slice(2);
 const argValue = (flag) => {
@@ -121,7 +132,71 @@ function printReplay(report) {
   console.log('');
 }
 
+const list = (flag) => (argValue(flag) ? argValue(flag).split(',').map(x => x.trim()).filter(Boolean) : undefined);
+
+function printBoard(title, summary, baseline) {
+  console.log(`\n${title}: ${summary.common} common rows of ${summary.rows}` +
+    ` (coverage ${Object.entries(summary.coverage).map(([k, v]) => `${k} ${v}`).join(', ')})`);
+  console.log(`${'projector'.padEnd(34)}${pad('MAE', 7)}${pad('RMSE', 7)}${pad('bias', 7)}${pad('R^2', 7)}${pad('corr', 7)}${pad('minMAE', 8)}${pad('<p10%', 7)}${pad('>p90%', 7)}   vs ${baseline ?? '-'} (95% CI)`);
+  for (const r of summary.leaderboard) {
+    const p = summary.paired.find(x => x.projector === r.projector);
+    const vs = p ? `${fmt(p.diff, 3)} [${fmt(p.ci[0], 3)}, ${fmt(p.ci[1], 3)}]` : r.projector === baseline ? '(baseline)' : '';
+    console.log(`${r.projector.padEnd(34)}${pad(fmt(r.mae), 7)}${pad(fmt(r.rmse), 7)}${pad(fmt(r.bias), 7)}${pad(fmt(r.r2, 3), 7)}${pad(fmt(r.correlation, 3), 7)}` +
+      `${pad(fmt(r.minutes?.mae), 8)}${pad(fmt(r.coverage.belowP10, 1), 7)}${pad(fmt(r.coverage.aboveP90, 1), 7)}   ${vs}`);
+  }
+}
+
+function printModelEval(report, file) {
+  console.log('\n═══════════════════════════════════════════════════════════════');
+  console.log(`  MODEL EVALUATION (${report.site}, data ${report.signature})`);
+  console.log('═══════════════════════════════════════════════════════════════');
+  for (const seg of report.replay?.segments ?? []) {
+    printBoard(`REPLAY ${seg.season} [${seg.role}] ${seg.dates} dates, played`, seg.played, report.replay.baseline);
+    printBoard(`REPLAY ${seg.season} [${seg.role}] incl. DNP`, seg.withDnp, report.replay.baseline);
+  }
+  if (report.slate) {
+    const s = report.slate;
+    console.log(`\nSLATES: ${s.slates.map(x => `${x.date} (${x.played}/${x.players})`).join(', ')}`);
+    printBoard('SLATES incl. DNP (0 pts)', s.withDnp, s.baseline);
+    printBoard('SLATES played only', s.played, s.baseline);
+    console.log(`\nTOP-${s.valueHit.top} VALUE HIT RATE (>= ${s.valueHit.multiple}x; base rate ${fmt(s.valueHit.baseRate, 3)})`);
+    for (const v of s.valueHit.projectors) console.log(`${v.projector.padEnd(34)}${pad(`${v.hits}/${v.picks}`, 9)}${pad(fmt(v.rate, 3), 8)}  avg ${fmt(v.avgActualValue)}x`);
+  }
+  const t = report.timings;
+  console.log(`\nTIMINGS: load ${t.loadMs ?? 0} ms, index ${t.indexMs ?? 0} ms, replay ${t.replay?.totalMs ?? 0} ms, slates ${(t.slateLoadMs ?? 0) + (t.slate?.totalMs ?? 0)} ms, total ${t.totalMs} ms`);
+  for (const [name, v] of Object.entries(t.replay?.perProjectorMs ?? {})) console.log(`  replay ${name.padEnd(34)}${pad(v, 8)} ms${t.cache?.[name] ? `  (cache reused ${t.cache[name].reused}, added ${t.cache[name].added})` : ''}`);
+  if (file) console.log(`\nReport: ${file}`);
+  console.log('');
+}
+
 try {
+  if (args.includes('--list')) {
+    for (const p of listProjectors()) console.log(`${p.name.padEnd(34)}${p.modes.join('/').padEnd(14)}${p.description}`);
+    process.exit(0);
+  }
+
+  if (args.includes('--model')) {
+    const report = await modelEval.runModelEval({
+      mode: argValue('--mode') || 'both',
+      site: argValue('--site') || undefined,
+      projectors: list('--projectors'),
+      seasons: list('--seasons'),
+      from: options.from || undefined,
+      to: options.to || undefined,
+      slateDates: list('--slate-dates'),
+      replayBaseline: argValue('--baseline') || undefined,
+      slateBaseline: argValue('--slate-baseline') || undefined,
+      iterations: argValue('--iterations') ? Number(argValue('--iterations')) : undefined,
+      cache: !args.includes('--no-cache'),
+      includeRows: args.includes('--rows'),
+      onProgress: (m) => process.stderr.write(`  ${m}\n`)
+    });
+    const file = modelEval.writeReport(report, argValue('--out'));
+    if (asJson) console.log(JSON.stringify(report, null, 2));
+    else printModelEval(report, file);
+    process.exit(0);
+  }
+
   if (args.includes('--replay')) {
     const report = await runReplayBacktest({
       from: options.from,

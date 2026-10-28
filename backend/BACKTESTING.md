@@ -122,6 +122,45 @@ are inferred from who is missing from the box score, so read the injury
 numbers as directional. The blend weight in production is set with
 `PROJECTION_MINUTES_WEIGHT` (0..1, default 0.6).
 
+## Model Evaluation Harness
+
+`npm run backtest:model` is the bar every projection model is judged by
+(`src/services/modelEval/`). It is read-only on the database.
+
+- **Feature store** (`featureStore.js`): all box scores, team games and
+  inactive / DNP listings are loaded once; `asOf(date)` answers from rows
+  strictly before the date (game logs, team rest, pace / ratings, season
+  profiles, archetypes and archetype defense rebuilt as-of the date). Tests
+  poison every row on/after the date and check the features do not change.
+- **Projectors** (`projectors.js`): `project(ctx) -> { dk_points, minutes,
+  stats?, p10?, p90? }`, plus optional `fit`, `prepareDate`, `finish`.
+  Baselines: `season_avg`, `last5_avg`, `l10_minutes_x_fppm`, `legacy`,
+  `minutes_model`, `minutes_model_no_redistribution`, and on slates
+  `rotowire_raw` / `rotowire_adjusted`. Add a model with
+  `registerProjector(name, factory, meta)`.
+- **Replay**: walk-forward over every date, segmented train (2024-25; `fit`
+  only sees rows before 2025-26) / validation (2025-26) / holdout (2026-27).
+- **Slates**: the saved main slates, every snapshot player (DNPs score 0).
+- **Metrics**: MAE, RMSE, bias, R^2, correlation, minutes MAE, p10 / p90
+  coverage, per-stat MAE, breakdowns (minutes bucket, role, archetype, rest,
+  teammate out, salary tier), top-20 value hit rate (5x), and a paired
+  bootstrap 95% CI of the MAE difference vs a baseline (by date in replay).
+
+```bash
+npm run backtest:model                                   # replay + slates, all projectors
+npm run backtest:model -- --mode slate                   # slates only
+npm run backtest:model -- --projectors season_avg,minutes_model --seasons 2025-26
+npm run backtest:model -- --baseline minutes_model --slate-baseline rotowire_adjusted
+npm run backtest:model -- --list                         # registered projectors
+```
+
+The JSON report goes to `backend/.cache/model-eval/reports/` (gitignored), or
+`--out file.json`. Predictions are cached per projector version and data
+signature in `.cache/model-eval/predictions`, so a re-run only computes new
+projectors (`--no-cache` to recompute). A full uncached run takes about 2.5
+minutes (the minutes model's injury redistribution is most of it); cached, about 15 s.
+The service entry point is `runModelEval(options)` in `modelEvalService.js`.
+
 ## Environment Variables
 
 - `BACKTESTING_MODE=true` - Uses `nba_dfs_backtest.db` instead of `nba_dfs.db`
