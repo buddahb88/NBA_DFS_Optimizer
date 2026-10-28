@@ -33,11 +33,12 @@
  */
 
 import projectionService from '../projectionService.js';
-import { projectPlayers, resolveConfig } from '../minutesModel.js';
+import { buildOpponentFactors, projectFppm, projectPlayers, resolveConfig } from '../minutesModel.js';
 import { fantasyPointsColumn } from '../scoring.js';
 import { playerKey } from '../../utils/playerKey.js';
 import { quantile, STATS } from './metrics.js';
 import { STAT_FIELDS } from './featureStore.js';
+import { createMinutesV2Projector } from './minutesV2.js';
 
 const n = (v) => Number(v) || 0;
 const mean = (xs) => (xs.length ? xs.reduce((s, v) => s + v, 0) / xs.length : null);
@@ -210,6 +211,30 @@ const rotowire = (field, minutesField, floorField, ceilingField) => () => ({
   }
 });
 
+/**
+ * RotoWire's minutes x our FPPM (minutesModel.projectFppm, as minutes_v2), so
+ * minutes sources compare in DK points with everything else equal.
+ */
+function rotowireMinutesTimesFppm() {
+  const memoKey = 'opponentFactors';
+  const config = resolveConfig();
+  return {
+    prepareDate({ view, shared }) {
+      if (!shared.has(memoKey)) shared.set(memoKey, buildOpponentFactors(view.minutesLogs(), config));
+    },
+    project({ view, player, slate, shared }) {
+      const minutes = slate?.rotowireMinutes;
+      if (!Number.isFinite(minutes)) return null;
+      if (player.out) return { dk_points: 0, minutes: 0 };
+      const games = view.playerGames(player.key, { seasons: 'all' }).map(g => ({ minutes: n(g.minutes), fp: n(g.fp) }));
+      const factors = shared.get(memoKey);
+      const fppm = projectFppm(games, { opponent: player.opponent, impliedTotal: slate.impliedTotal ?? null, opponentFactors: factors }, config)?.fppm
+        ?? factors.leagueFppm * 0.8;
+      return { dk_points: minutes * fppm, minutes };
+    }
+  };
+}
+
 const REGISTRY = new Map();
 
 /**
@@ -236,6 +261,14 @@ registerProjector('minutes_model', () => minutesModelProjector(), {
 });
 registerProjector('minutes_model_no_redistribution', () => minutesModelProjector({ redistribute: false }), {
   label: 'Minutes model (no redist.)', description: 'minutesModel minutes x FPPM, no injury redistribution'
+});
+registerProjector('minutes_v2', (options) => createMinutesV2Projector(options), {
+  label: 'Minutes v2', version: '1',
+  description: 'Our minutes model (recency / role / p_play / team total / blowout, fit on 2024-25) x FPPM; minutes p10/p90'
+});
+registerProjector('rotowire_minutes_x_fppm', rotowireMinutesTimesFppm, {
+  label: 'RotoWire min x FPPM', modes: ['slate'],
+  description: 'RotoWire projected minutes x the minutesModel FPPM (as minutes_v2): a minutes-only comparison in DK points'
 });
 registerProjector('rotowire_raw', rotowire('rotowire', 'rotowireMinutes', 'floor', 'ceiling'), {
   label: 'RotoWire raw', modes: ['slate'], cacheable: false,

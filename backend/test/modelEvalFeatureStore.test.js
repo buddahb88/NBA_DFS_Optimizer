@@ -37,23 +37,31 @@ function snapshot(store, date) {
     profiles: [...view.profiles().entries()].sort(),
     archetypes: keys.map(k => view.archetype(k)),
     dvp: [...view.dvpContext().cells.entries()].sort(),
-    prior: keys.map(k => view.priorSeasonProfile(k))
+    prior: keys.map(k => view.priorSeasonProfile(k)),
+    statuses: keys.map(k => view.playerStatuses(k)),
+    teamGames: teams.map(t => view.teamGames(t, { seasons: 'all' })),
+    teamPlayerRows: teams.map(t => view.teamPlayerRows(t, { games: 5 }))
   }));
 }
 
 describe('feature store: no lookahead', () => {
   test('features for date D ignore every game on or after D', () => {
-    const data = buildData();
+    // A few DNP / inactive listings before and after D
+    const listed = new Set([SEASON2[3], SEASON2[9], SEASON2[14]]);
+    const data = buildData({ skip: (name, date) => (!listed.has(date) ? null : name === nameOf('AAA', 'Deep') ? 'dnp' : name === nameOf('BBB', 'Sixth') ? 'inactive' : null) });
     const clean = fsMod.createFeatureStore(data);
     const poisoned = fsMod.createFeatureStore(poisonFrom(data, D));
     const a = snapshot(clean, D);
     const b = snapshot(poisoned, D);
     assert.ok(a.games.flat().length > 100, 'history is non-trivial');
     assert.ok(a.dvp.length > 0, 'dvp cells exist');
+    assert.equal(a.statuses.flat().length, 4, 'listings before D only');
+    assert.ok(a.teamPlayerRows.every(rows => rows.length > 0 && rows.every(r => r.game_date < D)));
     assert.deepEqual(b, a);
     // The poison does change later dates, so the check has teeth
     const later = SEASON2[15];
     assert.notDeepEqual(snapshot(poisoned, later).games, snapshot(clean, later).games);
+    assert.notDeepEqual(snapshot(poisoned, later).statuses, snapshot(clean, later).statuses);
   });
 
   test('player history is strictly before D, most recent first', () => {

@@ -57,6 +57,7 @@ export function scoreProjector(rows, name) {
       ? computeErrorMetrics(minuteRows.map(r => ({ projected: r.preds[name].minutes, actual: r.actual.minutes })))
       : null,
     coverage: coverage(withPred.map(r => ({ p10: r.preds[name].p10, p90: r.preds[name].p90, actual: r.actual.dk }))),
+    minutesCoverage: coverage(withPred.map(r => ({ p10: r.preds[name].minutes_p10, p90: r.preds[name].minutes_p90, actual: r.actual.minutes }))),
     stats: Object.keys(stats).length ? stats : null
   };
 }
@@ -75,19 +76,21 @@ export function mulberry32(seed) {
 
 /**
  * Paired MAE difference of projector a minus b (negative = a better) on rows
- * both project, with a percentile bootstrap 95% CI. cluster(row) resamples
+ * both project (field: 'dk' points or 'minutes'), with a percentile bootstrap 95% CI. cluster(row) resamples
  * whole groups (e.g. dates: player-games on one night are correlated).
  * Returns { n, clusters, diff, ci: [lo, hi], pBetter (share of resamples with a better) }.
  */
-export function pairedBootstrap(rows, a, b, { iterations = 1000, seed = 1, cluster = null } = {}) {
-  const both = rows.filter(r => finite(r.preds[a]?.dk_points) && finite(r.preds[b]?.dk_points));
+export function pairedBootstrap(rows, a, b, { iterations = 1000, seed = 1, cluster = null, field = 'dk' } = {}) {
+  const pred = field === 'minutes' ? (r, name) => r.preds[name]?.minutes : (r, name) => r.preds[name]?.dk_points;
+  const actual = field === 'minutes' ? (r) => r.actual.minutes : (r) => r.actual.dk;
+  const both = rows.filter(r => finite(pred(r, a)) && finite(pred(r, b)));
   if (!both.length) return { n: 0, clusters: 0, diff: null, ci: [null, null], pBetter: null };
   const groups = new Map();
   both.forEach((r, i) => {
     const k = cluster ? cluster(r) : i;
     let g = groups.get(k);
     if (!g) groups.set(k, (g = { sum: 0, n: 0 }));
-    g.sum += Math.abs(r.preds[a].dk_points - r.actual.dk) - Math.abs(r.preds[b].dk_points - r.actual.dk);
+    g.sum += Math.abs(pred(r, a) - actual(r)) - Math.abs(pred(r, b) - actual(r));
     g.n += 1;
   });
   const list = [...groups.values()];
@@ -146,7 +149,8 @@ export function baseHitRate(rows, { multiple = 5 } = {}) {
 }
 
 /**
- * MAE / bias per group for each projector: [{ group, n, mae: {name}, bias: {name} }].
+ * MAE / bias per group for each projector, points and minutes:
+ * [{ group, n, mae: {name}, bias: {name}, minutesMae: {name}, minutesBias: {name} }].
  * order: preferred group order (others after, sorted).
  */
 export function breakdown(rows, keyFn, names, order = null) {
@@ -167,12 +171,18 @@ export function breakdown(rows, keyFn, names, order = null) {
     const list = groups.get(k);
     const mae = {};
     const bias = {};
+    const minutesMae = {};
+    const minutesBias = {};
     for (const name of names) {
       const m = computeErrorMetrics(list.map(r => ({ projected: r.preds[name]?.dk_points, actual: r.actual.dk })));
       mae[name] = m.mae;
       bias[name] = m.bias;
+      const withMinutes = list.filter(r => finite(r.preds[name]?.minutes) && finite(r.actual.minutes));
+      const mm = withMinutes.length ? computeErrorMetrics(withMinutes.map(r => ({ projected: r.preds[name].minutes, actual: r.actual.minutes }))) : null;
+      minutesMae[name] = mm?.mae ?? null;
+      minutesBias[name] = mm?.bias ?? null;
     }
-    return { group: k, n: list.length, mae, bias };
+    return { group: k, n: list.length, mae, bias, minutesMae, minutesBias };
   });
 }
 

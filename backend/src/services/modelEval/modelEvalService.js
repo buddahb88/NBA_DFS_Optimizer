@@ -15,10 +15,11 @@
  *
  * Both report a leaderboard on the rows every projector covered (MAE, RMSE,
  * bias, R^2, correlation, minutes MAE, p10 / p90 coverage, per-stat MAE),
- * a paired bootstrap 95% CI on the MAE difference vs a baseline (clustered
- * by date in replay), breakdowns (minutes bucket, role, archetype, rest,
- * teammate out, salary tier on slates) and, on slates, the top-20 value hit
- * rate (5x).
+ * a paired bootstrap 95% CI on the MAE difference vs a baseline, points and
+ * minutes (clustered by date in replay), breakdowns (minutes bucket, role,
+ * archetype, rest, teammate out, blowout, salary tier on slates, and players
+ * who beat the reference projection's minutes by 3+: RotoWire on slates,
+ * minutes_model in replay) and, on slates, the top-20 value hit rate (5x).
  *
  * Predictions of cacheable projectors are cached on disk per projector
  * version and data signature (cacheDir/predictions), so a re-run only
@@ -259,7 +260,10 @@ export async function runModelEval(options = {}) {
           season: seg.season,
           role: seg.role,
           dates: new Set(seg.rows.map(r => r.date)).size,
-          ...summarizeRows(seg.rows, replayNames, { baseline, iterations: o.iterations, seed: o.seed, cluster: r => r.date })
+          ...summarizeRows(seg.rows, replayNames, {
+            baseline, iterations: o.iterations, seed: o.seed, cluster: r => r.date,
+            minutesReference: replayNames.includes('minutes_model') ? 'minutes_model' : null
+          })
         }))
       };
       if (o.includeRows) report.replay.rows = rows;
@@ -276,7 +280,10 @@ export async function runModelEval(options = {}) {
       const slateNames = projectors.filter(p => p.modes.includes('slate')).map(p => p.name);
       const { rows, timings: per } = await runSlates(store, projectors, slates, { onSlate: s => progress(`slate ${s.date} (${s.slateId})`) });
       const baseline = slateNames.includes(o.slateBaseline) ? o.slateBaseline : null;
-      const summary = summarizeRows(rows, slateNames, { baseline, iterations: o.iterations, seed: o.seed });
+      const summary = summarizeRows(rows, slateNames, {
+        baseline, iterations: o.iterations, seed: o.seed,
+        minutesReference: slateNames.includes('rotowire_raw') ? 'rotowire_raw' : null
+      });
       const common = rows.filter(r => slateNames.every(name => r.preds[name]));
       report.slate = {
         baseline,

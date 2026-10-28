@@ -12,9 +12,13 @@
  *   playerGames      box scores, most recent first (season filter, regular-only)
  *   minutesLogs      every played game as minutesModel game logs (oldest first)
  *   teamRest         days since the team's previous game this season (0 = B2B)
+ *   teamGames        the team's games (team_game_stats), most recent first
+ *   teamPlayerRows   box score rows of the team's last N games
+ *   playerStatuses   a player's INACTIVE / DNP listings
  *   teamRatings      pace / offensive / defensive rating from team_game_stats,
  *                    season-to-date shrunk toward last season (RATING_PRIOR_GAMES)
  *   league           league pace / rating this season (last season while thin)
+ *   expectedMargin   -spread, else the as-of net rating gap (blowout risk)
  *   profiles         season-to-date player_season_profiles rows
  *                    (playerProfileService.computeProfiles on games before D)
  *   archetype        classifyProfile on that profile; below the sample minimum,
@@ -50,6 +54,7 @@ import { previousSeason, seasonForDate, seasonStartDate } from '../../utils/seas
 import { playerKey } from '../../utils/playerKey.js';
 
 export const RATING_PRIOR_GAMES = 10;
+export const HOME_COURT = 1.5; // points of expected margin each way
 const LEAGUE_MIN_TEAM_GAMES = 50;
 const VIEW_CACHE = 4;
 export const STAT_FIELDS = Object.freeze({
@@ -164,7 +169,13 @@ export function createFeatureStore(data) {
     push(teamGamesByDate, g.game_date, g);
   }
   const statusesByDate = new Map();
-  for (const s of statuses) push(statusesByDate, s.game_date, s);
+  const statusesByPlayer = new Map();
+  for (const s of [...statuses].sort(byDateId)) {
+    push(statusesByDate, s.game_date, s);
+    push(statusesByPlayer, s.player_key, s);
+  }
+  const byGame = new Map();
+  for (const g of games) push(byGame, g.game_id, g);
 
   const dates = [...new Set([...byDate.keys(), ...teamGamesByDate.keys()])].sort();
 
@@ -250,6 +261,31 @@ export function createFeatureStore(data) {
         return { restDays: dayDiff(date, last.game_date) - 1, lastGame: last.game_date };
       },
 
+      /** A player's INACTIVE / DNP listings before the date, most recent first. */
+      playerStatuses(key) {
+        const rows = statusesByPlayer.get(key) ?? [];
+        return rows.slice(0, lowerBound(rows, date)).reverse();
+      },
+
+      /** The team's games (team_game_stats rows) before the date, most recent first; seasons as playerGames. */
+      teamGames(team, { seasons = 'current' } = {}) {
+        const rows = teamRows.get(team) ?? [];
+        const out = [];
+        for (let i = lowerBound(rows, date) - 1; i >= 0; i--) {
+          const g = rows[i];
+          if (seasons === 'current' && g.season !== season) break;
+          if (seasons === 'current+prior' && g.season !== season && g.season !== prior) break;
+          out.push(g);
+        }
+        return out;
+      },
+
+      /** Box score rows of the team's last `games` games before the date (any season), most recent game first. */
+      teamPlayerRows(team, { games: count = 10 } = {}) {
+        return view.teamGames(team, { seasons: 'all' }).slice(0, count)
+          .flatMap(g => (byGame.get(g.game_id) ?? []).filter(r => r.team === team));
+      },
+
       /** League pace / offensive rating before the date (last season's while under 50 team games). */
       league() {
         return lazy('league', () => {
@@ -283,6 +319,19 @@ export function createFeatureStore(data) {
             prior: p ? { pace: p.pace, offRtg: p.offRtg, defRtg: p.defRtg } : null
           };
         });
+      },
+
+      /**
+       * Expected margin for `team` (+ = favored): -spread when a line is known,
+       * else the shrunk net rating gap x average pace / 100 plus home court.
+       */
+      expectedMargin(team, opponent, isHome, spread = null) {
+        if (spread !== null && Number.isFinite(Number(spread))) return -Number(spread);
+        const a = view.teamRatings(team);
+        const b = view.teamRatings(opponent);
+        if (![a.offRtg, a.defRtg, b.offRtg, b.defRtg].every(Number.isFinite)) return 0;
+        const pace = ((a.pace ?? 100) + (b.pace ?? 100)) / 2;
+        return ((a.offRtg - a.defRtg) - (b.offRtg - b.defRtg)) * pace / 100 + (isHome ? HOME_COURT : -HOME_COURT);
       },
 
       /** Season-to-date profiles (player_season_profiles shape) from regular-season games before the date. */

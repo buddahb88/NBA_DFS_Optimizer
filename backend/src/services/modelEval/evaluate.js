@@ -12,7 +12,8 @@
  *   status, salary, actual: { dk, minutes, pts, ... }, tags, preds: { [name]: Prediction | null } }
  * Tags (breakdowns): minutesBucket (as-of last-5 average minutes), role
  * (started the game; DNPs are bench), archetype (as-of), rest (team rest
- * days), teammateOut (an OUT teammate averaging 20+ minutes), salaryTier (slates).
+ * days), teammateOut (an OUT teammate averaging 20+ minutes), blowout
+ * (|expected margin|: -spread on slates, as-of rating gap in replay), salaryTier (slates).
  */
 
 import { salaryTier, SALARY_TIERS } from '../projectionBacktestService.js';
@@ -57,9 +58,17 @@ function minutesBucket(view, key) {
   return avg < 15 ? '<15' : avg < 24 ? '15-24' : avg < 30 ? '24-30' : '30+';
 }
 
-function tagsFor(outcome, player, view, salary) {
+export const BLOWOUT_BUCKETS = ['<5', '5-10', '10+'];
+
+function blowoutBucket(view, player, spread) {
+  const m = Math.abs(view.expectedMargin(player.team, player.opponent, player.isHome, Number.isFinite(spread) ? spread : null));
+  return m < 5 ? '<5' : m < 10 ? '5-10' : '10+';
+}
+
+function tagsFor(outcome, player, view, salary, spread = null) {
   const r = player.restDays;
   return {
+    blowout: blowoutBucket(view, player, spread),
     minutesBucket: minutesBucket(view, player.key),
     role: outcome.isStarter ? 'starter' : 'bench',
     archetype: view.archetype(player.key).archetype,
@@ -104,7 +113,7 @@ async function scoreEntries({ mode, date, slateId = null, view, day, site, entri
     status: e.outcome.status,
     salary: e.slate?.salary ?? null,
     actual: e.outcome.actual,
-    tags: tagsFor(e.outcome, e.player, view, e.slate?.salary ?? null),
+    tags: tagsFor(e.outcome, e.player, view, e.slate?.salary ?? null, e.slate?.spread ?? null),
     preds: preds[i]
   }));
 }
@@ -219,9 +228,10 @@ export function segmentBySeason(rows, { train = [], validation = [] } = {}) {
  * Leaderboard, paired bootstrap vs the baseline and breakdowns, on the rows
  * every projector in `names` projected (common set), for players who played
  * and for everyone (DNPs score 0).
- * options: { baseline, iterations, seed, cluster(row) for the bootstrap }
+ * options: { baseline, iterations, seed, cluster(row) for the bootstrap,
+ *   minutesReference: projector whose minutes define the "beat projection by 3+" breakdown }
  */
-export function summarizeRows(rows, names, { baseline = null, iterations = 1000, seed = 1, cluster = null } = {}) {
+export function summarizeRows(rows, names, { baseline = null, iterations = 1000, seed = 1, cluster = null, minutesReference = null } = {}) {
   const summarize = (subset) => {
     const common = subset.filter(r => names.every(name => r.preds[name]));
     const leaderboard = names.map(name => ({ projector: name, ...scoreProjector(common, name) }))
@@ -229,14 +239,26 @@ export function summarizeRows(rows, names, { baseline = null, iterations = 1000,
     const paired = baseline && names.includes(baseline)
       ? names.filter(name => name !== baseline).map(name => ({ projector: name, vs: baseline, ...pairedBootstrap(common, name, baseline, { iterations, seed, cluster }) }))
       : [];
+    const hasMinutes = (name) => common.some(r => finite(r.preds[name]?.minutes));
+    const pairedMinutes = baseline && names.includes(baseline) && hasMinutes(baseline)
+      ? names.filter(name => name !== baseline && hasMinutes(name))
+        .map(name => ({ projector: name, vs: baseline, ...pairedBootstrap(common, name, baseline, { iterations, seed, cluster, field: 'minutes' }) }))
+      : [];
     const by = (fn, order) => breakdown(common, fn, names, order);
     const breakdowns = {
       minutes: by(r => r.tags.minutesBucket, MINUTES_BUCKETS),
       role: by(r => r.tags.role, ['starter', 'bench']),
       archetype: by(r => r.tags.archetype),
       rest: by(r => r.tags.rest, REST_BUCKETS),
-      teammateOut: by(r => r.tags.teammateOut, ['teammate out', 'none out'])
+      teammateOut: by(r => r.tags.teammateOut, ['teammate out', 'none out']),
+      blowout: by(r => r.tags.blowout, BLOWOUT_BUCKETS)
     };
+    // The players hindsight-optimal lineups are made of: 3+ minutes over the reference projection
+    if (minutesReference && names.includes(minutesReference)) {
+      const beat = `beat ${minutesReference} +3`;
+      breakdowns.beatProjection = by(r => (finite(r.preds[minutesReference]?.minutes)
+        ? (r.actual.minutes >= r.preds[minutesReference].minutes + 3 ? beat : 'other') : null), [beat, 'other']);
+    }
     if (common.some(r => r.tags.salaryTier)) breakdowns.salaryTier = by(r => r.tags.salaryTier, SALARY_TIERS.map(t => t.label));
     if (new Set(common.map(r => r.seasonType)).size > 1) breakdowns.seasonType = by(r => r.seasonType, ['regular', 'play-in', 'playoffs']);
     return {
@@ -245,6 +267,7 @@ export function summarizeRows(rows, names, { baseline = null, iterations = 1000,
       coverage: Object.fromEntries(names.map(name => [name, subset.filter(r => r.preds[name]).length])),
       leaderboard,
       paired,
+      pairedMinutes,
       breakdowns
     };
   };

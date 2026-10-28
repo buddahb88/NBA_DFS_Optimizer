@@ -146,19 +146,30 @@ function printBoard(title, summary, baseline) {
   }
 }
 
+function printMinutesPaired(summary) {
+  if (!summary.pairedMinutes?.length) return;
+  for (const p of summary.pairedMinutes) {
+    console.log(`  minutes ${p.projector.padEnd(32)} vs ${p.vs}: ${fmt(p.diff, 3)} [${fmt(p.ci[0], 3)}, ${fmt(p.ci[1], 3)}]`);
+  }
+}
+
 function printModelEval(report, file) {
   console.log('\n═══════════════════════════════════════════════════════════════');
   console.log(`  MODEL EVALUATION (${report.site}, data ${report.signature})`);
   console.log('═══════════════════════════════════════════════════════════════');
   for (const seg of report.replay?.segments ?? []) {
     printBoard(`REPLAY ${seg.season} [${seg.role}] ${seg.dates} dates, played`, seg.played, report.replay.baseline);
+    printMinutesPaired(seg.played);
     printBoard(`REPLAY ${seg.season} [${seg.role}] incl. DNP`, seg.withDnp, report.replay.baseline);
+    printMinutesPaired(seg.withDnp);
   }
   if (report.slate) {
     const s = report.slate;
     console.log(`\nSLATES: ${s.slates.map(x => `${x.date} (${x.played}/${x.players})`).join(', ')}`);
     printBoard('SLATES incl. DNP (0 pts)', s.withDnp, s.baseline);
+    printMinutesPaired(s.withDnp);
     printBoard('SLATES played only', s.played, s.baseline);
+    printMinutesPaired(s.played);
     console.log(`\nTOP-${s.valueHit.top} VALUE HIT RATE (>= ${s.valueHit.multiple}x; base rate ${fmt(s.valueHit.baseRate, 3)})`);
     for (const v of s.valueHit.projectors) console.log(`${v.projector.padEnd(34)}${pad(`${v.hits}/${v.picks}`, 9)}${pad(fmt(v.rate, 3), 8)}  avg ${fmt(v.avgActualValue)}x`);
   }

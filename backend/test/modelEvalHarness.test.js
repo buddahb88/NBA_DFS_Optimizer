@@ -97,6 +97,42 @@ describe('metrics', () => {
   });
 });
 
+describe('minutes metrics', () => {
+  const rows = [
+    { date: 'a', tags: { blowout: '<5' }, actual: { dk: 20, minutes: 30 }, preds: { p: { dk_points: 22, minutes: 28, minutes_p10: 20, minutes_p90: 34 }, q: { dk_points: 21, minutes: 33 } } },
+    { date: 'b', tags: { blowout: '10+' }, actual: { dk: 40, minutes: 36 }, preds: { p: { dk_points: 30, minutes: 31, minutes_p10: 25, minutes_p90: 35 }, q: { dk_points: 35, minutes: 30 } } },
+    { date: 'c', tags: { blowout: '10+' }, actual: { dk: 0, minutes: 0 }, preds: { p: { dk_points: 5, minutes: 4, minutes_p10: 0, minutes_p90: 12 }, q: { dk_points: 8, minutes: 10 } } }
+  ];
+
+  test('scoreProjector: minutes p10 / p90 coverage', () => {
+    const s = metrics.scoreProjector(rows, 'p');
+    assert.equal(s.minutesCoverage.n, 3);
+    close(s.minutesCoverage.aboveP90, 33.3);
+    assert.equal(metrics.scoreProjector(rows, 'q').minutesCoverage.n, 0);
+  });
+
+  test('pairedBootstrap on minutes', () => {
+    const r = metrics.pairedBootstrap(rows, 'p', 'q', { iterations: 50, field: 'minutes' });
+    close(r.diff, ((2 - 3) + (5 - 6) + (4 - 10)) / 3, 1e-3);
+  });
+
+  test('breakdown carries minutes MAE / bias', () => {
+    const b = metrics.breakdown(rows, r => r.tags.blowout, ['p', 'q']);
+    const big = b.find(g => g.group === '10+');
+    close(big.minutesMae.p, 4.5);
+    close(big.minutesBias.q, 2);
+  });
+
+  test('summarizeRows: blowout and beat-projected-minutes breakdowns', () => {
+    const summary = evaluate.summarizeRows(rows.map(r => ({ ...r, played: r.actual.minutes > 0, tags: { ...r.tags, minutesBucket: '30+', role: 'starter', archetype: 'x', rest: 'B2B', teammateOut: 'none out' } })),
+      ['p', 'q'], { baseline: 'q', iterations: 20, minutesReference: 'q' });
+    const beat = summary.withDnp.breakdowns.beatProjection;
+    assert.deepEqual(beat.map(g => [g.group, g.n]), [['beat q +3', 1], ['other', 2]]);
+    assert.ok(summary.withDnp.breakdowns.blowout.length === 2);
+    assert.equal(summary.withDnp.pairedMinutes[0].projector, 'p');
+  });
+});
+
 describe('projectors', () => {
   let store;
   const key = () => playerKey(nameOf('AAA', 'Star'));
@@ -286,6 +322,20 @@ describe('slates, cache and service', () => {
     const other = rows.find(r => r.name === nameOf('CCC', 'Wing'));
     assert.equal(other.tags.teammateOut, 'none out');
     close(other.preds.minutes_model.minutes, other.preds.minutes_model_no_redistribution.minutes);
+  });
+
+  test('blowout tag: |expected margin| from the slate spread, else the rating gap', async () => {
+    const slate = slateFor(D);
+    slate.players = slate.players.map(p => ({ ...p, out: false, slate: { ...p.slate, spread: p.team === 'AAA' ? -12.5 : p.team === 'BBB' ? 12.5 : -2 } }));
+    const { rows } = await evaluate.runSlates(store, [projectors.createProjector('season_avg')], [slate]);
+    assert.equal(rows.find(r => r.team === 'AAA').tags.blowout, '10+');
+    assert.equal(rows.find(r => r.team === 'CCC').tags.blowout, '<5');
+    const replay = await evaluate.runReplay(store, [projectors.createProjector('season_avg')], { from: D, to: D });
+    assert.ok(replay.rows.every(r => ['<5', '5-10', '10+'].includes(r.tags.blowout)));
+    const view = store.asOf(D);
+    assert.ok(Number.isFinite(view.expectedMargin('AAA', 'BBB', true)));
+    close(view.expectedMargin('AAA', 'BBB', true) + view.expectedMargin('BBB', 'AAA', false), 0);
+    close(view.expectedMargin('AAA', 'BBB', true, -7), 7);
   });
 
   test('prediction cache: a cached date skips prepareDate and project', async () => {
