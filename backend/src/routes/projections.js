@@ -252,4 +252,22 @@ router.delete('/:slateId/overrides/:playerId', async (req, res) => {
   }
 });
 
+/**
+ * GET /api/projections/:slateId/own-model[?refresh=1]
+ * Our model for the slate (services/modelEval/ownModelService.js): per player
+ * ours_minutes, p_play, ours_mean, ours_median, p10, p90, p_boom, p_dd, the
+ * RotoWire blend (blend_point; weights from the M4 backtest) and ours vs
+ * RotoWire disagreement. Read-only; not used by the optimizer yet.
+ */
+router.get('/:slateId/own-model', async (req, res) => {
+  try {
+    const { projectSlateOwnModel } = await import('../services/modelEval/ownModelService.js');
+    const refresh = ['1', 'true'].includes(String(req.query.refresh ?? ''));
+    res.json(await projectSlateOwnModel(req.params.slateId, { refresh }));
+  } catch (error) {
+    console.error('Own model projection error:', error);
+    res.status(error.status ?? 500).json({ error: error.message });
+  }
+});
+
 export default router;
