@@ -22,14 +22,17 @@
  * captured live (capture_source NULL) is never overwritten unless forced:
  * its existing rows only gain detail columns and Vegas that are still NULL.
  * Every DK classic slate found is written to slate_catalog; is_main marks
- * the main slate of each date (most games, then earliest lock).
+ * the main slate of each date (most games, then earliest lock), recomputed
+ * over every cataloged slate of the date, live ones included
+ * (slateCatalogService).
  */
 
 import fs from 'fs';
 import path from 'path';
-import db, { DATABASE_TYPE } from '../config/database.js';
+import db from '../config/database.js';
 import { getEligibleSlots } from '../config/sites.js';
 import rotowireService from './rotowireService.js';
+import { upsertCatalogSlate, slateName, mainOrder } from './slateCatalogService.js';
 import { snapshotRowFor, upsertSnapshotRow, playerGameStart, rotowireGameDate } from './slateSnapshotService.js';
 import { loadArchetypeLookup } from './archetypeDefenseService.js';
 import { playerKey, canonicalTeam } from '../utils/playerKey.js';
@@ -88,11 +91,6 @@ export function classifySlate(slateId, players) {
   };
 }
 
-const mainOrder = (a, b) => b.games - a.games
-  || String(a.firstGameTime).localeCompare(String(b.firstGameTime))
-  || b.players - a.players
-  || Number(a.slateId) - Number(b.slateId);
-
 /** DK classic slates with isMain set on the main slate of each date (most games, then earliest lock). */
 export function markMainSlates(slates) {
   const main = new Map();
@@ -102,15 +100,6 @@ export function markMainSlates(slates) {
     if (!current || mainOrder(s, current) < 0) main.set(s.gameDate, s);
   }
   return slates.map(s => ({ ...s, isMain: main.get(s.gameDate) === s }));
-}
-
-const lockLabel = (iso) => (iso
-  ? new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' }).format(new Date(iso)) + ' ET'
-  : null);
-
-/** "Main · 11 games · 7:00 PM ET" / "Classic · 3 games · 10:00 PM ET" */
-export function slateName(slate) {
-  return [slate.isMain ? 'Main' : 'Classic', `${slate.games} games`, lockLabel(slate.firstGameTime)].filter(Boolean).join(' · ');
 }
 
 const NULL_ODDS = { moneyline: null, overUnder: null, spread: null, impliedPts: null, impliedWinProb: null };
@@ -181,27 +170,10 @@ export function cachedSlateFetcher({ cacheDir, delayMs = 1000, fetchRaw = (id) =
   };
 }
 
-async function upsertCatalog(slate, now) {
-  const values = {
-    site: SITE, slate_id: slate.slateId, game_date: slate.gameDate, name: slateName(slate), contest_type: slate.contestType,
-    games: slate.games, players: slate.players, first_game_time: slate.firstGameTime, is_main: slate.isMain ? 1 : 0,
-    source: 'rotowire', updated_at: now.toISOString()
-  };
-  const cols = Object.keys(values);
-  if (DATABASE_TYPE === 'azuresql') {
-    await db.run(`
-      MERGE INTO slate_catalog AS target
-      USING (SELECT @site AS site, @slate_id AS slate_id) AS source
-      ON target.site = source.site AND target.slate_id = source.slate_id
-      WHEN MATCHED THEN UPDATE SET ${cols.filter(c => c !== 'site' && c !== 'slate_id').map(c => `[${c}] = @${c}`).join(', ')}
-      WHEN NOT MATCHED THEN INSERT (${cols.map(c => `[${c}]`).join(', ')}) VALUES (${cols.map(c => `@${c}`).join(', ')});`, values);
-  } else {
-    await db.run(`
-      INSERT INTO slate_catalog (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})
-      ON CONFLICT(site, slate_id) DO UPDATE SET ${cols.filter(c => c !== 'site' && c !== 'slate_id').map(c => `${c} = excluded.${c}`).join(', ')}`,
-    ...cols.map(c => values[c]));
-  }
-}
+const catalogValues = (slate) => ({
+  site: SITE, slate_id: slate.slateId, game_date: slate.gameDate, name: slateName(slate), contest_type: slate.contestType,
+  games: slate.games, players: slate.players, first_game_time: slate.firstGameTime, is_main: slate.isMain ? 1 : 0, source: 'rotowire'
+});
 
 // Prior-season archetype only: this season's is built from games after the slate
 async function priorArchetypeLookup() {
@@ -299,7 +271,7 @@ export async function backfillRotowireSlates({
        FROM slate_player_snapshots WHERE site = ? AND slate_id = ? AND game_date = ?`, SITE, slate.slateId, slate.gameDate);
     const mode = Number(existing?.live) > 0 && !force ? 'fill' : 'upsert';
     const written = dryRun ? 0 : await writeSlate(slate, players, { mode, now, archetypeOf, odds });
-    if (!dryRun) await upsertCatalog(slate, now);
+    if (!dryRun) await upsertCatalogSlate(catalogValues(slate), { now });
     entry.slates.push({
       slateId: slate.slateId, name: slateName(slate), isMain: slate.isMain, games: slate.games, firstGameTime: slate.firstGameTime,
       rotowirePlayers: slate.players, projectedPlayers: players.length, before: Number(existing?.n) || 0, mode, written
@@ -308,5 +280,7 @@ export async function backfillRotowireSlates({
   }
   return { dates };
 }
+
+export { slateName };
 
 export default { classifySlate, markMainSlates, slateName, snapshotPlayersFromRotowire, cachedSlateFetcher, backfillRotowireSlates };

@@ -18,6 +18,7 @@ import { seasonForDate } from '../utils/season.js';
  * snapshot before the next day's sync wipe) only fills columns that are
  * still NULL and never writes the range columns, which may have been
  * recomputed after lock. Pre-lock values are what a backtest has to see.
+ * Every snapshotted slate is also cataloged (slateCatalogService).
  */
 
 export { SNAPSHOT_DETAIL_COLUMNS };
@@ -300,7 +301,18 @@ export async function snapshotSlate(slateId, { now = new Date() } = {}) {
     await upsertSnapshotRow(snapshotRowFor(p, { slate, site, now, archetype, matchup }), { locked });
     written++;
   }
+  await catalogSlate(site, slateId, now);
   return written;
+}
+
+// Catalog the snapshotted slate (slate_catalog) so the night stays backtestable; a failure only warns
+async function catalogSlate(site, slateId, now) {
+  try {
+    const { catalogLiveSlate } = await import('./slateCatalogService.js');
+    await catalogLiveSlate(site, slateId, { now });
+  } catch (error) {
+    console.warn(`  Slate catalog update failed for slate ${slateId}: ${error.message}`);
+  }
 }
 
 /** Snapshot every slate currently in the players table (before a sync wipe). */
