@@ -19,6 +19,7 @@
     "backfill:site-points": "node scripts/backfill-site-fantasy-points.js",
     "backfill:nba-api": "node scripts/backfill-nba-api.js",
     "backfill:espn": "node scripts/backfill-espn.js",
+    "catalog:slates": "node scripts/catalog-live-slates.js",
     "backtest:accuracy": "node scripts/projectionBacktest.js",
     "test:accuracy": "vitest run test/projectionBacktest.test.js"
   },
