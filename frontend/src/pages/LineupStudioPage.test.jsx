@@ -11,11 +11,11 @@ vi.mock('../context/SlateContext', () => ({ useSlate: vi.fn() }))
 vi.mock('../services/api', () => ({
   playersAPI: { getBySlateId: vi.fn(), recalculateProjections: vi.fn(), resetProjections: vi.fn() },
   playerSettingsAPI: { getBySlateId: vi.fn() },
-  optimizerAPI: { generate: vi.fn(), reviewLineup: vi.fn(), slateBreakdown: vi.fn() },
+  optimizerAPI: { generate: vi.fn(), reviewLineup: vi.fn(), slateBreakdown: vi.fn(), compareSources: vi.fn() },
   lineupsAPI: { create: vi.fn() },
   exportAPI: { lineups: vi.fn() },
   portfolioAPI: { getPresets: vi.fn(), build: vi.fn(), getJob: vi.fn(), cancel: vi.fn() },
-  projectionsAPI: { getSanity: vi.fn(), setSanity: vi.fn() },
+  projectionsAPI: { getSanity: vi.fn(), setSanity: vi.fn(), getSource: vi.fn(), setSource: vi.fn() },
 }))
 
 const POS = ['PG', 'SG', 'SF', 'PF', 'C', 'PG/SG', 'SF/PF', 'C']
@@ -80,6 +80,28 @@ describe('LineupStudioPage', () => {
     await waitFor(() => expect(projectionsAPI.setSanity).toHaveBeenCalledWith({ enabled: false }))
     await waitFor(() => expect(playersAPI.getBySlateId.mock.calls.length).toBe(loads + 1))
     expect(toggle).toHaveAttribute('aria-checked', 'false')
+  })
+
+  it('projection source control: switching it reloads the pool; the pool shows the source and the fade badge', async () => {
+    const status = { source: 'blend', origin: 'default', default: 'blend', options: ['rotowire', 'ours', 'blend'] }
+    projectionsAPI.getSource.mockResolvedValue({ data: status })
+    projectionsAPI.setSource.mockResolvedValue({ data: { ...status, source: 'ours', origin: 'runtime' } })
+    const faded = { ...PLAYERS[0], projected_points: 36, projection_source: 'blend', projection_requested: 'blend', projection_rotowire: 40,
+      projection_ours: 32, projection_blend: 36, ours_minutes: 30, p_play: 0.95,
+      projection_fade: { points_diff: -8, hit_rate: 0.688, n: 77, text: 'Fade: ours 32.0 vs RotoWire 40.0 (-8.0).' } }
+    playersAPI.getBySlateId.mockResolvedValue({ data: [faded, ...PLAYERS.slice(1)] })
+
+    renderStudio()
+    const group = await screen.findByRole('radiogroup', { name: 'Projections' })
+    expect(projectionsAPI.getSource).toHaveBeenCalledWith(expect.objectContaining({ slateId: expect.anything() }))
+    fireEvent.click(await screen.findByRole('tab', { name: /Player pool/ }))
+    expect(await screen.findByTestId('fade-badge')).toHaveTextContent('Fade 69%')
+    expect(screen.getByLabelText(/RotoWire 40.0 · Ours 32.0 · Blend 36.0/)).toHaveTextContent('36.0')
+
+    const loads = playersAPI.getBySlateId.mock.calls.length
+    fireEvent.click(within(group).getByRole('radio', { name: 'Ours' }))
+    await waitFor(() => expect(projectionsAPI.setSource).toHaveBeenCalledWith({ source: 'ours' }))
+    await waitFor(() => expect(playersAPI.getBySlateId.mock.calls.length).toBe(loads + 1))
   })
 
   it('shows an empty state when no slate is selected', () => {
@@ -329,6 +351,14 @@ describe('LineupStudioPage', () => {
       expect(within(card).getByText('50.0')).toBeInTheDocument()
       expect(within(card).queryByRole('button', { name: 'Save' })).not.toBeInTheDocument()
       expect(screen.getByText('Actual (best)')).toBeInTheDocument()
+      // Compare sources re-runs the same request once per source
+      optimizerAPI.compareSources.mockResolvedValue({ data: { sources: [
+        { source: 'rotowire', summary: { fallback: 0 }, lineups: 1, topProjected: 300, bestActual: 157.5, avgActual: 157.5, accuracy: { n: 8, mae: 9.1, bias: 1, playedMae: 8 }, topLineup: null },
+        { source: 'blend', summary: { fallback: 0 }, lineups: 1, topProjected: 295, bestActual: 170, avgActual: 170, accuracy: { n: 8, mae: 8.4, bias: 0.5, playedMae: 7.9 }, topLineup: null },
+      ] } })
+      fireEvent.click(within(screen.getByTestId('source-comparison')).getByRole('button', { name: 'Compare sources' }))
+      await waitFor(() => expect(optimizerAPI.compareSources).toHaveBeenCalledWith(optimizerAPI.generate.mock.calls[0][0]))
+      expect(await screen.findByTestId('source-row-blend')).toHaveTextContent('170.0')
       expect(screen.getByRole('button', { name: /Save all/ })).toBeDisabled()
       expect(screen.getByRole('button', { name: /Export 1 for/ })).toBeDisabled()
 

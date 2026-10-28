@@ -33,6 +33,8 @@ import usePortfolioJob from '../features/portfolio/usePortfolioJob';
 import { PORTFOLIO_SITE } from '../features/portfolio/portfolioMath';
 import SlateModeSelect from '../features/slate/SlateModeSelect';
 import ProjectionSanityToggle from '../features/slate/ProjectionSanityToggle';
+import ProjectionSourceSelect from '../features/slate/ProjectionSourceSelect';
+import SourceComparison from '../features/slate/SourceComparison';
 import { BACKTEST_DISABLED, formatActual, lineupActual } from '../features/slate/backtest';
 import {
   FALLBACK_SITE,
@@ -240,11 +242,12 @@ export default function LineupStudioPage() {
         players,
         Object.fromEntries((savedControls || []).map((s) => [String(s.playerId), s])),
       );
-      const res = await optimizerAPI.generate({
+      const request = {
         ...buildOptimizerRequest({ slateId, site, settings, locked, excluded }),
         ...JSON.parse(paramsKey),
         players: poolControls,
-      });
+      };
+      const res = await optimizerAPI.generate(request);
       if (slateRef.current !== requestSlate) return;
       const stamp = Date.now();
       const lineups = (res.data.lineups || []).map((l, i) => ({
@@ -261,7 +264,7 @@ export default function LineupStudioPage() {
           details: [...warnings, 'Try relaxing pool filters, stack rules or locks.'],
         });
       } else {
-        setRun({ status: 'done', lineups, warnings, requested: settings.numLineups, maxExposure: settings.maxExposure });
+        setRun({ status: 'done', lineups, warnings, requested: settings.numLineups, maxExposure: settings.maxExposure, request });
       }
     } catch (err) {
       if (slateRef.current !== requestSlate) return;
@@ -622,6 +625,8 @@ export default function LineupStudioPage() {
                   <Stat label="Avg salary" value={formatSalary(summary.avgSalary)} hint={`of ${formatSalary(salaryCap)}`} />
                 </div>
 
+                {isBacktest && <SourceComparison request={run.request ?? null} />}
+
                 {run.warnings.length > 0 && (
                   <Notice notice={{ tone: 'caution', text: 'The optimizer reported:', details: run.warnings }} onDismiss={() => setRun({ ...run, warnings: [] })} />
                 )}
@@ -703,6 +708,10 @@ export default function LineupStudioPage() {
         <div className="flex flex-wrap items-center gap-2">
           <SlateModeSelect showRanges />
           <ProjectionSanityToggle onChange={() => setPoolVersion((v) => v + 1)} />
+          <ProjectionSourceSelect
+            slateParams={slateId ? { slateId, ...(slateParams ?? {}) } : null}
+            onChange={() => setPoolVersion((v) => v + 1)}
+          />
           <Tabs
             variant="pill"
             value={view}

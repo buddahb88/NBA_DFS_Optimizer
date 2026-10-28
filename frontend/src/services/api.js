@@ -65,6 +65,9 @@ export const optimizerAPI = {
   // extra: { slateDate, ranges } to rebuild a saved past slate (backtest)
   slateBreakdown: (slateId, mode, extra = {}) => api.post('/optimizer/slate-breakdown', { slateId, mode, ...extra }),
   reviewLineup: (slateId, lineup, mode, extra = {}) => api.post('/optimizer/review-lineup', { slateId, lineup, mode, ...extra }),
+  // The generate body once per projection source: { sources: [{ source, summary, lineups, topProjected,
+  // bestActual, avgActual, accuracy: { n, mae, bias, playedMae }, topLineup }] }
+  compareSources: (settings) => api.post('/optimizer/compare-sources', settings, { timeout: 300000 }),
 };
 
 // Export API (site upload CSVs)
@@ -166,6 +169,11 @@ export const projectionsAPI = {
   getSanity: () => api.get('/projections/sanity'),
   // { enabled?: boolean | null, components?: { fppm?, blowout? } | null } (null = back to the default)
   setSanity: (body) => api.put('/projections/sanity', body),
+  // Projection source: { source: rotowire|ours|blend, origin, default, options }; params { slateId, slateDate }
+  // add `slate`: { applied, fallback, fades, error, loadMs } for that slate (the own model can take ~2 s cold)
+  getSource: (params = {}) => api.get('/projections/source', { params, timeout: 120000 }),
+  // { source: 'rotowire' | 'ours' | 'blend' | null } (null = back to the default)
+  setSource: (body) => api.put('/projections/source', body),
 };
 
 // Late Swap API
