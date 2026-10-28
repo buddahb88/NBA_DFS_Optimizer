@@ -30,6 +30,7 @@ import { getPlayerResultsOnDate } from './resultsService.js';
 import { playerKey } from '../utils/playerKey.js';
 import { projectionSanityEnabled } from '../config/projectionSanity.js';
 import { applyProjectionSanity } from './projections/sanityService.js';
+import { parseSource, projectionSource as activeProjectionSource } from '../config/projectionSource.js';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -254,16 +255,32 @@ async function loadPostedPlayers(source, { filters = {}, includeZero = false, ra
  * sanity: apply the projection sanity layer (projections/sanityService.js;
  * computed on read, the posted value stays as projection_raw); default
  * from config/projectionSanity.js.
+ * projectionSource: 'rotowire' | 'ours' | 'blend' (projections/sourceService.js,
+ * applied after the sanity layer; default from config/projectionSource.js).
+ * 'rotowire' leaves the rows exactly as before; ours / blend replace
+ * projected_points / floor / ceiling / boom with the own model's (as of the
+ * slate's date) and keep RotoWire per player when the model has no row.
+ * onProjectionSource(summary): called with the source layer's counts.
  */
-export async function loadSlatePlayers(source, { filters = {}, includeZero = false, ranges = 'model', sanity = null, now = new Date() } = {}) {
+export async function loadSlatePlayers(source, {
+  filters = {}, includeZero = false, ranges = 'model', sanity = null, projectionSource = null,
+  onProjectionSource = null, now = new Date()
+} = {}) {
   if (!source) return [];
-  const players = await loadPostedPlayers(source, { filters, includeZero, ranges });
-  if (!(sanity ?? projectionSanityEnabled()) || players.length === 0) return players;
-  // The history covers the whole slate, whatever subset was asked for
-  const all = await loadPostedPlayers(source, { includeZero: true, ranges });
-  const projected = all.filter(p => Number(p.projected_points) > 0);
-  const adjusted = await applyProjectionSanity(source, players, { projected, all, now });
-  return adjusted.sort(byValue);
+  let players = await loadPostedPlayers(source, { filters, includeZero, ranges });
+  if ((sanity ?? projectionSanityEnabled()) && players.length > 0) {
+    // The history covers the whole slate, whatever subset was asked for
+    const all = await loadPostedPlayers(source, { includeZero: true, ranges });
+    const projected = all.filter(p => Number(p.projected_points) > 0);
+    players = (await applyProjectionSanity(source, players, { projected, all, now })).sort(byValue);
+  }
+  const chosen = parseSource(projectionSource) ?? activeProjectionSource();
+  if (chosen === 'rotowire' || players.length === 0) return players;
+  // Imported late: the own model reads slates through this module
+  const { applyProjectionSource } = await import('./projections/sourceService.js');
+  const result = await applyProjectionSource(source, players, { projectionSource: chosen, now });
+  onProjectionSource?.(result.summary);
+  return result.players.sort(byValue);
 }
 
 /** resolveSlate + loadSlatePlayers. Returns { source, players }. */

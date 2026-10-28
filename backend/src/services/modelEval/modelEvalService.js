@@ -149,8 +149,8 @@ export function slateFields(p, a = p) {
  */
 export async function loadSlate(store, { date, slateId, site = DEFAULTS.site }) {
   const source = await resolveSlate({ slateDate: date, slateId, site });
-  const raw = await loadSlatePlayers(source, { includeZero: true, sanity: false });
-  const adjusted = new Map((await loadSlatePlayers(source, { includeZero: true, sanity: true })).map(p => [p.id, p]));
+  const raw = await loadSlatePlayers(source, { includeZero: true, sanity: false, projectionSource: 'rotowire' });
+  const adjusted = new Map((await loadSlatePlayers(source, { includeZero: true, sanity: true, projectionSource: 'rotowire' })).map(p => [p.id, p]));
   const day = store.gameDay(date);
   const box = new Map(day.players.map(p => [`${p.team}|${p.key}`, p]));
   const zero = { dk: 0, minutes: 0, ...Object.fromEntries(Object.keys(STAT_FIELDS).map(k => [k, 0])) };

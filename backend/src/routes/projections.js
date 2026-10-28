@@ -8,6 +8,8 @@ import { DEFAULT_SITE, isValidSite } from '../config/sites.js';
 import {
   projectionSanityConfig, projectionSanityStatus, setProjectionSanity, setProjectionSanityComponents
 } from '../config/projectionSanity.js';
+import { SOURCES, parseSource, projectionSourceStatus, setProjectionSource } from '../config/projectionSource.js';
+import { SlateSourceError, loadSlatePlayers, resolveSlate } from '../services/slateSource.js';
 
 const router = express.Router();
 
@@ -82,6 +84,52 @@ router.put('/sanity', (req, res) => {
   if (enabled !== undefined) setProjectionSanity(enabled);
   if (components !== undefined) setProjectionSanityComponents(components);
   res.json(sanityResponse());
+});
+
+/**
+ * GET /api/projections/source[?slateId=&slateDate=]
+ * Projection source setting (config/projectionSource.js): { source, origin,
+ * default, options }. With slateId / slateDate it also reads that slate with
+ * the active source and adds `slate`: { source, slateId, slateDate, players,
+ * applied, fallback, fades, error, cached, modelMs, loadMs } - how many players
+ * got the own model's numbers and how many kept RotoWire.
+ */
+router.get('/source', async (req, res) => {
+  const status = projectionSourceStatus();
+  const { slateId, slateDate } = req.query;
+  if (!slateId && !slateDate) return res.json(status);
+  try {
+    const source = await resolveSlate({ slateId, slateDate });
+    if (!source) return res.status(404).json({ error: 'No slate' });
+    const t0 = Date.now();
+    let summary = null;
+    const players = await loadSlatePlayers(source, { includeZero: true, onProjectionSource: (s) => { summary = s; } });
+    const loadMs = Date.now() - t0;
+    res.json({
+      ...status,
+      slate: summary
+        ? { ...summary, loadMs }
+        : { source: status.source, slateId: source.slateId, slateDate: source.slateDate, players: players.length, applied: 0, fallback: 0, fades: 0, error: null, loadMs }
+    });
+  } catch (error) {
+    if (error instanceof SlateSourceError) return res.status(error.status).json({ error: error.message });
+    console.error('Projection source status error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * PUT /api/projections/source
+ * Body { source: 'rotowire' | 'ours' | 'blend' | null }: runtime override until
+ * the server restarts (Lineup Studio control); null resets to env / default.
+ * Every slate read (optimizer, portfolio, chat, radar, player tables) follows it.
+ */
+router.put('/source', (req, res) => {
+  const { source } = req.body || {};
+  if (source === undefined || (source !== null && !parseSource(source))) {
+    return res.status(400).json({ error: `source must be one of: ${SOURCES.join(', ')} (or null to reset)` });
+  }
+  res.json(setProjectionSource(source));
 });
 
 /**
@@ -253,17 +301,19 @@ router.delete('/:slateId/overrides/:playerId', async (req, res) => {
 });
 
 /**
- * GET /api/projections/:slateId/own-model[?refresh=1]
+ * GET /api/projections/:slateId/own-model[?slateDate=YYYY-MM-DD&refresh=1]
  * Our model for the slate (services/modelEval/ownModelService.js): per player
  * ours_minutes, p_play, ours_mean, ours_median, p10, p90, p_boom, p_dd, the
  * RotoWire blend (blend_point; weights from the M4 backtest) and ours vs
- * RotoWire disagreement. Read-only; not used by the optimizer yet.
+ * RotoWire disagreement. slateDate before today: that night's saved slate,
+ * projected as of its date. Read-only; slate reads use it through the
+ * projection source setting (GET / PUT /api/projections/source).
  */
 router.get('/:slateId/own-model', async (req, res) => {
   try {
     const { projectSlateOwnModel } = await import('../services/modelEval/ownModelService.js');
     const refresh = ['1', 'true'].includes(String(req.query.refresh ?? ''));
-    res.json(await projectSlateOwnModel(req.params.slateId, { refresh }));
+    res.json(await projectSlateOwnModel(req.params.slateId, { refresh, slateDate: req.query.slateDate || null }));
   } catch (error) {
     console.error('Own model projection error:', error);
     res.status(error.status ?? 500).json({ error: error.message });

@@ -10,6 +10,7 @@ import { recomputeSlateRanges } from '../services/variance/outcomeRangeService.j
 import { primeOpportunityMetrics } from '../services/opportunity/metricsService.js';
 import { getSlateMatchups } from '../services/archetypeDefenseService.js';
 import { loadSlatePlayers, resolveSlate, withActuals } from '../services/slateSource.js';
+import { SOURCES, parseSource } from '../config/projectionSource.js';
 import { DEFAULT_SITE, isValidSite } from '../config/sites.js';
 
 const router = express.Router();
@@ -34,11 +35,18 @@ async function withMatchups(slateId, players, query) {
 // shows its pre-lock floor / ceiling instead of the outcome-model ones.
 // Projections carry the sanity layer when it is on (config/projectionSanity.js):
 // projection_raw / projected_minutes_raw keep the posted values and
-// projection_reasons say why they moved.
+// projection_reasons say why they moved. Then the projection source
+// (config/projectionSource.js; ?projectionSource=rotowire|ours|blend for this
+// request): ours / blend rows carry projection_rotowire / projection_ours /
+// projection_blend, ours_minutes, p_play and projection_fade.
 router.get('/:slateId', async (req, res) => {
   try {
     const { slateId } = req.params;
     const { position, minSalary, maxSalary, team, slateDate, ranges = 'model' } = req.query;
+    const projectionSource = req.query.projectionSource || null;
+    if (projectionSource && !parseSource(projectionSource)) {
+      return res.status(400).json({ error: `projectionSource must be one of: ${SOURCES.join(', ')}` });
+    }
 
     const filters = {};
     if (position) filters.position = position;
@@ -49,13 +57,13 @@ router.get('/:slateId', async (req, res) => {
     if (slateDate) {
       const source = await resolveSlate({ slateId, slateDate });
       const players = await withActuals(source, await loadSlatePlayers(source, {
-        filters, ranges: ranges === 'original' ? 'original' : 'model'
+        filters, ranges: ranges === 'original' ? 'original' : 'model', projectionSource
       }));
       return res.json(await withMatchups(source.slateId, players, req.query));
     }
 
     // Live: projections after the sanity layer (projection_raw = as synced)
-    const players = await loadSlatePlayers(await resolveSlate({ slateId }), { filters });
+    const players = await loadSlatePlayers(await resolveSlate({ slateId }), { filters, projectionSource });
     res.json(await withMatchups(slateId, players, req.query));
   } catch (error) {
     res.status(error.status || 500).json({ error: error.message });

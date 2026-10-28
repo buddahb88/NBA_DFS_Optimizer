@@ -1,7 +1,8 @@
 /**
  * OWN MODEL FOR A LIVE SLATE (M4): projectSlateOwnModel(slateId).
- * GET /api/projections/:slateId/own-model. Read-only on the database; not
- * wired into the UI or the optimizer defaults (M5).
+ * GET /api/projections/:slateId/own-model. Read-only on the database. Slate
+ * reads use it through the projection source layer (projections/sourceService.js,
+ * config/projectionSource.js: ours / blend).
  *
  * Per player, from point-in-time features of the slate's date (the feature
  * store as of the date: history strictly before it, plus the slate's pre-lock
@@ -35,6 +36,7 @@ import { slateDay } from './evaluate.js';
 import { createOwnModelProjector, ownPrediction, prepareOwnMaps } from './ownModel.js';
 import { blendPrediction, leanBucket } from './blend.js';
 import { WEIGHTS_FILE } from './ownModelBacktest.js';
+import { projectionSanityConfig } from '../../config/projectionSanity.js';
 
 export const MODEL_VERSION = '1';
 const TEAMMATE_OUT_MINUTES = 20;
@@ -156,26 +158,34 @@ export function playerOutput(entry, ownPred, weights) {
 }
 
 /**
- * Own-model projections for a slate. options: { site, refresh, weightsFile,
- * cacheDir, now }. Returns { slateId, date, site, label, generatedAt, cached,
+ * Own-model projections for a slate. options: { site, slateDate, source,
+ * refresh, weightsFile, cacheDir, now }. source: an already resolved slate
+ * (slateSource.resolveSlate) - the projection source layer passes its own,
+ * so a backtest night projects as of that date; slateDate resolves a past
+ * night's saved slate. Returns { slateId, date, site, label, generatedAt, cached,
  * weights: { name, generatedAt, slates } | null, timings, players }.
  */
-export async function projectSlateOwnModel(slateId, { site = null, refresh = false, weightsFile = WEIGHTS_FILE, cacheDir = DEFAULT_CACHE_DIR, now = new Date() } = {}) {
+export async function projectSlateOwnModel(slateId, {
+  site = null, slateDate = null, source: resolved = null, refresh = false, weightsFile = WEIGHTS_FILE,
+  cacheDir = DEFAULT_CACHE_DIR, now = new Date()
+} = {}) {
   const tStart = Date.now();
   const timings = {};
-  const source = await resolveSlate({ slateId, site });
+  const source = resolved ?? await resolveSlate({ slateId, slateDate, site, now });
   if (!source) throw Object.assign(new Error('No slate'), { status: 404 });
   const siteKey = getSiteConfig(source.site).key;
   const weights = readWeights(weightsFile);
   const signature = await dataSignature();
-  const cacheKey = [source.slateId, source.slateDate, siteKey, signature, await slateSignature(source), weights?.generatedAt ?? 'none'].join('|');
+  // RotoWire "adjusted" (the blend's and the fade's comparison) follows the sanity components
+  const sanityKey = JSON.stringify(projectionSanityConfig());
+  const cacheKey = [source.slateId, source.slateDate, siteKey, signature, await slateSignature(source), weights?.generatedAt ?? 'none', sanityKey].join('|');
   if (!refresh && results.has(cacheKey)) {
     return { ...results.get(cacheKey), cached: true, timings: { totalMs: ms(tStart) } };
   }
 
   let t0 = Date.now();
-  const raw = await loadSlatePlayers(source, { includeZero: true, sanity: false, now });
-  const adjusted = new Map((await loadSlatePlayers(source, { includeZero: true, sanity: true, now })).map(p => [p.id, p]));
+  const raw = await loadSlatePlayers(source, { includeZero: true, sanity: false, projectionSource: 'rotowire', now });
+  const adjusted = new Map((await loadSlatePlayers(source, { includeZero: true, sanity: true, projectionSource: 'rotowire', now })).map(p => [p.id, p]));
   timings.slateMs = ms(t0);
   if (!raw.length) throw Object.assign(new Error(`No players for slate ${source.slateId}`), { status: 404 });
 
