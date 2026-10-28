@@ -246,12 +246,15 @@ describe('minutes_v2: output', () => {
   });
 
   test('fit: coefficients and quantiles from training rows only', () => {
-    const s = featureStore.createFeatureStore(buildData());
+    // A player who never scores has FPPM 0, so a zero DK sigma: his residual must not poison the quantiles
+    const data = buildData();
+    for (const g of data.games) if (g.player_name === nameOf('DDD', 'Deep')) Object.assign(g, { dk_fantasy_points: 0, fd_fantasy_points: 0, yahoo_fantasy_points: 0 });
+    const s = featureStore.createFeatureStore(data);
     const model = v2.fitMinutesV2(s.restrictTo('2025-07-01'), { params: { ...v2.DEFAULT_PARAMS, ...PARAMS } });
     assert.equal(model.fitInfo.dates, SEASON1.length);
     assert.equal(model.cond.length, v2.condVector(v2.playerFeatures(s.asOf(D), { key: 'x', team: 'AAA' })).length);
     assert.equal(model.zMinutes.length, 99);
-    assert.ok(model.zMinutes[0] <= model.zMinutes[98]);
+    for (const zs of [model.zMinutes, model.zDk]) assert.ok(zs.every((z, i) => Number.isFinite(z) && (i === 0 || z >= zs[i - 1])), 'monotone quantiles');
   });
 
   test('fitLad recovers a median line; fitLogistic separates', () => {

@@ -576,8 +576,11 @@ export function fitMinutesV2(store, { seasons = null, params = DEFAULT_PARAMS, d
   const zm = [], zd = [];
   each(base, (pred, o) => {
     if (!o.played) return;
-    zm.push((o.actual.minutes - pred.conditional_minutes) / pred.sigma);
-    zd.push((o.actual.dk - pred.conditional_minutes * pred.fppm) / pred.dkSigma);
+    const z1 = (o.actual.minutes - pred.conditional_minutes) / pred.sigma;
+    const z2 = (o.actual.dk - pred.conditional_minutes * pred.fppm) / pred.dkSigma;
+    // A zero FPPM gives a zero DK sigma: no residual to learn from (and NaN breaks the sort)
+    if (Number.isFinite(z1)) zm.push(z1);
+    if (Number.isFinite(z2)) zd.push(z2);
   });
   zm.sort((a, b) => a - b);
   zd.sort((a, b) => a - b);

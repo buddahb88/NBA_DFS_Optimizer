@@ -130,21 +130,38 @@ numbers as directional. The blend weight in production is set with
 - **Feature store** (`featureStore.js`): all box scores, team games and
   inactive / DNP listings are loaded once; `asOf(date)` answers from rows
   strictly before the date (game logs, team rest, pace / ratings, season
-  profiles, archetypes and archetype defense rebuilt as-of the date). Tests
-  poison every row on/after the date and check the features do not change.
+  profiles, archetypes and archetype defense rebuilt as-of the date, a
+  player's DNP / inactive listings, the team's recent box scores, expected
+  margin). Tests poison every row on/after the date and check the features do
+  not change.
 - **Projectors** (`projectors.js`): `project(ctx) -> { dk_points, minutes,
   stats?, p10?, p90? }`, plus optional `fit`, `prepareDate`, `finish`.
   Baselines: `season_avg`, `last5_avg`, `l10_minutes_x_fppm`, `legacy`,
   `minutes_model`, `minutes_model_no_redistribution`, and on slates
-  `rotowire_raw` / `rotowire_adjusted`. Add a model with
+  `rotowire_raw` / `rotowire_adjusted` / `rotowire_minutes_x_fppm` (RotoWire
+  minutes x our FPPM: minutes compared in DK points). Add a model with
   `registerProjector(name, factory, meta)`.
+- **`minutes_v2`** (`minutesV2.js`): our minutes model. Conditional minutes
+  (LAD regression: recency-weighted minutes with last season as a pseudo-count
+  early on, role / start changes, B2B, home, blowout risk, returning, team
+  change), `p_play` (logistic), team total normalized toward ~241 expected
+  minutes (gap by minutes variance and with/without splits of OUT teammates),
+  `minutes_p10` / `minutes_p90`, DK = minutes x `minutesModel.projectFppm`.
+  `fit` on 2024-25; `priorSeasonGames`, `shading`, `splitWeight` were chosen on
+  2025-26 validation only.
 - **Replay**: walk-forward over every date, segmented train (2024-25; `fit`
   only sees rows before 2025-26) / validation (2025-26) / holdout (2026-27).
 - **Slates**: the saved main slates, every snapshot player (DNPs score 0).
+  Snapshots only hold RotoWire's projected players (OUT players are left out,
+  not flagged), so regulars of the slate's teams missing from the pool count
+  as OUT for redistribution.
 - **Metrics**: MAE, RMSE, bias, R^2, correlation, minutes MAE, p10 / p90
-  coverage, per-stat MAE, breakdowns (minutes bucket, role, archetype, rest,
-  teammate out, salary tier), top-20 value hit rate (5x), and a paired
-  bootstrap 95% CI of the MAE difference vs a baseline (by date in replay).
+  coverage (DK and minutes), per-stat MAE, breakdowns with DK and minutes MAE
+  (minutes bucket, role, archetype, rest, teammate out, blowout = |expected
+  margin|, salary tier, and players who beat the reference projection's
+  minutes by 3+: RotoWire on slates, minutes_model in replay), top-20 value
+  hit rate (5x), and paired bootstrap 95% CIs of the DK and minutes MAE
+  difference vs a baseline (by date in replay).
 
 ```bash
 npm run backtest:model                                   # replay + slates, all projectors
@@ -157,8 +174,9 @@ npm run backtest:model -- --list                         # registered projectors
 The JSON report goes to `backend/.cache/model-eval/reports/` (gitignored), or
 `--out file.json`. Predictions are cached per projector version and data
 signature in `.cache/model-eval/predictions`, so a re-run only computes new
-projectors (`--no-cache` to recompute). A full uncached run takes about 2.5
-minutes (the minutes model's injury redistribution is most of it); cached, about 15 s.
+projectors (`--no-cache` to recompute). A full uncached run takes about 3
+minutes (the minutes model's injury redistribution is most of it); cached,
+about 35 s (minutes_v2 refits each run, ~5 s).
 The service entry point is `runModelEval(options)` in `modelEvalService.js`.
 
 ## Environment Variables

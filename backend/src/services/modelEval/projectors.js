@@ -263,7 +263,7 @@ registerProjector('minutes_model_no_redistribution', () => minutesModelProjector
   label: 'Minutes model (no redist.)', description: 'minutesModel minutes x FPPM, no injury redistribution'
 });
 registerProjector('minutes_v2', (options) => createMinutesV2Projector(options), {
-  label: 'Minutes v2', version: '1',
+  label: 'Minutes v2', version: '2',
   description: 'Our minutes model (recency / role / p_play / team total / blowout, fit on 2024-25) x FPPM; minutes p10/p90'
 });
 registerProjector('rotowire_minutes_x_fppm', rotowireMinutesTimesFppm, {
