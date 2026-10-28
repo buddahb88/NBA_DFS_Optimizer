@@ -149,6 +149,32 @@ numbers as directional. The blend weight in production is set with
   `minutes_p10` / `minutes_p90`, DK = minutes x `minutesModel.projectFppm`.
   `fit` on 2024-25; `priorSeasonGames`, `shading`, `splitWeight` were chosen on
   2025-26 validation only.
+- **`rates_v1`** (`ratesV1.js`): our per-minute production model. Per-stat
+  rates (pts, reb, ast, stl, blk, tov, fg3m): empirical-Bayes base rates
+  (all seasons decayed by games, season boundaries discounted, shrunk to the
+  as-of archetype's prior; points = true-shooting attempts x TS% and threes =
+  3PA x 3P% with efficiency shrunk hard, volume kept), then per-stat Poisson
+  regressions (offset log minutes) on recent form (volume and shooting apart),
+  pace and scoring environment (Vegas implied total on slates), as-of archetype
+  defense deltas (`view.archetypeDefense()`), home / B2B / blowout / role /
+  team change, usage freed by OUT teammates plus measured with/without
+  splits, and a minutes elasticity. DK points, p10 / p90, P(double-double),
+  P(triple-double) and the boom probability (`boom_at`: 6x salary on slates,
+  40 DK in replay) come from simulating Poisson-gamma stat lines. End to end
+  it uses minutes_v2's minutes (point = DK median at minutes_v2's point
+  minutes; ranges from the full DNP / minutes mixture);
+  `rates_v1_rotowire_minutes` (slates) uses RotoWire's minutes. `fit` on
+  2024-25; knobs chosen on 2025-26 validation (see the file header).
+  Its `analyze` hook adds **rate quality at actual minutes** per segment: DK
+  at the actual minutes from the pre-game rates vs `projectFppm` x actual
+  minutes and naive raw rates (MAE, per-minute error, per-stat MAE, paired
+  bootstrap, coverage, DD / TD counts, breakdowns). `rates_flat` is the same
+  without the elasticity, which is fit on actual minutes.
+- **Probability calibration**: projectors returning `p_boom` + `boom_at`,
+  `p_dd`, `p_td` get reliability buckets and Brier scores in the leaderboard.
+- **Extra pairs**: `comparisons` (CLI `--compare a:b,...`) adds paired
+  bootstraps beyond the baseline (default: rates_v1 vs minutes_v2 / RotoWire,
+  rates_v1_rotowire_minutes vs RotoWire raw / RotoWire min x FPPM).
 - **Replay**: walk-forward over every date, segmented train (2024-25; `fit`
   only sees rows before 2025-26) / validation (2025-26) / holdout (2026-27).
 - **Slates**: the saved main slates, every snapshot player (DNPs score 0).
@@ -157,7 +183,7 @@ numbers as directional. The blend weight in production is set with
   as OUT for redistribution.
 - **Metrics**: MAE, RMSE, bias, R^2, correlation, minutes MAE, p10 / p90
   coverage (DK and minutes), per-stat MAE, breakdowns with DK and minutes MAE
-  (minutes bucket, role, archetype, rest, teammate out, blowout = |expected
+  (minutes bucket, role, archetype, rest, teammate out, pace, blowout = |expected
   margin|, salary tier, and players who beat the reference projection's
   minutes by 3+: RotoWire on slates, minutes_model in replay), top-20 value
   hit rate (5x), and paired bootstrap 95% CIs of the DK and minutes MAE
@@ -175,8 +201,8 @@ The JSON report goes to `backend/.cache/model-eval/reports/` (gitignored), or
 `--out file.json`. Predictions are cached per projector version and data
 signature in `.cache/model-eval/predictions`, so a re-run only computes new
 projectors (`--no-cache` to recompute). A full uncached run takes about 3
-minutes (the minutes model's injury redistribution is most of it); cached,
-about 35 s (minutes_v2 refits each run, ~5 s).
+minutes plus about 2.5 for rates_v1 (two simulations per player); cached,
+about 35 s plus the fits (minutes_v2 ~5 s, rates_v1 ~25 s) and rates_v1's rate-quality simulation (~40 s).
 The service entry point is `runModelEval(options)` in `modelEvalService.js`.
 
 ## Environment Variables

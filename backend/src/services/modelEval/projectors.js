@@ -39,6 +39,7 @@ import { playerKey } from '../../utils/playerKey.js';
 import { quantile, STATS } from './metrics.js';
 import { STAT_FIELDS } from './featureStore.js';
 import { createMinutesV2Projector } from './minutesV2.js';
+import { createRatesV1Projector } from './ratesV1.js';
 
 const n = (v) => Number(v) || 0;
 const mean = (xs) => (xs.length ? xs.reduce((s, v) => s + v, 0) / xs.length : null);
@@ -265,6 +266,14 @@ registerProjector('minutes_model_no_redistribution', () => minutesModelProjector
 registerProjector('minutes_v2', (options) => createMinutesV2Projector(options), {
   label: 'Minutes v2', version: '2',
   description: 'Our minutes model (recency / role / p_play / team total / blowout, fit on 2024-25) x FPPM; minutes p10/p90'
+});
+registerProjector('rates_v1', (options) => createRatesV1Projector(options), {
+  label: 'Rates v1', version: '1',
+  description: 'Our per-minute production (per-stat rates: shrinkage, usage with OUT teammates, pace, archetype defense; fit on 2024-25) x minutes_v2, DK by simulation'
+});
+registerProjector('rates_v1_rotowire_minutes', (options) => createRatesV1Projector({ ...options, minutesSource: 'rotowire' }), {
+  label: 'Rates v1 x RotoWire min', modes: ['slate'], version: '1',
+  description: 'rates_v1 per-minute production x RotoWire projected minutes (rates compared with the minutes held equal)'
 });
 registerProjector('rotowire_minutes_x_fppm', rotowireMinutesTimesFppm, {
   label: 'RotoWire min x FPPM', modes: ['slate'],
