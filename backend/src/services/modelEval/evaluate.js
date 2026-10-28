@@ -16,6 +16,10 @@
  */
 
 import { salaryTier, SALARY_TIERS } from '../projectionBacktestService.js';
+import { inferOutPlayers } from '../projectionReplayBacktest.js';
+import { playerKey as modelKey } from '../minutesModel.js';
+import { playerKey } from '../../utils/playerKey.js';
+import { seasonStartDate } from '../../utils/season.js';
 import { breakdown, pairedBootstrap, scoreProjector } from './metrics.js';
 
 const finite = (v) => typeof v === 'number' && Number.isFinite(v);
@@ -134,8 +138,10 @@ export async function runReplay(store, projectors, { from = null, to = null, sea
 /**
  * Saved slates. slates: [{ slateId, date, players: [{ key, name, team, opponent,
  * position, isHome, out, slate: {...}, outcome: { played, status, actual, isStarter } }] }].
- * OUT lists are what was known before lock: the game's INACTIVE listing plus
- * the slate's OUT injury statuses (no box-score inference).
+ * OUT lists are what was known before lock: the game's INACTIVE listing, the
+ * slate's OUT injury statuses, and regulars (15+ min over the team's last 5
+ * games this season) missing from the slate pool - RotoWire leaves OUT players
+ * out rather than flagging them (no box-score inference).
  */
 export async function runSlates(store, projectors, slates, { onSlate = null } = {}) {
   const active = projectors.filter(supports('slate'));
@@ -145,15 +151,29 @@ export async function runSlates(store, projectors, slates, { onSlate = null } = 
     const view = store.asOf(s.date);
     const base = store.gameDay(s.date);
     const teams = new Map([...base.teams].map(([team, t]) => [team, { ...t, out: t.out.filter(o => o.source === 'status') }]));
+    const expectedMinutes = (key) => {
+      const recent = view.playerGames(key, { seasons: 'all' }).slice(0, 5);
+      return recent.length ? recent.reduce((x, g) => x + (Number(g.minutes) || 0), 0) / recent.length : 0;
+    };
+    const addOut = (t, o) => { if (!t.out.some(x => x.key === o.key)) t.out.push({ ...o, expectedMinutes: expectedMinutes(o.key) }); };
     for (const p of s.players) {
       if (!p.out) continue;
       const t = teams.get(p.team) ?? { team: p.team, opponent: p.opponent, isHome: p.isHome, gameId: null, out: [] };
       teams.set(p.team, t);
-      if (!t.out.some(o => o.key === p.key)) {
-        const recent = view.playerGames(p.key, { seasons: 'all' }).slice(0, 5);
-        const expectedMinutes = recent.length ? recent.reduce((x, g) => x + (Number(g.minutes) || 0), 0) / recent.length : 0;
-        t.out.push({ key: p.key, name: p.name, source: 'slate', reason: p.slate?.injuryStatus ?? null, expectedMinutes });
-      }
+      addOut(t, { key: p.key, name: p.name, source: 'slate', reason: p.slate?.injuryStatus ?? null });
+    }
+    // RotoWire drops OUT players from the pool instead of flagging them: regulars of the
+    // slate's teams missing from the pool (and from the listings) are OUT, as replay infers
+    // from the box score
+    const present = new Map();
+    for (const p of s.players) {
+      if (!present.has(p.team)) present.set(p.team, new Set());
+      present.get(p.team).add(p.key).add(modelKey(p.name));
+    }
+    for (const [team, keys] of present) for (const o of teams.get(team)?.out ?? []) keys.add(o.key).add(modelKey(o.name));
+    for (const o of inferOutPlayers(view.minutesLogs().filter(g => g.date >= seasonStartDate(view.season)), present)) {
+      const t = teams.get(o.team);
+      if (t) addOut(t, { key: playerKey(o.name), name: o.name, source: 'slate-pool', reason: null });
     }
     const day = { teams };
     const entries = s.players.map(p => ({

@@ -45,7 +45,7 @@ import { baseHitRate, valueHitRate } from './metrics.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const DEFAULT_CACHE_DIR = path.resolve(__dirname, '../../../.cache/model-eval');
 // Bump when the feature store changes what projectors see (invalidates cached predictions)
-export const FEATURE_VERSION = '1';
+export const FEATURE_VERSION = '2';
 
 export const DEFAULTS = Object.freeze({
   mode: 'both',
@@ -65,7 +65,7 @@ export const LOOKAHEAD_NOTES = Object.freeze([
   'Every feature is built from rows strictly before the game date (featureStore.asOf); tests poison all rows on/after D and assert identical features.',
   'Season profiles, archetypes and archetype defense are rebuilt as-of each date with the same code that fills player_season_profiles / player_archetypes / team_archetype_defense; the stored current-season rows (full-season) are never read.',
   'Legacy model: team_defense_rankings and team_defense_vs_position hold current values only, so the defense, pace and legacy position-DVP adjustments are excluded (0); the archetype DVP is as-of.',
-  'Same-day inputs (known at lock): opponent, home/away, team rest from the schedule, and OUT lists - the game\'s INACTIVE listing, plus in replay regulars missing from both box score and listing (inferred, as projectionReplayBacktest); on slates the OUT injury statuses instead of the inference.',
+  'Same-day inputs (known at lock): opponent, home/away, team rest from the schedule, and OUT lists - the game\'s INACTIVE listing, plus in replay regulars missing from both box score and listing (inferred, as projectionReplayBacktest); on slates the OUT injury statuses and regulars missing from the slate pool (RotoWire omits OUT players) instead of the box-score inference.',
   'Replay has no Vegas lines, salaries or RotoWire projections; those exist only on the saved slates.',
   'Breakdown tags use the game\'s start flag for role (confirmed lineups are known near lock); projectors never see it.'
 ]);

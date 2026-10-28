@@ -273,6 +273,21 @@ describe('slates, cache and service', () => {
     assert.ok(summary.withDnp.breakdowns.salaryTier.length > 0);
   });
 
+  test('runSlates: a regular missing from the slate pool is OUT and his minutes are handed out', async () => {
+    // RotoWire leaves OUT players out of the pool instead of flagging them
+    const slate = slateFor(D);
+    slate.players = slate.players.filter(p => p.name !== nameOf('AAA', 'Star')).map(p => ({ ...p, out: false }));
+    const projs = ['minutes_model', 'minutes_model_no_redistribution'].map(n => projectors.createProjector(n));
+    const { rows } = await evaluate.runSlates(store, projs, [slate]);
+    const wing = rows.find(r => r.name === nameOf('AAA', 'Wing'));
+    assert.equal(wing.tags.teammateOut, 'teammate out');
+    assert.ok(wing.preds.minutes_model.minutes > wing.preds.minutes_model_no_redistribution.minutes);
+    // The other game's teams lost nobody
+    const other = rows.find(r => r.name === nameOf('CCC', 'Wing'));
+    assert.equal(other.tags.teammateOut, 'none out');
+    close(other.preds.minutes_model.minutes, other.preds.minutes_model_no_redistribution.minutes);
+  });
+
   test('prediction cache: a cached date skips prepareDate and project', async () => {
     let prepared = 0;
     let projected = 0;
