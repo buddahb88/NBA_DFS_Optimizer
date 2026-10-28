@@ -243,13 +243,43 @@ disagreement with its historical hit rate, from point-in-time features of the
 slate's date. The models are the harness fits (2024-25), fit once (~20 s) and
 cached in `.cache/model-eval/models`; the feature store loads in ~1.5 s per
 process and data signature; a slate projects in ~0.2 s and is cached per slate
-rows + data + weights. Not used by the optimizer or the UI yet.
+rows + data + weights. `?slateDate=` projects a past night's saved slate as of
+its date (matches the harness's own_mean to rounding: 10/21 and 10/24, max
+0.005 DK).
+
+### Projection source (M5)
+
+Every slate read (`slateSource.loadSlatePlayers`: optimizer, portfolio, chat
+and agent tools, radar, player tables, Lineup Studio) applies RotoWire ->
+sanity layer -> **projection source** (`config/projectionSource.js`,
+`services/projections/sourceLayer.js` + `sourceService.js`):
+
+- `rotowire`: rows exactly as before; the own model is not run.
+- `ours`: projected_points = ours_mean, floor / ceiling = p10 / p90,
+  boom_probability = p_boom (%), std_dev from the p10-p90 width.
+- `blend` (default): blend_point with our distribution re-centered on it.
+
+Rows then carry projection_source / projection_requested, projection_rotowire
+(sanity-adjusted as read), projection_ours, projection_blend, ours_minutes,
+p_play and projection_fade (ours 4+ DK points below RotoWire sanity-adjusted,
+with the bucket's saved-slate hit rate; "ours higher" never flags). A player
+missing from the model, or a failing model, keeps RotoWire
+(projection_fallback + reason, counted, console warning). Backtest nights use
+the model as of their date. Setting: env `PROJECTION_SOURCE`, runtime
+`GET / PUT /api/projections/source` (resets on restart; `?slateDate=` /
+`?slateId=` adds the slate's counts and load time), per request
+`projectionSource` on `GET /api/players/:slateId` and
+`POST /api/optimizer/generate`. `POST /api/optimizer/compare-sources` runs one
+optimizer request per source (lineup projected / actual totals, pool MAE incl.
+DNP) - the Lineup Studio backtest panel's "Compare sources". Model load: ~1.5-
+1.8 s cold per process (feature store), ~10-40 ms warm per slate read.
 
 ## Environment Variables
 
 - `BACKTESTING_MODE=true` - Uses `nba_dfs_backtest.db` instead of `nba_dfs.db`
 - `DATABASE_PATH=/custom/path.db` - Use a completely custom database path (overrides backtest mode)
 - `PROJECTION_MINUTES_WEIGHT=0.6` - Weight of the minutes x FPPM model in slate projections (0 turns it off)
+- `PROJECTION_SOURCE=blend` - Projection every slate read uses: `rotowire`, `ours` or `blend` (default)
 
 ## File Locations
 

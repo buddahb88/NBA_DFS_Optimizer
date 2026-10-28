@@ -308,3 +308,30 @@ describe('regression: RotoWire source leaves the optimizer as it was', () => {
     assert.equal(own.calls.length, 0);
   });
 });
+
+describe('chat / agent tools carry the source and the fade', () => {
+  test('chatSourceFields: compact fields, {} on a RotoWire read', () => {
+    assert.deepEqual(layer.chatSourceFields({ projected_points: 30 }), {});
+    const p = layer.applySource({ id: 1, projected_points: 30, salary: 5000 },
+      { ours_mean: 24, p10: 14, p90: 35, rotowire_points: 30, ours_minutes: 27, p_play: 0.9, blend_point: 27, disagreement: { points_diff: -6, lean: 'lower 6+', history: { n: 77, hitRate: 0.688 } } }, 'ours');
+    assert.deepEqual(layer.chatSourceFields(p), {
+      projectionSource: 'ours', rotowireProjection: 30, oursProjection: 24, blendProjection: 27, oursMinutes: 27, pPlay: 0.9,
+      fade: { pointsDiff: -6, hitRate: 0.688, calls: 77, note: p.projection_fade.text }
+    });
+    assert.equal(layer.pickSourceFields(p).projection_fade.points_diff, -6);
+  });
+
+  test('ResearchAgent get_slate_summary: source on each player and the fade calls', async () => {
+    const source = await slateSource.resolveSlate({ now: NOW });
+    const posted = await slateSource.loadSlatePlayers(source, { projectionSource: 'rotowire', now: NOW });
+    own.impl = () => ({ players: ownRows(posted, { delta: (p) => (p.name === 'Player 9' ? -7 : 0) }) });
+    setting.setProjectionSource('ours');
+    const { default: ResearchAgent } = await import('../src/agents/ResearchAgent.js');
+    const tool = new ResearchAgent().tools.find(t => t.name === 'get_slate_summary');
+    const out = await tool.execute({});
+    assert.equal(out.projectionSource, 'ours');
+    assert.ok(out.topProjected.every(p => p.projectionSource === 'ours' && Number.isFinite(p.rotowireProjection)));
+    assert.deepEqual(out.fadeCalls.map(p => p.name), ['Player 9']);
+    assert.equal(out.fadeCalls[0].fade.pointsDiff, -7);
+  });
+});

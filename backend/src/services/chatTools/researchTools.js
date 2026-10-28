@@ -39,6 +39,7 @@ import { opportunityScore } from '../opportunity/radarScore.js';
 import { getTeammateOpportunity } from '../opportunity/teammateService.js';
 import { RADAR_MODES } from '../opportunity/radarConfig.js';
 import { isOutStatus } from '../minutesModel.js';
+import { chatSourceFields } from '../projections/sourceLayer.js';
 
 export const RESEARCH_TOOL_NAMES = Object.freeze([
   'get_archetype_matchups',
@@ -497,6 +498,7 @@ const radarRow = (p) => ({
   projectedPoints: p.projected_points,
   ownership: p.rostership,
   injuryStatus: p.injury_status,
+  ...chatSourceFields(p),
   score: p.score,
   cashScore: p.cash_score,
   gppScore: p.gpp_score,
@@ -587,7 +589,7 @@ async function getPlayerOpportunity({ name, slateDate, slateId, site }) {
     player: {
       name: p.name, key: p.player_key, team: p.team, opponent: p.opponent, position: p.position,
       salary: p.salary, projectedPoints: p.projected_points, ownership: p.rostership, injuryStatus: p.injury_status,
-      floor: p.floor, ceiling: p.ceiling,
+      floor: p.floor, ceiling: p.ceiling, ...chatSourceFields(p),
     },
     scores: {
       cash: { score: p.cash_score, rank: rankOf('cash_score'), of: rows.length, components: p.components, coverage: p.coverage },

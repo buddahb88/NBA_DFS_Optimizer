@@ -113,4 +113,34 @@ export function applySource(player, own, source, { reason = null, threshold = FA
   };
 }
 
-export default { FADE_THRESHOLD, fadeCall, sourceNumbers, applySource };
+export const SOURCE_FIELDS = Object.freeze([
+  'projection_source', 'projection_requested', 'projection_fallback', 'projection_fallback_reason',
+  'projection_rotowire', 'projection_ours', 'projection_blend', 'ours_minutes', 'p_play', 'projection_fade'
+]);
+
+/** The layer's fields of a row ({} for a RotoWire read), for rows rebuilt field by field. */
+export const pickSourceFields = (p) => (p?.projection_source
+  ? Object.fromEntries(SOURCE_FIELDS.filter(f => f in p).map(f => [f, p[f]]))
+  : {});
+
+/**
+ * Compact source fields for chat / agent tool payloads ({} for a RotoWire
+ * read): which source the projection is, the three numbers, our minutes /
+ * p_play and the fade call.
+ */
+export function chatSourceFields(p) {
+  if (!p?.projection_source) return {};
+  const fade = p.projection_fade;
+  return {
+    projectionSource: p.projection_source,
+    ...(p.projection_fallback ? { projectionFallback: p.projection_fallback_reason ?? true } : {}),
+    rotowireProjection: p.projection_rotowire,
+    oursProjection: p.projection_ours,
+    blendProjection: p.projection_blend,
+    oursMinutes: p.ours_minutes,
+    pPlay: p.p_play,
+    ...(fade ? { fade: { pointsDiff: fade.points_diff, hitRate: fade.hit_rate, calls: fade.n, note: fade.text } } : {})
+  };
+}
+
+export default { FADE_THRESHOLD, SOURCE_FIELDS, fadeCall, sourceNumbers, applySource, pickSourceFields, chatSourceFields };

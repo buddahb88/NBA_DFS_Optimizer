@@ -13,6 +13,7 @@ import db from '../config/database.js';
 import { createResearchTools } from '../services/chatTools/researchTools.js';
 import { getCurrentSlateInfo } from '../services/slateFreshness.js';
 import { chatSlate, loadSlatePlayers, withActuals } from '../services/slateSource.js';
+import { chatSourceFields } from '../services/projections/sourceLayer.js';
 
 const SLATE_DATE_PROP = {
   type: 'string',
@@ -74,6 +75,11 @@ Important Query Tips:
 - Players table has pre-joined dvp_pts_allowed (real points allowed to the position, about 18-28, NOT fantasy points; legacy) and opp_def_eff
 - Vegas data includes: vegas_implied_total, vegas_spread, vegas_over_under, vegas_win_prob
 - Advanced metrics: floor, ceiling, volatility, boom_probability, bust_probability, leverage_score
+
+PROJECTION SOURCE (slate tools):
+- Projections follow the app's projection source: RotoWire, ours (our own model) or a blend. When it is ours / blend, players carry projectionSource, rotowireProjection, oursProjection, blendProjection, oursMinutes and pPlay; say which source a number is
+- fade: our model is 4+ DK points below RotoWire. Its hitRate is how often the actual landed below RotoWire for that bucket on the saved slates (base rate ~58%); quote it. There is no "ours higher" call - our higher numbers showed no edge
+- get_slate_summary lists fadeCalls; mention the strongest ones as fade candidates (most reliable at $4K-5.9K)
 
 CRITICAL - NO HALLUCINATION RULES:
 - ONLY report data that is actually returned from your tool calls
@@ -311,6 +317,7 @@ class ResearchAgent extends BaseAgent {
               salary: p.salary,
               projection: p.projected_points,
               ownership: p.rostership,
+              ...chatSourceFields(p),
               ...actualOf(p)
             })),
             bestValue: top(players.filter(p => p.salary > 0), valueScore).map(p => ({
@@ -320,6 +327,7 @@ class ResearchAgent extends BaseAgent {
               salary: p.salary,
               projection: p.projected_points,
               valueScore: round(valueScore(p), 2),
+              ...chatSourceFields(p),
               ...actualOf(p)
             })),
             topLeverage: top(players.filter(p => p.leverage_score != null), p => Number(p.leverage_score)).map(p => ({
@@ -331,8 +339,19 @@ class ResearchAgent extends BaseAgent {
               ownership: p.rostership,
               leverage: p.leverage_score,
               ceiling: p.ceiling,
+              ...chatSourceFields(p),
               ...actualOf(p)
-            }))
+            })),
+            projectionSource: players[0]?.projection_requested ?? 'rotowire',
+            fadeCalls: [...players.filter(p => p.projection_fade)]
+              .sort((a, b) => a.projection_fade.points_diff - b.projection_fade.points_diff).slice(0, 10).map(p => ({
+                name: p.name,
+                position: p.position,
+                team: p.team,
+                salary: p.salary,
+                ...chatSourceFields(p),
+                ...actualOf(p)
+              }))
           };
         }
       },

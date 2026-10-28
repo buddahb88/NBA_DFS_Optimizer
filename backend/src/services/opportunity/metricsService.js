@@ -29,6 +29,7 @@ import db from '../../config/database.js';
 import { fantasyPointsColumn } from '../scoring.js';
 import { GAME_ROWS_SELECT } from '../playerProfileService.js';
 import { resolveSlate, loadSlatePlayers, withActuals, SlateSourceError } from '../slateSource.js';
+import { pickSourceFields } from '../projections/sourceLayer.js';
 import { easternDate } from '../slateSnapshotService.js';
 import { playerKey, canonicalTeam } from '../../utils/playerKey.js';
 import { seasonForDate, previousSeason } from '../../utils/season.js';
@@ -198,6 +199,8 @@ function buildRows(source, players, history) {
         projection_reasons: p.projection_reasons,
         projection_sanity: true
       } : {}),
+      // Projection source layer (slateSource): RotoWire / ours / blend and the fade call
+      ...pickSourceFields(p),
       rostership: p.rostership ?? null,
       floor: p.floor ?? null,
       ceiling: p.ceiling ?? null,

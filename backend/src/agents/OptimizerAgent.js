@@ -13,6 +13,7 @@ import { resolveSite } from '../utils/resolveSite.js';
 import { withUiBlocks } from '../services/chatTools/uiBlockBuilders.js';
 import { chatSlate, loadSlatePlayers, scoreLineups, withActuals, lineupActualTotal } from '../services/slateSource.js';
 import { withOpportunity, validateOpportunityWeight } from '../services/opportunity/optimizerNudge.js';
+import { chatSourceFields } from '../services/projections/sourceLayer.js';
 
 const SLATE_DATE_PROP = {
   type: 'string',
@@ -340,6 +341,7 @@ class OptimizerAgent extends BaseAgent {
               leverage: p.leverage_score,
               boomProb: p.boom_probability,
               injury: p.injury_status,
+              ...chatSourceFields(p),
               ...actualOf(p)
             }))
           };
