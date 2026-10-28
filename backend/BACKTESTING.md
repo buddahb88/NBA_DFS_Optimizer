@@ -205,6 +205,46 @@ minutes plus about 2.5 for rates_v1 (two simulations per player); cached,
 about 35 s plus the fits (minutes_v2 ~5 s, rates_v1 ~25 s) and rates_v1's rate-quality simulation (~40 s).
 The service entry point is `runModelEval(options)` in `modelEvalService.js`.
 
+### Own model x RotoWire (M4)
+
+`npm run backtest:own-model` (`ownModelBacktest.js`, read-only) combines our
+model with RotoWire and judges it at the lineup level on the saved main slates.
+
+- **`own_mean`** (`ownModel.js`, slates): rates_v1 x minutes_v2 with the DK
+  **mean** incl. DNP as the point (what an optimizer sums; rates_v1's own point
+  is the median), plus the mixture quantiles, p_play, role shift and, with
+  RotoWire minutes, the mean at conditional minutes blended toward RotoWire's
+  on a 0.1 grid.
+- **Blends** (`blend.js`): `points` = w x RotoWire (sanity-adjusted) + (1 - w) x
+  our mean; `minutes` = our rates at blended minutes. w per segment of a scheme
+  (global, salary tier, minutes certainty, minutes gap, teammate out, role
+  change), fit by absolute error incl. DNPs and shrunk toward the global w (100
+  pseudo-rows). Every blend is scored **leave-one-slate-out** (weights from the
+  other slates), with paired bootstrap CIs vs rotowire_adjusted by row and by
+  slate, and weight ranges across folds. Floor / ceiling / boom: our quantiles
+  re-centered on the blended point.
+- **Disagreement**: "ours higher / lower by X+" calls (DK points and minutes)
+  with the hit rate (actual on our side of RotoWire), the share closer to ours,
+  the base rate of actuals above / below RotoWire, and by segment.
+- **Lineups** (`lineupBacktest.js`): per slate and source (RotoWire raw /
+  adjusted, ours, the chosen blend's out-of-fold predictions) the cash
+  max-projection lineup (optimizer LP pipeline + HiGHS, DK slots, $50K cap, $49K
+  min) - actual, % of the hindsight optimal, percentile in a 5,000-lineup
+  ownership-sampled field - and a 20-lineup GPP portfolio
+  (`generateLineupBatch` with the Lineup Studio 20-max preset, seeded).
+- `--replay` adds rates_v1's mean vs median point in replay; `--write-weights`
+  writes `src/services/modelEval/ownModelWeights.json` (the chosen blend's
+  weights on all slates and the disagreement buckets) for the live service.
+
+**Live:** `GET /api/projections/:slateId/own-model` (`ownModelService.js`,
+`projectSlateOwnModel`) returns per player ours_minutes, p_play, ours_mean,
+ours_median, p10, p90, p_boom, p_dd, blend_point (and its range) and the
+disagreement with its historical hit rate, from point-in-time features of the
+slate's date. The models are the harness fits (2024-25), fit once (~20 s) and
+cached in `.cache/model-eval/models`; the feature store loads in ~1.5 s per
+process and data signature; a slate projects in ~0.2 s and is cached per slate
+rows + data + weights. Not used by the optimizer or the UI yet.
+
 ## Environment Variables
 
 - `BACKTESTING_MODE=true` - Uses `nba_dfs_backtest.db` instead of `nba_dfs.db`

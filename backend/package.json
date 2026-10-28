@@ -22,6 +22,7 @@
     "catalog:slates": "node scripts/catalog-live-slates.js",
     "backtest:accuracy": "node scripts/projectionBacktest.js",
     "backtest:model": "node scripts/projectionBacktest.js --model",
+    "backtest:own-model": "node scripts/ownModelBacktest.js",
     "test:accuracy": "vitest run test/projectionBacktest.test.js"
   },
   "keywords": [],
