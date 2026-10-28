@@ -40,6 +40,7 @@ import { quantile, STATS } from './metrics.js';
 import { STAT_FIELDS } from './featureStore.js';
 import { createMinutesV2Projector } from './minutesV2.js';
 import { createRatesV1Projector } from './ratesV1.js';
+import { createOwnModelProjector } from './ownModel.js';
 
 const n = (v) => Number(v) || 0;
 const mean = (xs) => (xs.length ? xs.reduce((s, v) => s + v, 0) / xs.length : null);
@@ -274,6 +275,10 @@ registerProjector('rates_v1', (options) => createRatesV1Projector(options), {
 registerProjector('rates_v1_rotowire_minutes', (options) => createRatesV1Projector({ ...options, minutesSource: 'rotowire' }), {
   label: 'Rates v1 x RotoWire min', modes: ['slate'], version: '1',
   description: 'rates_v1 per-minute production x RotoWire projected minutes (rates compared with the minutes held equal)'
+});
+registerProjector('own_mean', (options) => createOwnModelProjector(options), {
+  label: 'Own model (mean)', modes: ['slate'], version: '1',
+  description: 'rates_v1 x minutes_v2 with the DK MEAN incl. DNP as the point (sums in an optimizer); quantiles and minutes-blend means for blend.js'
 });
 registerProjector('rotowire_minutes_x_fppm', rotowireMinutesTimesFppm, {
   label: 'RotoWire min x FPPM', modes: ['slate'],

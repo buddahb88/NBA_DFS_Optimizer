@@ -123,11 +123,14 @@ async function scoreEntries({ mode, date, slateId = null, view, day, site, entri
     key: e.player.key,
     name: e.player.name,
     team: e.player.team,
+    opponent: e.player.opponent,
+    position: e.player.position ?? null,
     played: e.outcome.played,
     status: e.outcome.status,
     salary: e.slate?.salary ?? null,
     actual: e.outcome.actual,
     tags: tagsFor(e.outcome, e.player, view, e.slate?.salary ?? null, e.slate?.spread ?? null),
+    ...(e.slate ? { slate: e.slate } : {}),
     preds: preds[i]
   }));
 }
@@ -166,44 +169,62 @@ export async function runReplay(store, projectors, { from = null, to = null, sea
  * games this season) missing from the slate pool - RotoWire leaves OUT players
  * out rather than flagging them (no box-score inference).
  */
+/**
+ * Pre-lock context of one saved or live slate: view (history before the
+ * date), day.teams with OUT lists and the players' contexts. OUT lists are
+ * what was known before lock: the game's INACTIVE listing, the slate's OUT
+ * injury statuses, and regulars (15+ min over the team's last 5 games this
+ * season) missing from the slate pool - RotoWire leaves OUT players out
+ * rather than flagging them (no box-score inference). Every slate team gets
+ * an entry (a live slate has no box scores yet).
+ * slate: { date, players: [{ key, name, team, opponent, position, isHome, out, slate }] }.
+ * Returns { view, day, contexts } (contexts[i] for slate.players[i]).
+ */
+export function slateDay(store, s) {
+  const view = store.asOf(s.date);
+  const base = store.gameDay(s.date);
+  const teams = new Map([...base.teams].map(([team, t]) => [team, { ...t, out: t.out.filter(o => o.source === 'status') }]));
+  for (const p of s.players) {
+    if (!teams.has(p.team)) teams.set(p.team, { team: p.team, opponent: p.opponent, isHome: Boolean(p.isHome), gameId: null, out: [] });
+  }
+  const expectedMinutes = (key) => {
+    const recent = view.playerGames(key, { seasons: 'all' }).slice(0, 5);
+    return recent.length ? recent.reduce((x, g) => x + (Number(g.minutes) || 0), 0) / recent.length : 0;
+  };
+  const addOut = (t, o) => { if (!t.out.some(x => x.key === o.key)) t.out.push({ ...o, expectedMinutes: expectedMinutes(o.key) }); };
+  for (const p of s.players) {
+    if (p.out) addOut(teams.get(p.team), { key: p.key, name: p.name, source: 'slate', reason: p.slate?.injuryStatus ?? null });
+  }
+  // RotoWire drops OUT players from the pool instead of flagging them: regulars of the
+  // slate's teams missing from the pool (and from the listings) are OUT, as replay infers
+  // from the box score
+  const present = new Map();
+  for (const p of s.players) {
+    if (!present.has(p.team)) present.set(p.team, new Set());
+    present.get(p.team).add(p.key).add(modelKey(p.name));
+  }
+  for (const [team, keys] of present) for (const o of teams.get(team)?.out ?? []) keys.add(o.key).add(modelKey(o.name));
+  for (const o of inferOutPlayers(view.minutesLogs().filter(g => g.date >= seasonStartDate(view.season)), present)) {
+    const t = teams.get(o.team);
+    if (t) addOut(t, { key: playerKey(o.name), name: o.name, source: 'slate-pool', reason: null });
+  }
+  const day = { teams };
+  const contexts = s.players.map(p => contextPlayer({ ...p, seasonType: p.seasonType ?? 'regular' }, view, day, { out: p.out }));
+  return { view, day, contexts };
+}
+
+/**
+ * Saved slates. slates: [{ slateId, date, players: [{ key, name, team, opponent,
+ * position, isHome, out, slate: {...}, outcome: { played, status, actual, isStarter } }] }].
+ * OUT lists: slateDay.
+ */
 export async function runSlates(store, projectors, slates, { onSlate = null } = {}) {
   const active = projectors.filter(supports('slate'));
   const timings = {};
   const rows = [];
   for (const s of slates) {
-    const view = store.asOf(s.date);
-    const base = store.gameDay(s.date);
-    const teams = new Map([...base.teams].map(([team, t]) => [team, { ...t, out: t.out.filter(o => o.source === 'status') }]));
-    const expectedMinutes = (key) => {
-      const recent = view.playerGames(key, { seasons: 'all' }).slice(0, 5);
-      return recent.length ? recent.reduce((x, g) => x + (Number(g.minutes) || 0), 0) / recent.length : 0;
-    };
-    const addOut = (t, o) => { if (!t.out.some(x => x.key === o.key)) t.out.push({ ...o, expectedMinutes: expectedMinutes(o.key) }); };
-    for (const p of s.players) {
-      if (!p.out) continue;
-      const t = teams.get(p.team) ?? { team: p.team, opponent: p.opponent, isHome: p.isHome, gameId: null, out: [] };
-      teams.set(p.team, t);
-      addOut(t, { key: p.key, name: p.name, source: 'slate', reason: p.slate?.injuryStatus ?? null });
-    }
-    // RotoWire drops OUT players from the pool instead of flagging them: regulars of the
-    // slate's teams missing from the pool (and from the listings) are OUT, as replay infers
-    // from the box score
-    const present = new Map();
-    for (const p of s.players) {
-      if (!present.has(p.team)) present.set(p.team, new Set());
-      present.get(p.team).add(p.key).add(modelKey(p.name));
-    }
-    for (const [team, keys] of present) for (const o of teams.get(team)?.out ?? []) keys.add(o.key).add(modelKey(o.name));
-    for (const o of inferOutPlayers(view.minutesLogs().filter(g => g.date >= seasonStartDate(view.season)), present)) {
-      const t = teams.get(o.team);
-      if (t) addOut(t, { key: playerKey(o.name), name: o.name, source: 'slate-pool', reason: null });
-    }
-    const day = { teams };
-    const entries = s.players.map(p => ({
-      outcome: p.outcome,
-      player: contextPlayer({ ...p, seasonType: p.seasonType ?? 'regular' }, view, day, { out: p.out }),
-      slate: { ...p.slate, slateId: s.slateId }
-    }));
+    const { view, day, contexts } = slateDay(store, s);
+    const entries = s.players.map((p, i) => ({ outcome: p.outcome, player: contexts[i], slate: { ...p.slate, slateId: s.slateId } }));
     rows.push(...await scoreEntries({ mode: 'slate', date: s.date, slateId: s.slateId, view, day, site: store.site, entries, projectors: active, timings }));
     onSlate?.(s);
   }
@@ -317,4 +338,4 @@ export function withPredictionCache(projector, cache) {
   };
 }
 
-export default { runReplay, runSlates, fitProjectors, summarizeRows, segmentBySeason, contextPlayer, withPredictionCache };
+export default { runReplay, runSlates, slateDay, fitProjectors, summarizeRows, segmentBySeason, contextPlayer, withPredictionCache };

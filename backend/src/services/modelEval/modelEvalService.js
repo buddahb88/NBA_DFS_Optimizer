@@ -119,6 +119,30 @@ export async function listMainSlates({ site = DEFAULTS.site, dates = null, now =
 const num = (v) => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
 
 /**
+ * Slate fields a projector sees (ctx.slate) for one players-table / snapshot
+ * row: p posted, a the same row after the sanity layer.
+ */
+export function slateFields(p, a = p) {
+  return {
+    salary: num(p.salary),
+    rotowire: num(p.projected_points),
+    rotowireMinutes: num(p.projected_minutes),
+    floor: num(p.floor),
+    ceiling: num(p.ceiling),
+    adjusted: num(a.projected_points),
+    adjustedMinutes: num(a.projected_minutes),
+    adjustedFloor: num(a.floor),
+    adjustedCeiling: num(a.ceiling),
+    spread: num(p.vegas_spread),
+    impliedTotal: num(p.vegas_implied_total),
+    overUnder: num(p.vegas_over_under),
+    injuryStatus: p.injury_status ?? null,
+    ownership: num(p.rostership),
+    leverage: num(p.leverage_score)
+  };
+}
+
+/**
  * One saved slate as runSlates input: snapshot players (raw and with the
  * sanity layer) with outcomes from the store's box scores; players whose
  * team has no result for the date (postponed / not synced) are left out.
@@ -147,22 +171,7 @@ export async function loadSlate(store, { date, slateId, site = DEFAULTS.site }) 
       isHome: t.isHome,
       seasonType: result?.seasonType ?? 'regular',
       out: isOutStatus(p.injury_status),
-      slate: {
-        salary: num(p.salary),
-        rotowire: num(p.projected_points),
-        rotowireMinutes: num(p.projected_minutes),
-        floor: num(p.floor),
-        ceiling: num(p.ceiling),
-        adjusted: num(a.projected_points),
-        adjustedMinutes: num(a.projected_minutes),
-        adjustedFloor: num(a.floor),
-        adjustedCeiling: num(a.ceiling),
-        spread: num(p.vegas_spread),
-        impliedTotal: num(p.vegas_implied_total),
-        overUnder: num(p.vegas_over_under),
-        injuryStatus: p.injury_status ?? null,
-        ownership: num(p.rostership)
-      },
+      slate: slateFields(p, a),
       outcome: result
         ? { played: result.played, status: result.status, actual: result.actual, isStarter: result.isStarter }
         : { played: false, status: 'DNP', actual: zero, isStarter: false }

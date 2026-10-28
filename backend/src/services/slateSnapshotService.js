@@ -109,7 +109,7 @@ export function playerGameStart(player, startTime = null) {
   return startTimeDate(startTime) ? new Date(startTime).toISOString() : null;
 }
 
-function isHomeFlag(player) {
+export function isHomeFlag(player) {
   const raw = parseJson(player.raw_data);
   if (typeof raw?.isHome === 'boolean') return raw.isHome ? 1 : 0;
   const teams = /([A-Za-z]{2,4})\s*@\s*([A-Za-z]{2,4})/.exec(String(player.game_info || ''));

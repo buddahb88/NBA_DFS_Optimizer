@@ -677,9 +677,10 @@ function fitDispersion(samples, model) {
  * distribution (DNP with probability 1 - p_play, else minutes_v2's
  * conditional minutes); the point is the DK median at minutes_v2's point
  * minutes (pointMinutes 'point') or the median of the mixture with DNP mass
- * shading x (1 - p_play) ('mixture').
+ * shading x (1 - p_play) ('mixture'). quantiles: levels (0-1) of the full
+ * mixture to return as dk_quantiles (mixture only; blends re-center them).
  */
-export function predictPlayer(rates, model, minutes, { seed, scoring, boomAt, typical = 0 }) {
+export function predictPlayer(rates, model, minutes, { seed, scoring, boomAt, typical = 0, quantiles = null }) {
   const params = model.params;
   const dispersion = model.dispersion;
   const elasticity = model.elasticity ?? null;
@@ -724,8 +725,21 @@ export function predictPlayer(rates, model, minutes, { seed, scoring, boomAt, ty
     p_dd: pPlay * s.dd,
     p_td: pPlay * s.td,
     p_boom: boomAt === null ? null : pPlay * shareAtLeast(s.dk, boomAt),
-    rates
+    rates,
+    ...(quantiles ? { dk_quantiles: quantiles.map(t => mixture(t, q)) } : {})
   };
+}
+
+/**
+ * Mean DK conditional on playing, minutes drawn around `cond` (minutes_v2's
+ * conditional distribution: sigma x standardized residual quantiles,
+ * stratified as predictPlayer). Multiply by p_play for the mean incl. DNP.
+ */
+export function conditionalMean(rates, model, { cond, sigma, zMinutes = null }, { seed, scoring, typical = 0 }) {
+  const sims = model.params.sims;
+  let i = 0;
+  const draw = () => Math.max(0.5, cond + sigma * zAt(zMinutes, (i++ % sims + 0.5) / sims));
+  return sampleMean(simulate(rates, model.dispersion, draw, { sims, seed, scoring, elasticity: model.elasticity ?? null, typical }).dk);
 }
 
 /**
