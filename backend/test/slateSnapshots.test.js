@@ -7,13 +7,10 @@ import { fileURLToPath } from 'url';
 import express from 'express';
 import Database from 'better-sqlite3';
 
-// The sync route scrapes ESPN / Hashtag Basketball / RotoWire; stub the network
+// The sync route scrapes Hashtag Basketball / RotoWire; stub the network
 const rotowirePlayers = vi.hoisted(() => ({ list: [] }));
 vi.mock('../src/services/rotowireService.js', () => ({
   default: { fetchPlayers: async () => rotowirePlayers.list }
-}));
-vi.mock('../src/services/espnScraperService.js', () => ({
-  default: { fetchAndStoreDefenseRankings: async () => {} }
 }));
 vi.mock('../src/services/hashtagBasketballService.js', () => ({
   default: { fetchAndStorePositionDefense: async () => {} }
@@ -238,6 +235,28 @@ describe('POST /api/players/:slateId/sync', () => {
     assert.deepEqual(rows.map(r => [r.slate_id, r.player_key, r.salary]), [
       ['new', 'nikola jokic', 11800],
       ['old', 'luka doncic', 11000]
+    ]);
+  });
+
+  test('computes team ratings from box scores instead of scraping ESPN', async () => {
+    const { getCurrentSeason, seasonStartDate } = await import('../src/utils/season.js');
+    const season = getCurrentSeason();
+    const date = seasonStartDate(season);
+    await db.run('DELETE FROM team_defense_rankings');
+    await db.run('DELETE FROM team_game_stats');
+    for (const [team, opponent, pts, possessions] of [['DEN', 'UTA', 120, 100], ['UTA', 'DEN', 104, 100]]) {
+      await db.run(`INSERT INTO team_game_stats (game_id, game_date, season, season_type, team, opponent, pts, possessions)
+        VALUES ('g1', ?, ?, 'regular', ?, ?, ?, ?)`, date, season, team, opponent, pts, possessions);
+    }
+    rotowirePlayers.list = [rwPlayer('rw9', 'Nikola Jokić', { team: 'DEN', opponent: 'UTA', position: 'C', salary: 11800 })];
+    assert.equal((await sync('main')).status, 200);
+
+    const route = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '../src/routes/players.js'), 'utf8');
+    assert.ok(!/espn\.com|espnScraper/i.test(route), 'sync route does not scrape ESPN');
+    const rows = await db.all('SELECT team, def_eff, off_eff, pace FROM team_defense_rankings ORDER BY team');
+    assert.deepEqual(rows, [
+      { team: 'DEN', def_eff: 104, off_eff: 120, pace: 100 },
+      { team: 'UTA', def_eff: 120, off_eff: 104, pace: 100 }
     ]);
   });
 

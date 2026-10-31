@@ -59,9 +59,11 @@ class ProjectionService {
     this.gamesCache = new Map(); // `${player_key}|${date}|${points column}` -> regular-season games
     this.SEASON_PRIOR_GAMES = SEASON_PRIOR_GAMES;
 
-    // League averages (2024-25 season baselines)
-    this.LEAGUE_AVG_DEF_EFF = 113.0;
-    this.LEAGUE_AVG_PACE = 100.0;
+    // League averages. Defense / pace are replaced by the mean of
+    // team_defense_rankings when it is loaded (teamRatingsService: pace =
+    // possessions per game); these 2025-26 values are the fallback.
+    this.LEAGUE_AVG_DEF_EFF = 112.7;
+    this.LEAGUE_AVG_PACE = 102.5;
     this.LEAGUE_AVG_IMPLIED_TOTAL = 113.0;
     this.LEAGUE_AVG_DVP_RANK = 75.5; // Middle of overall 1-150 scale (30 teams x 5 positions)
     this.LEAGUE_AVG_DVP_PTS = 23; // Real points allowed per position (Hashtag per-position avgs ~21.8-24.0, Oct 2026)
@@ -301,15 +303,32 @@ class ProjectionService {
    * Load defense rankings into memory
    */
   async loadDefenseRankings() {
-    if (!this.defenseRankings) {
+    // Reload after teamRatingsService rewrites the table (box-score sync, slate sync)
+    if (!this.defenseRankings || this.defenseRankingsVersion !== teamDefenseModel.version) {
       const rankings = await teamDefenseModel.getAll();
       this.defenseRankings = {};
       for (const team of rankings) {
         this.defenseRankings[team.team] = team;
       }
+      this.defenseRankingsVersion = teamDefenseModel.version;
+      this.setLeagueAverages(rankings);
       console.log(`📊 Loaded defense rankings for ${Object.keys(this.defenseRankings).length} teams`);
     }
     return this.defenseRankings;
+  }
+
+  /**
+   * League defensive efficiency and pace as the mean over teams, so the
+   * defense / pace adjustments are centered on the ratings they compare.
+   * Kept at the constructor fallbacks with fewer than 20 teams.
+   */
+  setLeagueAverages(rankings) {
+    const mean = (field) => {
+      const values = rankings.map(r => Number(r[field])).filter(v => Number.isFinite(v) && v > 0);
+      return values.length >= 20 ? values.reduce((s, v) => s + v, 0) / values.length : null;
+    };
+    this.LEAGUE_AVG_DEF_EFF = mean('def_eff') ?? this.LEAGUE_AVG_DEF_EFF;
+    this.LEAGUE_AVG_PACE = mean('pace') ?? this.LEAGUE_AVG_PACE;
   }
 
   /**

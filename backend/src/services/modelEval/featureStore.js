@@ -55,8 +55,9 @@ import { playerKey as modelKey } from '../minutesModel.js';
 import { fantasyPointsColumn } from '../scoring.js';
 import { previousSeason, seasonForDate, seasonStartDate } from '../../utils/season.js';
 import { playerKey } from '../../utils/playerKey.js';
+import { RATING_PRIOR_GAMES, shrinkRating as shrink } from '../teamRatingsService.js';
 
-export const RATING_PRIOR_GAMES = 10;
+export { RATING_PRIOR_GAMES };
 export const HOME_COURT = 1.5; // points of expected margin each way
 const LEAGUE_MIN_TEAM_GAMES = 50;
 const VIEW_CACHE = 4;
@@ -112,12 +113,6 @@ function ratingsOf(rows, oppOf) {
     defRtg: oppPoss > 0 ? (100 * oppPts) / oppPoss : null
   };
 }
-
-const shrink = (cur, prior, games, k = RATING_PRIOR_GAMES) => {
-  if (cur === null || cur === undefined) return prior ?? null;
-  if (prior === null || prior === undefined) return cur;
-  return (games * cur + k * prior) / (games + k);
-};
 
 /**
  * Index loaded rows. data: { site, games, teamGames, statuses } (loadFeatureData shapes).

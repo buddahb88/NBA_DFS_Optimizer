@@ -2,7 +2,7 @@ import express from 'express';
 import playerModel from '../models/playerModel.js';
 import slateModel from '../models/slateModel.js';
 import rotowireService from '../services/rotowireService.js';
-import espnScraperService from '../services/espnScraperService.js';
+import { refreshTeamRatings } from '../services/teamRatingsService.js';
 import hashtagBasketballService from '../services/hashtagBasketballService.js';
 import projectionService from '../services/projectionService.js';
 import { snapshotAllSlates, snapshotSlate } from '../services/slateSnapshotService.js';
@@ -75,12 +75,13 @@ router.post('/:slateId/sync', async (req, res) => {
   try {
     const { slateId } = req.params;
 
-    // STEP 1: Fetch fresh defense rankings from ESPN and Hashtag Basketball
-    console.log(`🔄 Step 1/4: Fetching overall team defense rankings from ESPN...`);
+    // STEP 1: Team pace / efficiency from the box scores, position defense from Hashtag Basketball
+    console.log(`🔄 Step 1/4: Computing team pace and efficiency from box scores...`);
     try {
-      await espnScraperService.fetchAndStoreDefenseRankings();
+      const ratings = await refreshTeamRatings();
+      console.log(`  ✓ Team ratings (${ratings.season}): ${ratings.teams} teams`);
     } catch (error) {
-      console.warn('⚠️  Failed to fetch ESPN defense rankings, continuing with cached data:', error.message);
+      console.warn('⚠️  Failed to compute team ratings, continuing with cached data:', error.message);
     }
 
     console.log(`🔄 Step 2/4: Fetching position-specific defense rankings from Hashtag Basketball...`);

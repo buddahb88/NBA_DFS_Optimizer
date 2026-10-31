@@ -1,6 +1,24 @@
 import db, { DATABASE_TYPE } from '../config/database.js';
 
+const params = (team) => ({
+  team: team.team,
+  defEff: team.defEff,
+  offEff: team.offEff ?? null,
+  pace: team.pace ?? null,
+  astRatio: team.astRatio ?? null,
+  toRatio: team.toRatio ?? null,
+  rebr: team.rebr ?? null,
+  effFgPct: team.effFgPct ?? null,
+  tsPct: team.tsPct ?? null
+});
+
 class TeamDefenseModel {
+  constructor() {
+    // Bumped on every write so in-memory caches (projectionService) can reload
+    this.version = 0;
+  }
+
+  /** Upsert rows { team, defEff, offEff, pace, astRatio, toRatio, rebr, effFgPct, tsPct }; returns the count. */
   async bulkUpsert(teams) {
     if (DATABASE_TYPE === 'azuresql') {
       for (const team of teams) {
@@ -15,51 +33,31 @@ class TeamDefenseModel {
           WHEN NOT MATCHED THEN
             INSERT (team, def_eff, off_eff, pace, ast_ratio, to_ratio, rebr, eff_fg_pct, ts_pct)
             VALUES (@team, @defEff, @offEff, @pace, @astRatio, @toRatio, @rebr, @effFgPct, @tsPct);
-        `, {
-          team: team.team,
-          defEff: team.defEff,
-          offEff: team.offEff || null,
-          pace: team.pace || null,
-          astRatio: team.astRatio || null,
-          toRatio: team.toRatio || null,
-          rebr: team.rebr || null,
-          effFgPct: team.effFgPct || null,
-          tsPct: team.tsPct || null
-        });
+        `, params(team));
       }
     } else {
-      const insertMany = db.transaction((teamsData) => {
-        for (const team of teamsData) {
-          db.run(`
-            INSERT INTO team_defense_rankings (
-              team, def_eff, off_eff, pace, ast_ratio, to_ratio, rebr, eff_fg_pct, ts_pct, updated_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(team) DO UPDATE SET
-              def_eff = excluded.def_eff,
-              off_eff = excluded.off_eff,
-              pace = excluded.pace,
-              ast_ratio = excluded.ast_ratio,
-              to_ratio = excluded.to_ratio,
-              rebr = excluded.rebr,
-              eff_fg_pct = excluded.eff_fg_pct,
-              ts_pct = excluded.ts_pct,
-              updated_at = CURRENT_TIMESTAMP
-          `,
-            team.team,
-            team.defEff,
-            team.offEff || null,
-            team.pace || null,
-            team.astRatio || null,
-            team.toRatio || null,
-            team.rebr || null,
-            team.effFgPct || null,
-            team.tsPct || null
-          );
-        }
-      });
-      insertMany(teams);
+      const upsert = db.sqliteDb.prepare(`
+        INSERT INTO team_defense_rankings (
+          team, def_eff, off_eff, pace, ast_ratio, to_ratio, rebr, eff_fg_pct, ts_pct, updated_at
+        )
+        VALUES (@team, @defEff, @offEff, @pace, @astRatio, @toRatio, @rebr, @effFgPct, @tsPct, CURRENT_TIMESTAMP)
+        ON CONFLICT(team) DO UPDATE SET
+          def_eff = excluded.def_eff,
+          off_eff = excluded.off_eff,
+          pace = excluded.pace,
+          ast_ratio = excluded.ast_ratio,
+          to_ratio = excluded.to_ratio,
+          rebr = excluded.rebr,
+          eff_fg_pct = excluded.eff_fg_pct,
+          ts_pct = excluded.ts_pct,
+          updated_at = CURRENT_TIMESTAMP
+      `);
+      db.transaction((teamsData) => {
+        for (const team of teamsData) upsert.run(params(team));
+      })(teams);
     }
+    this.version++;
+    return teams.length;
   }
 
   async getByTeam(team) {

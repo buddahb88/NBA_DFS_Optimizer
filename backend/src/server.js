@@ -23,6 +23,7 @@ import dashboardRouter from './routes/dashboard.js';
 import resultsRouter from './routes/results.js';
 import syncRunService from './services/syncRunService.js';
 import { startHistoricalSyncScheduler } from './services/historicalSyncScheduler.js';
+import { ensureTeamRatings } from './services/teamRatingsService.js';
 import archetypesRouter from './routes/archetypes.js';
 import opportunityRouter from './routes/opportunity.js';
 
@@ -95,6 +96,14 @@ async function startServer() {
     // Syncs left running by a previous process would otherwise hold the sync lock
     const interrupted = await syncRunService.failInterrupted();
     if (interrupted) console.warn(`⚠️ Marked ${interrupted} interrupted historical sync run(s) as failed`);
+
+    // team_defense_rankings (pace / efficiency from box scores) when empty; refreshed by each sync
+    try {
+      const ratings = await ensureTeamRatings();
+      if (ratings) console.log(`📊 Computed team ratings (${ratings.season}): ${ratings.teams} teams`);
+    } catch (error) {
+      console.warn('⚠️ Team ratings not computed at startup:', error.message);
+    }
 
     // ESPN catch-up of historical_games now and on HISTORICAL_SYNC_CRON (hourly by default, 'off' disables)
     startHistoricalSyncScheduler({ runOnStart: true });

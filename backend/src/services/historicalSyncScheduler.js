@@ -17,7 +17,8 @@ import syncRunService from './syncRunService.js';
 import { refreshSeasonDefense } from './archetypeDefenseService.js';
 import { refreshSeasonProfiles } from './playerProfileService.js';
 import { refreshSeasonArchetypes } from './archetypeService.js';
-import { listSeasons, seasonForDate } from '../utils/season.js';
+import { refreshTeamRatings } from './teamRatingsService.js';
+import { getCurrentSeason, listSeasons, previousSeason, seasonForDate } from '../utils/season.js';
 
 export const SCHEDULED_SOURCE = 'espn-scheduled';
 
@@ -34,14 +35,18 @@ export function scheduleExpression(env = process.env) {
 /**
  * Rebuild the box-score-derived tables for one season, in dependency order:
  * player_season_profiles -> player_archetypes (classified from profiles) ->
- * team_archetype_defense (grouped by archetype). The opportunity metrics
+ * team_archetype_defense (grouped by archetype), then the current season's
+ * team_defense_rankings (pace / efficiency; last season is its early-season
+ * prior, so either season's games change it). The opportunity metrics
  * cache is cleared by syncRunService.finish.
  */
 export async function refreshSeasonDerived(season) {
   const profiles = await refreshSeasonProfiles(season);
   const archetypes = await refreshSeasonArchetypes(season);
   const defense = await refreshSeasonDefense(season);
-  return { season, profiles: profiles.players, archetypes: archetypes.players, defense: defense.rows };
+  const current = getCurrentSeason();
+  const ratings = season === current || season === previousSeason(current) ? await refreshTeamRatings({ season: current }) : null;
+  return { season, profiles: profiles.players, archetypes: archetypes.players, defense: defense.rows, teamRatings: ratings?.teams ?? 0 };
 }
 
 /** Azure SQL returns DATE columns as Date objects */
@@ -120,7 +125,7 @@ export async function runIncrementalSync({
     try {
       const refreshed = await refreshDerived(season);
       if (refreshed?.season) {
-        console.log(`✓ ${season} derived tables: ${refreshed.profiles} profiles, ${refreshed.archetypes} archetypes, ${refreshed.defense} defense rows`);
+        console.log(`✓ ${season} derived tables: ${refreshed.profiles} profiles, ${refreshed.archetypes} archetypes, ${refreshed.defense} defense rows, ${refreshed.teamRatings} team ratings`);
       }
     } catch (error) {
       console.error(`❌ Derived table refresh ${season} failed:`, error.message);

@@ -151,7 +151,7 @@ You have access to the following tables:
 5. **player_season_profiles** - Each player's season role profile (usage, assist/rebound rates, per-36, fantasy points per minute)
 6. **historical_games** - ESPN game logs for every game since 2024-25 (keyed by player_key)
 7. **slate_player_snapshots** - Saved past slates (salary, projection, projected ownership) to compare with actual results
-8. **team_defense_rankings** - Team defensive efficiency, pace, and advanced stats (from ESPN)
+8. **team_defense_rankings** - Team pace (possessions per game), offensive/defensive efficiency (points per 100 possessions) and shooting/turnover/rebound rates, current season computed from box scores
 9. **team_defense_vs_position** - Legacy position DVP from HashtagBasketball (REAL points allowed, not fantasy points)
 10. **lineups** - Saved DFS lineups
 11. **lineup_players** - Junction table linking players to lineups

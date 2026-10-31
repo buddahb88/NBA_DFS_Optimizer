@@ -23,6 +23,7 @@
     "backtest:accuracy": "node scripts/projectionBacktest.js",
     "backtest:model": "node scripts/projectionBacktest.js --model",
     "backtest:own-model": "node scripts/ownModelBacktest.js",
+    "ratings:teams": "node scripts/team-ratings.js",
     "test:accuracy": "vitest run test/projectionBacktest.test.js"
   },
   "keywords": [],
