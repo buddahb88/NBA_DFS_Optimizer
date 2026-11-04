@@ -146,23 +146,37 @@ const findPlayer = (players, id) => {
     ?? players.find(p => (p.player_key ?? playerKey(p.name)) === s) ?? null;
 };
 
-/** Played and unplayed games of the current + last season before asOf, newest first. */
-async function loadGames(key, { asOf, season, site }) {
-  const fpColumn = fantasyPointsColumn(site);
-  const rows = await db.all(`
-    SELECT game_date, season, season_type, team, opponent, minutes, points, rebounds, assists, steals, blocks,
-           turnovers, fg3_made, ${fpColumn}, is_starter, is_back_to_back, is_home
-    FROM historical_games
-    WHERE player_key = ? AND game_date < ? AND season IN (?, ?)
-    ORDER BY game_date DESC`, key, asOf, season, previousSeason(season));
-  return { rows, fpColumn };
-}
+const HISTORY_CHUNK = 400;
 
-async function loadSnapshots(key, { asOf, site }) {
-  return db.all(`
-    SELECT game_date, slate_id, salary, projected_points, captured_at
-    FROM slate_player_snapshots
-    WHERE player_key = ? AND site = ? AND game_date < ?`, key, site, asOf);
+/**
+ * Game logs (current + last season) and salary snapshots before asOf for
+ * many players in one pass: { fpColumn, games: Map(key -> rows newest first),
+ * snapshots: Map(key -> rows) }. The card reads one key, the slate verdicts all.
+ */
+export async function loadHistory(keys, { asOf, season, site }) {
+  const fpColumn = fantasyPointsColumn(site);
+  const unique = [...new Set(keys.filter(Boolean))];
+  const games = new Map(unique.map(k => [k, []]));
+  const snapshots = new Map(unique.map(k => [k, []]));
+  for (let i = 0; i < unique.length; i += HISTORY_CHUNK) {
+    const chunk = unique.slice(i, i + HISTORY_CHUNK);
+    const marks = chunk.map(() => '?').join(', ');
+    const [gameRows, snapRows] = await Promise.all([
+      db.all(`
+        SELECT player_key, game_date, season, season_type, team, opponent, minutes, points, rebounds, assists, steals, blocks,
+               turnovers, fg3_made, ${fpColumn}, is_starter, is_back_to_back, is_home
+        FROM historical_games
+        WHERE player_key IN (${marks}) AND game_date < ? AND season IN (?, ?)
+        ORDER BY game_date DESC`, ...chunk, asOf, season, previousSeason(season)),
+      db.all(`
+        SELECT player_key, game_date, slate_id, salary, projected_points, captured_at
+        FROM slate_player_snapshots
+        WHERE player_key IN (${marks}) AND site = ? AND game_date < ?`, ...chunk, site, asOf),
+    ]);
+    for (const r of gameRows) games.get(r.player_key)?.push(r);
+    for (const r of snapRows) snapshots.get(r.player_key)?.push(r);
+  }
+  return { fpColumn, games, snapshots };
 }
 
 /** Season-to-date role profile from games before asOf (computeProfiles), or null. */
@@ -183,66 +197,66 @@ async function secondaryArchetype(key, season) {
 
 const starterChange = (c) => (c === 'into' ? 'to_starter' : c === 'out' ? 'to_bench' : null);
 
+const byId = (rows) => new Map((rows ?? []).map(r => [String(r.id), r]));
+
 /**
- * The card for one slate player. playerId matches the slate row id, the
- * site's player_id or the player_key. Throws SlateSourceError (404 when the
- * slate or player is not found).
+ * Everything slate-wide the card and the slate verdicts share, loaded once:
+ * { source, chosen, asOf, season, lastSeason, players, ctx, own: Map(id -> own
+ * model row), radar: Map(id -> radar row), warnings }. own / radar are empty
+ * maps when their service fails (named in warnings).
  */
-export async function getPlayerCard({ slateId, playerId, slateDate = null, projectionSource = null, now = new Date() } = {}) {
+export async function prepareSlate({ slateId, slateDate = null, projectionSource = null, now = new Date() } = {}) {
   const source = await resolveSlate({ slateId, slateDate: slateDate || null, now });
   if (!source) throw new SlateSourceError('No slate synced', 404);
+  return prepareSource(source, { projectionSource, now });
+}
+
+/** prepareSlate for an already resolved source. */
+export async function prepareSource(source, { projectionSource = null, now = new Date() } = {}) {
   const chosen = parseSource(projectionSource) ?? activeProjectionSource();
-  const cardKey = `${source.slateId}|${source.slateDate ?? ''}|${source.site}|${playerId}|${chosen}`;
-  const cachedCard = recall(cards, cardKey, CARD_TTL_MS);
-  if (cachedCard) return { ...cachedCard, meta: { ...cachedCard.meta, cached: true } };
-
   const warnings = [];
-  let players = await loadSlatePlayers(source, { includeZero: true, projectionSource: chosen, now });
-  const found = findPlayer(players, playerId);
-  if (!found) throw new SlateSourceError(`Player ${playerId} is not on slate ${source.slateId}`, 404);
-  let p = found;
-  if (source.isBacktest) [p] = await withActuals(source, [found]);
-
-  const key = p.player_key ?? playerKey(p.name);
   const asOf = source.slateDate ?? easternDate(now);
-  const ctx = await slateContext(source, asOf, warnings);
-  const { season } = ctx;
-  const lastSeason = previousSeason(season);
+  const players = await loadSlatePlayers(source, { includeZero: true, projectionSource: chosen, now });
+  const [ctx, own, radar] = await Promise.all([
+    slateContext(source, asOf, warnings),
+    soft(warnings, 'own model', async () => byId((await projectSlateOwnModel(source.slateId, { source, now })).players), new Map()),
+    soft(warnings, 'opportunity radar', async () => byId((await getOpportunityRadar({
+      slateId: source.slateId, slateDate: source.isBacktest ? source.slateDate : null, site: source.site, now,
+    })).players), new Map()),
+  ]);
+  return { source, chosen, asOf, season: ctx.season, lastSeason: previousSeason(ctx.season), players, ctx, own, radar, warnings };
+}
+
+export const findSlatePlayer = (players, id) => findPlayer(players, id);
+
+/** History key of a slate row (live rows carry no player_key: derive it from the name). */
+export const slatePlayerKey = (p) => p.player_key ?? playerKey(p.name);
+
+/**
+ * The verdict-bearing pieces of one player's card, pure given the prepared
+ * slate and his history (loadHistory): { key, team, opponent, info, own,
+ * radar, entries, form, track, projection, matchup (no per-stat deltas),
+ * environment, split, radarSummary, starterChange, verdict, ... }. The card
+ * and the slate verdicts both call this, so they cannot disagree.
+ */
+export function assemblePlayer(p, prep, history) {
+  const { ctx, season, lastSeason, chosen } = prep;
+  const key = slatePlayerKey(p);
+  const own = prep.own.get(String(p.id)) ?? null;
+  const radar = prep.radar.get(String(p.id)) ?? null;
   const team = canonicalTeam(p.team);
   const opponent = canonicalTeam(p.opponent);
-
-  const [own, radar, games, snapshots, current, previousRows, archetypeRow] = await Promise.all([
-    soft(warnings, 'own model', async () => {
-      const result = await projectSlateOwnModel(source.slateId, { source, now });
-      return result.players.find(o => String(o.id) === String(p.id)) ?? null;
-    }),
-    soft(warnings, 'opportunity radar', async () => {
-      const r = await getOpportunityRadar({ slateId: source.slateId, slateDate: source.isBacktest ? source.slateDate : null, site: source.site, now });
-      return r.players.find(row => String(row.id) === String(p.id)) ?? null;
-    }),
-    soft(warnings, 'game log', () => loadGames(key, { asOf, season, site: source.site }), { rows: [], fpColumn: fantasyPointsColumn(source.site) }),
-    soft(warnings, 'salary history', () => loadSnapshots(key, { asOf, site: source.site }), []),
-    soft(warnings, 'season profile', () => seasonToDateProfile(key, { season, asOf })),
-    soft(warnings, 'last season profile', () => getPlayerProfiles(key, { seasons: [lastSeason] }), []),
-    // A backtest reads last season's (complete) row so the night's season can't leak in
-    soft(warnings, 'archetype', () => secondaryArchetype(key, source.isBacktest ? lastSeason : season)),
-  ]);
+  const fpColumn = history?.fpColumn ?? fantasyPointsColumn(prep.source.site);
 
   // --- Form -------------------------------------------------------------------------
-  const byDate = snapshotsByDate(snapshots);
-  const entries = games.rows.map(g => ({
-    ...gameEntry(g, { fpColumn: games.fpColumn, salary: byDate.get(String(g.game_date).slice(0, 10))?.salary ?? null }),
+  const byDate = snapshotsByDate(history?.snapshots?.get(key) ?? []);
+  const entries = (history?.games?.get(key) ?? []).map(g => ({
+    ...gameEntry(g, { fpColumn, salary: byDate.get(String(g.game_date).slice(0, 10))?.salary ?? null }),
     seasonKey: g.season,
   }));
   const form = summarizeForm(entries, { season, lastSeason });
   const gamesByDate = new Map(entries.map(e => [e.date, e]));
   const track = trackRecord([...byDate.values()], gamesByDate);
-
-  // --- Identity ---------------------------------------------------------------------
-  const info = ctx.matchups.get(String(p.player_id)) ?? {};
-  const archetype = info.archetype ?? p.archetype ?? (archetypeRow?.archetype !== 'unclassified' ? archetypeRow?.archetype : null) ?? null;
-  const secondary = archetypeRow?.secondary_archetype && archetypeRow.secondary_archetype !== archetype ? archetypeRow.secondary_archetype : null;
-  const isHome = isHomeFlag(p);
 
   // --- Projection ---------------------------------------------------------------------
   const salary = num(p.salary);
@@ -283,11 +297,10 @@ export async function getPlayerCard({ slateId, playerId, slateDate = null, proje
   };
 
   // --- Matchup ------------------------------------------------------------------------
+  const info = ctx.matchups.get(String(p.player_id)) ?? {};
   let matchup = null;
   if (info.matchup) {
     const m = info.matchup;
-    const row = await soft(warnings, 'defense grid', async () => (await defenseRows(ctx, source, m))
-      .find(r => r.team === m.opponent && r.group_key === m.group_key) ?? null);
     matchup = {
       opponent: m.opponent,
       grouping: m.grouping,
@@ -301,14 +314,9 @@ export async function getPlayerCard({ slateId, playerId, slateDate = null, proje
       games: m.games,
       adjusted_edge: r2(num(m.adjusted_edge)),
       edge_flags: m.edge_flags ?? [],
-      stats: row ? {
-        pts: r2(num(row.pts_delta)), reb: r2(num(row.reb_delta)), ast: r2(num(row.ast_delta)),
-        fg3m: r2(num(row.fg3m_delta)), stocks: r2(num(row.stocks_delta)),
-      } : null,
+      stats: null,
     };
   }
-  const teamRating = ctx.ratings?.get(team) ?? null;
-  const oppRating = ctx.ratings?.get(opponent) ?? null;
   const spread = num(p.vegas_spread);
   const environment = {
     implied_total: num(p.vegas_implied_total),
@@ -318,15 +326,11 @@ export async function getPlayerCard({ slateId, playerId, slateDate = null, proje
     over_under: num(p.vegas_over_under),
     blowout: spread === null ? null : Math.abs(spread) >= 10,
     blowout_risk: num(p.blowout_risk),
-    team: teamRating,
-    opponent: oppRating,
+    team: ctx.ratings?.get(team) ?? null,
+    opponent: ctx.ratings?.get(opponent) ?? null,
   };
 
   // --- Context ------------------------------------------------------------------------
-  const teammatesOut = players
-    .filter(o => o !== found && canonicalTeam(o.team) === team && isOutStatus(o.injury_status))
-    .map(o => ({ name: o.name, status: o.injury_status, salary: num(o.salary) }))
-    .sort((a, b) => (b.salary ?? 0) - (a.salary ?? 0));
   const split = radar && (radar.teammate_out_names?.length || radar.teammate_min_delta !== null) ? {
     out_names: radar.teammate_out_names ?? [],
     sample: radar.teammate_sample ?? null,
@@ -335,44 +339,16 @@ export async function getPlayerCard({ slateId, playerId, slateDate = null, proje
     usg_delta: num(radar.teammate_usg_delta),
     absorbed_pct: num(radar.teammate_absorbed_pct),
   } : null;
-  const context = {
-    teammates_out: teammatesOut,
-    split,
-    radar: radar ? {
-      cash_score: radar.cash_score ?? null,
-      gpp_score: radar.gpp_score ?? null,
-      reason: radar.reason ?? null,
-      rate_projection: num(radar.rate_projection),
-      salary_lag: radar.salary_lag ?? null,
-      back_to_back: radar.back_to_back ?? null,
-      rest_days: radar.rest_days ?? null,
-    } : null,
-  };
-
-  // --- Role -----------------------------------------------------------------------------
-  const prev = previousRows?.[0] ?? null;
-  const role = {
-    season,
-    lastSeason,
-    current,
-    previous: prev ? { season: lastSeason, games: prev.games, starts: prev.starts, ...roleRow(prev) } : null,
-    archetype_average: archetype ? ctx.archetypeAvg?.get(archetype) ?? null : null,
-    started_last_game: radar?.started_last_game ?? form.log.at(-1)?.is_starter ?? null,
-    starts_l5: radar?.starts_l5 ?? null,
-    starter_change: starterChange(radar?.starter_change),
-  };
-
-  // --- Actual (backtest) ------------------------------------------------------------------
-  const actual = source.isBacktest ? {
-    points: num(p.actualPoints),
-    minutes: num(p.actualMinutes),
-    status: p.resultStatus ?? null,
-    value: num(p.actualPoints) !== null && salaryK ? r2(num(p.actualPoints) / salaryK) : null,
-    vs_projection: num(p.actualPoints) !== null && active !== null ? r1(num(p.actualPoints) - active) : null,
-    vs_rotowire: num(p.actualPoints) !== null && rotowire !== null ? r1(num(p.actualPoints) - rotowire) : null,
-    vs_ours: num(p.actualPoints) !== null && projection.ours !== null ? r1(num(p.actualPoints) - projection.ours) : null,
-    hit5x: num(p.actualPoints) !== null && salaryK ? num(p.actualPoints) >= salaryK * 5 : null,
+  const radarSummary = radar ? {
+    cash_score: radar.cash_score ?? null,
+    gpp_score: radar.gpp_score ?? null,
+    reason: radar.reason ?? null,
+    rate_projection: num(radar.rate_projection),
+    salary_lag: radar.salary_lag ?? null,
+    back_to_back: radar.back_to_back ?? null,
+    rest_days: radar.rest_days ?? null,
   } : null;
+  const change = starterChange(radar?.starter_change);
 
   // --- Verdict --------------------------------------------------------------------------------
   const minutesBase = form.trend.baseline === 'season' ? form.season : form.lastSeason;
@@ -392,7 +368,7 @@ export async function getPlayerCard({ slateId, playerId, slateDate = null, proje
     minutesL5: form.l5?.minutes ?? null,
     minutesSeason: minutesBase?.minutes ?? null,
     minutesDelta: form.trend.minutes_delta_l5,
-    starterChange: role.starter_change,
+    starterChange: change,
     teammatesOut: split?.out_names ?? [],
     teammateMinDelta: split?.min_delta ?? null,
     teammateGames: split?.games_without ?? null,
@@ -406,11 +382,101 @@ export async function getPlayerCard({ slateId, playerId, slateDate = null, proje
     opponent,
     impliedTotal: environment.implied_total,
     spread,
-    radarCash: context.radar?.cash_score ?? null,
-    radarGpp: context.radar?.gpp_score ?? null,
+    radarCash: radarSummary?.cash_score ?? null,
+    radarGpp: radarSummary?.gpp_score ?? null,
     trackBias: track.bias,
     trackN: track.n,
   });
+
+  return {
+    key, team, opponent, info, own, radar, entries, form, track, projection, matchup, environment,
+    split, radarSummary, starterChange: change, salary, salaryK, active, rotowire, verdict,
+  };
+}
+
+/**
+ * The card for one slate player. playerId matches the slate row id, the
+ * site's player_id or the player_key. Throws SlateSourceError (404 when the
+ * slate or player is not found).
+ */
+export async function getPlayerCard({ slateId, playerId, slateDate = null, projectionSource = null, now = new Date() } = {}) {
+  const source = await resolveSlate({ slateId, slateDate: slateDate || null, now });
+  if (!source) throw new SlateSourceError('No slate synced', 404);
+  const chosen = parseSource(projectionSource) ?? activeProjectionSource();
+  const cardKey = `${source.slateId}|${source.slateDate ?? ''}|${source.site}|${playerId}|${chosen}`;
+  const cachedCard = recall(cards, cardKey, CARD_TTL_MS);
+  if (cachedCard) return { ...cachedCard, meta: { ...cachedCard.meta, cached: true } };
+
+  const prep = await prepareSource(source, { projectionSource: chosen, now });
+  const { players, ctx, season, lastSeason, asOf } = prep;
+  const warnings = [...prep.warnings];
+  const found = findPlayer(players, playerId);
+  if (!found) throw new SlateSourceError(`Player ${playerId} is not on slate ${source.slateId}`, 404);
+  let p = found;
+  if (source.isBacktest) [p] = await withActuals(source, [found]);
+
+  const key = slatePlayerKey(p);
+  const [history, current, previousRows, archetypeRow] = await Promise.all([
+    soft(warnings, 'game log', () => loadHistory([key], { asOf, season, site: source.site }), null),
+    soft(warnings, 'season profile', () => seasonToDateProfile(key, { season, asOf })),
+    soft(warnings, 'last season profile', () => getPlayerProfiles(key, { seasons: [lastSeason] }), []),
+    // A backtest reads last season's (complete) row so the night's season can't leak in
+    soft(warnings, 'archetype', () => secondaryArchetype(key, source.isBacktest ? lastSeason : season)),
+  ]);
+  const a = assemblePlayer(p, prep, history);
+  const { team, opponent, info, form, track, projection, environment, split, radarSummary, salaryK, active, rotowire, verdict } = a;
+
+  // --- Identity ---------------------------------------------------------------------
+  const archetype = info.archetype ?? p.archetype ?? (archetypeRow?.archetype !== 'unclassified' ? archetypeRow?.archetype : null) ?? null;
+  const secondary = archetypeRow?.secondary_archetype && archetypeRow.secondary_archetype !== archetype ? archetypeRow.secondary_archetype : null;
+  const isHome = isHomeFlag(p);
+
+  // --- Matchup: per-stat deltas from the defense grid (card only) ----------------------------
+  let matchup = a.matchup;
+  if (info.matchup) {
+    const m = info.matchup;
+    const row = await soft(warnings, 'defense grid', async () => (await defenseRows(ctx, source, m))
+      .find(r => r.team === m.opponent && r.group_key === m.group_key) ?? null);
+    matchup = {
+      ...matchup,
+      stats: row ? {
+        pts: r2(num(row.pts_delta)), reb: r2(num(row.reb_delta)), ast: r2(num(row.ast_delta)),
+        fg3m: r2(num(row.fg3m_delta)), stocks: r2(num(row.stocks_delta)),
+      } : null,
+    };
+  }
+
+  // --- Context ------------------------------------------------------------------------
+  const teammatesOut = players
+    .filter(o => o !== found && canonicalTeam(o.team) === team && isOutStatus(o.injury_status))
+    .map(o => ({ name: o.name, status: o.injury_status, salary: num(o.salary) }))
+    .sort((x, y) => (y.salary ?? 0) - (x.salary ?? 0));
+  const context = { teammates_out: teammatesOut, split, radar: radarSummary };
+
+  // --- Role -----------------------------------------------------------------------------
+  const prev = previousRows?.[0] ?? null;
+  const role = {
+    season,
+    lastSeason,
+    current,
+    previous: prev ? { season: lastSeason, games: prev.games, starts: prev.starts, ...roleRow(prev) } : null,
+    archetype_average: archetype ? ctx.archetypeAvg?.get(archetype) ?? null : null,
+    started_last_game: a.radar?.started_last_game ?? form.log.at(-1)?.is_starter ?? null,
+    starts_l5: a.radar?.starts_l5 ?? null,
+    starter_change: a.starterChange,
+  };
+
+  // --- Actual (backtest) ------------------------------------------------------------------
+  const actual = source.isBacktest ? {
+    points: num(p.actualPoints),
+    minutes: num(p.actualMinutes),
+    status: p.resultStatus ?? null,
+    value: num(p.actualPoints) !== null && salaryK ? r2(num(p.actualPoints) / salaryK) : null,
+    vs_projection: num(p.actualPoints) !== null && active !== null ? r1(num(p.actualPoints) - active) : null,
+    vs_rotowire: num(p.actualPoints) !== null && rotowire !== null ? r1(num(p.actualPoints) - rotowire) : null,
+    vs_ours: num(p.actualPoints) !== null && projection.ours !== null ? r1(num(p.actualPoints) - projection.ours) : null,
+    hit5x: num(p.actualPoints) !== null && salaryK ? num(p.actualPoints) >= salaryK * 5 : null,
+  } : null;
 
   const card = {
     slate: {
@@ -426,7 +492,7 @@ export async function getPlayerCard({ slateId, playerId, slateDate = null, proje
       opponent,
       position: p.position,
       roster_positions: p.roster_positions ?? null,
-      salary,
+      salary: a.salary,
       headshot: p.headshot ?? null,
       injury_status: p.injury_status ?? null,
       archetype,
@@ -450,4 +516,4 @@ export async function getPlayerCard({ slateId, playerId, slateDate = null, proje
   return warnings.length ? card : remember(cards, cardKey, card);
 }
 
-export default { getPlayerCard, clearPlayerCardCache };
+export default { getPlayerCard, clearPlayerCardCache, prepareSlate, prepareSource, loadHistory, assemblePlayer };

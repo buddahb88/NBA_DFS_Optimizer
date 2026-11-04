@@ -10,6 +10,7 @@ import {
 } from '../config/projectionSanity.js';
 import { SOURCES, parseSource, projectionSourceStatus, setProjectionSource } from '../config/projectionSource.js';
 import { SlateSourceError, loadSlatePlayers, resolveSlate } from '../services/slateSource.js';
+import { clearSlateVerdictCache } from '../services/playerCard/slateVerdicts.js';
 
 const router = express.Router();
 
@@ -129,7 +130,10 @@ router.put('/source', (req, res) => {
   if (source === undefined || (source !== null && !parseSource(source))) {
     return res.status(400).json({ error: `source must be one of: ${SOURCES.join(', ')} (or null to reset)` });
   }
-  res.json(setProjectionSource(source));
+  const status = setProjectionSource(source);
+  // The active source changed: verdicts cached under the old default are stale
+  clearSlateVerdictCache();
+  res.json(status);
 });
 
 /**

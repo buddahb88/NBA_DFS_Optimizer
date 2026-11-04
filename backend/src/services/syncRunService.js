@@ -9,6 +9,7 @@
 import db, { DATABASE_TYPE } from '../config/database.js';
 import { clearOpportunityCache } from './opportunity/metricsService.js';
 import { clearSanityCache } from './projections/sanityService.js';
+import { clearSlateVerdictCache } from './playerCard/slateVerdicts.js';
 
 const COLUMNS = 'id, source, season, started_at, finished_at, games_inserted, error';
 
@@ -47,6 +48,7 @@ class SyncRunService {
     // New box scores change every cached opportunity metric on or after them
     clearOpportunityCache();
     clearSanityCache();
+    clearSlateVerdictCache();
     await db.run(
       `UPDATE sync_runs SET finished_at = @finished_at, games_inserted = @games, error = @error WHERE id = @id`,
       { id, finished_at: timestamp(), games: gamesInserted, error });

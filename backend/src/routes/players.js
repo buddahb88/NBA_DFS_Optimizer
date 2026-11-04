@@ -12,7 +12,8 @@ import { getSlateMatchups } from '../services/archetypeDefenseService.js';
 import { loadSlatePlayers, resolveSlate, withActuals } from '../services/slateSource.js';
 import { SOURCES, parseSource } from '../config/projectionSource.js';
 import { DEFAULT_SITE, isValidSite } from '../config/sites.js';
-import { getPlayerCard } from '../services/playerCard/playerCardService.js';
+import { getPlayerCard, clearPlayerCardCache } from '../services/playerCard/playerCardService.js';
+import { getSlateVerdicts, clearSlateVerdictCache } from '../services/playerCard/slateVerdicts.js';
 
 const router = express.Router();
 
@@ -95,6 +96,29 @@ router.get('/:slateId/card/:playerId', async (req, res) => {
   }
 });
 
+// Slate verdicts: the player card's Cash / GPP verdict, score and confidence
+// for every player of the slate in one request (services/playerCard/
+// slateVerdicts.js; same rules as the card). slateDate (past) = backtest as
+// of that date. projectionSource overrides the active source. Keyed by the
+// slate row id.
+router.get('/:slateId/verdicts', async (req, res) => {
+  try {
+    const projectionSource = req.query.projectionSource || null;
+    if (projectionSource && !parseSource(projectionSource)) {
+      return res.status(400).json({ error: `projectionSource must be one of: ${SOURCES.join(', ')}` });
+    }
+    res.json(await getSlateVerdicts({
+      slateId: req.params.slateId,
+      slateDate: req.query.slateDate || null,
+      projectionSource,
+      detail: req.query.detail === 'true' || req.query.detail === '1',
+    }));
+  } catch (error) {
+    if (!error.status) console.error('Slate verdicts error:', error);
+    res.status(error.status || 500).json({ error: error.message });
+  }
+});
+
 // Fetch and sync players from RotoWire
 router.post('/:slateId/sync', async (req, res) => {
   try {
@@ -149,6 +173,9 @@ router.post('/:slateId/sync', async (req, res) => {
     // Bulk insert players (with defense-adjusted projections)
     await playerModel.bulkCreateOrUpdate(slateId, players);
     await snapshotSlate(slateId);
+    // New slate rows: cached cards / verdicts are stale
+    clearPlayerCardCache();
+    clearSlateVerdictCache();
     // Precompute Opportunity Radar metrics in the background (failures are logged)
     primeOpportunityMetrics(slateId);
 
