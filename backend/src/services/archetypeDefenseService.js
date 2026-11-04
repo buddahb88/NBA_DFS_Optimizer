@@ -513,7 +513,7 @@ export function weakTiers(rows, stat = 'fp') {
 const SLATE_SQL = 'SELECT slate_id FROM slates WHERE slate_id = ?';
 // player_key: backtest actuals are looked up by it (loadActuals)
 const SLATE_PLAYER_FIELDS = ['player_id', 'player_key', 'name', 'team', 'opponent', 'position', 'salary', 'projected_points',
-  'projected_minutes', 'injury_status'];
+  'projected_minutes', 'injury_status', 'headshot'];
 
 const dayBefore = (date) => new Date(Date.parse(`${date}T00:00:00Z`) - 86400000).toISOString().slice(0, 10);
 
@@ -640,6 +640,10 @@ export async function getTonight(query = {}) {
     lastNGames: defense.lastNGames, source: defense.source, edgeConfig: MATCHUP_EDGE_CONFIG,
     slatePlayers: players.length, matchedPlayers, defenseRows: defense.rows.length,
     players: out,
+    // Every slate player, so the page can link history rows (player_key) to the card
+    roster: players.map(p => ({
+      player_id: p.player_id, player_key: playerKey(p.name), name: p.name, team: canonicalTeam(p.team), headshot: p.headshot,
+    })),
   };
 }
 
@@ -688,6 +692,7 @@ export function buildTonight(players, { tiers, column, grouping, archetypeOf, ed
       teams: hit.teams,
       games: hit.row.games,
       projected_minutes: p.projected_minutes,
+      headshot: p.headshot ?? null,
       ...edge,
     });
   }

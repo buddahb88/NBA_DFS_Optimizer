@@ -1,12 +1,23 @@
 import { useState } from 'react';
 import { Badge, DataTable, Tabs, Tooltip } from '../../components/ui';
-import { TONIGHT_SORTS, edgeBadges, edgeExplanation, formatDelta, statFor, tonightSorting } from './archetypes';
+import { TONIGHT_SORTS, edgeBadges, edgeExplanation, formatDelta, statFor, tonightCardTarget, tonightSorting } from './archetypes';
 import { ACTUAL_COLUMN, RESULT_COLUMN } from '../slate/backtestColumns';
+import PlayerCardTrigger from '../playerCard/PlayerCardTrigger';
 
-function columnsFor(stat, edgeConfig, isBacktest) {
+function columnsFor(stat, data) {
+  const edgeConfig = data?.edgeConfig;
+  const isBacktest = !!data?.isBacktest;
   const { unit } = statFor(stat);
   const columns = [
-    { accessorKey: 'name', header: 'Player' },
+    {
+      accessorKey: 'name',
+      header: 'Player',
+      cell: ({ row }) => (
+        <PlayerCardTrigger target={tonightCardTarget(row.original, data)} className="font-medium">
+          {row.original.name}
+        </PlayerCardTrigger>
+      ),
+    },
     { accessorKey: 'position', header: 'Pos' },
     { accessorKey: 'team', header: 'Tm' },
     { accessorKey: 'opponent', header: 'Opp' },
@@ -105,7 +116,7 @@ export default function TonightTable({ data, stat, loading, emptyState }) {
       // Remount so the toggle resets the table's own sorting
       key={sort}
       data={data?.players ?? []}
-      columns={columnsFor(stat, data?.edgeConfig, !!data?.isBacktest)}
+      columns={columnsFor(stat, data)}
       loading={loading && !data}
       maxHeight="60vh"
       initialSorting={tonightSorting(sort)}

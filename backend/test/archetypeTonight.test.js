@@ -124,6 +124,10 @@ describe('GET /tonight', () => {
     // RotoWire's PHO is canonicalized to the historical PHX
     assert.equal(wing.opponent, 'PHX');
     assert.equal(wing.matchup_delta, 2);
+    // Roster: every slate player keyed for history rows (suffix-free player_key)
+    assert.equal(body.roster.length, 4);
+    assert.deepEqual(body.roster.find(p => p.player_id === '3'),
+      { player_id: '3', player_key: 'wing three', name: 'Wing Three Jr.', team: 'BOS', headshot: null });
   });
 
   test('position grouping and per-stat ranking', async () => {

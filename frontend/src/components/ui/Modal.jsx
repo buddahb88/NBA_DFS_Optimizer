@@ -18,7 +18,12 @@ export default function Modal({ open, onClose, title, description, footer, size 
   useEffect(() => {
     if (!open) return undefined;
     const prevFocus = document.activeElement;
-    const onKey = (e) => e.key === 'Escape' && onCloseRef.current?.();
+    // Only the topmost dialog closes (e.g. a player card opened from this modal)
+    const isTop = () => {
+      const dialogs = document.querySelectorAll('[role="dialog"][aria-modal="true"]');
+      return !panelRef.current || dialogs[dialogs.length - 1] === panelRef.current;
+    };
+    const onKey = (e) => e.key === 'Escape' && isTop() && onCloseRef.current?.();
     document.addEventListener('keydown', onKey);
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';

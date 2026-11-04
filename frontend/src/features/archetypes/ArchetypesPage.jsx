@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Button, Card, CardBody, CardHeader, EmptyState, IconGrid, IconInfo, Spinner, Tabs } from '../../components/ui';
 import { useSlate } from '../../context/SlateContext';
@@ -10,7 +10,7 @@ import CellDrilldown from './CellDrilldown';
 import TonightTable from './TonightTable';
 import useArchetypes from './useArchetypes';
 import SlateModeSelect from '../slate/SlateModeSelect';
-import { parseDeepLink, statFor } from './archetypes';
+import { parseDeepLink, statFor, tonightCardTarget } from './archetypes';
 
 const TABS = [
   { value: 'heatmap', label: 'Defense heatmap' },
@@ -84,6 +84,20 @@ export default function ArchetypesPage() {
     const defs = (filters.grouping === 'position' ? definitions.data?.positions : definitions.data?.archetypes) ?? [];
     openCell({ ...target, label: defs.find((d) => d.key === target.group)?.label });
   }, [defense.status, definitions, filters.grouping, openCell]);
+
+  // Drill-down names link to the card when the player is on the slate Tonight loaded
+  const tonightData = tonight.data;
+  const rosterByKey = useMemo(
+    () => new Map((tonightData?.roster ?? []).filter((p) => p.player_key).map((p) => [p.player_key, p])),
+    [tonightData],
+  );
+  const drilldownCardTarget = useCallback(
+    (key) => {
+      const p = key ? rosterByKey.get(key) : null;
+      return p ? tonightCardTarget(p, tonightData) : null;
+    },
+    [rosterByKey, tonightData],
+  );
 
   const season = defense.data?.season || filters.season || seasons.data?.current;
   const { label: statLabel } = statFor(filters.stat);
@@ -178,7 +192,12 @@ export default function ArchetypesPage() {
 
       <ArchetypeLegend definitions={definitions} />
 
-      <CellDrilldown cell={cell} onClose={closeCell} onRetry={cell ? () => openCell(cell) : undefined} />
+      <CellDrilldown
+        cell={cell}
+        onClose={closeCell}
+        onRetry={cell ? () => openCell(cell) : undefined}
+        cardTarget={drilldownCardTarget}
+      />
     </div>
   );
 }

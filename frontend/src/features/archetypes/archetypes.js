@@ -175,3 +175,13 @@ export function edgeExplanation(p) {
   if (c.crowding_factor !== 1) text += ` x ${c.crowding_factor.toFixed(2)} crowding`
   return `${text} = ${formatDelta(p.adjusted_edge, 2)}`
 }
+
+/** Player card target for a Tonight row (or /tonight roster entry), on the slate the table shows (a backtest's night included). */
+export const tonightCardTarget = (p, data) => ({
+  playerId: p.player_id,
+  slateId: data?.slateId ?? null,
+  slateDate: data?.isBacktest ? data.slateDate ?? null : null,
+  name: p.name,
+  headshot: p.headshot ?? null,
+  team: p.team,
+});

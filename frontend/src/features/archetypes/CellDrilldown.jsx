@@ -1,13 +1,29 @@
 import { useMemo } from 'react';
 import { Button, DataTable, EmptyState, Modal, Spinner, Stat } from '../../components/ui';
 import { formatDelta } from './archetypes';
+import PlayerCardTrigger from '../playerCard/PlayerCardTrigger';
 
 const delta = ({ getValue }) => formatDelta(getValue());
 const toneFor = (v) => (v > 0 ? 'text-info' : v < 0 ? 'text-negative' : 'text-fg-muted');
 
-const columns = [
+/**
+ * cardTarget: (player_key) => player card target when that player is on the
+ * working slate, else null (the name stays plain text).
+ */
+const columnsFor = (cardTarget) => [
   { accessorKey: 'game_date', header: 'Date' },
-  { accessorKey: 'player_name', header: 'Player' },
+  {
+    accessorKey: 'player_name',
+    header: 'Player',
+    cell: ({ row }) => {
+      const target = cardTarget?.(row.original.player_key);
+      return target ? (
+        <PlayerCardTrigger target={target} className="font-medium">{row.original.player_name}</PlayerCardTrigger>
+      ) : (
+        row.original.player_name
+      );
+    },
+  },
   { accessorKey: 'team', header: 'Tm' },
   { accessorKey: 'minutes', header: 'Min', meta: { numeric: true }, cell: ({ getValue }) => Number(getValue()).toFixed(0) },
   { accessorKey: 'fp', header: 'FP', meta: { numeric: true }, cell: ({ getValue }) => Number(getValue()).toFixed(1) },
@@ -24,10 +40,14 @@ const columns = [
   { accessorKey: 'fg3m_delta', header: '3PM', meta: { numeric: true }, cell: delta },
 ];
 
-/** Modal listing the player-games behind one heatmap cell. */
-export default function CellDrilldown({ cell, onClose, onRetry }) {
+/**
+ * Modal listing the player-games behind one heatmap cell. Names of players on
+ * the working slate open their card (cardTarget, see columnsFor).
+ */
+export default function CellDrilldown({ cell, onClose, onRetry, cardTarget }) {
   const summary = cell?.data?.summary;
   const games = useMemo(() => cell?.data?.games ?? [], [cell]);
+  const columns = useMemo(() => columnsFor(cardTarget), [cardTarget]);
 
   return (
     <Modal

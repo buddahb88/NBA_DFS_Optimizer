@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import ArchetypesPage from './ArchetypesPage'
 import { archetypesAPI, historicalAPI } from '../../services/api'
 import { useSlate } from '../../context/SlateContext'
+import { PlayerCardContext } from '../playerCard/playerCardContext'
 
 vi.mock('../../services/api', () => ({
   historicalAPI: { getSeasons: vi.fn() },
@@ -243,3 +244,77 @@ describe('ArchetypesPage', () => {
   })
 })
 
+describe('ArchetypesPage player card links', () => {
+  const ROSTER = [
+    { player_id: '1', player_key: 'guard one', name: 'Guard One', team: 'MIA', headshot: 'g1.png' },
+    { player_id: '2', player_key: 'wing two', name: 'Wing Two', team: 'BOS', headshot: null },
+    { player_id: '3', player_key: 'bench three', name: 'Bench Three', team: 'MIA', headshot: null },
+  ]
+  const CELL_GAMES = {
+    ...GAMES,
+    games: [
+      { ...GAMES.games[0], game_id: 'g1', player_key: 'guard one', player_name: 'Guard One' },
+      { ...GAMES.games[0], game_id: 'g2', player_key: 'gone guy', player_name: 'Gone Guy' },
+    ],
+  }
+  const renderWithCard = () => {
+    const open = vi.fn()
+    render(
+      <PlayerCardContext.Provider value={{ open, close: vi.fn(), target: null }}>
+        <MemoryRouter initialEntries={['/archetypes']}><ArchetypesPage /></MemoryRouter>
+      </PlayerCardContext.Provider>,
+    )
+    return open
+  }
+
+  beforeEach(() => {
+    archetypesAPI.getTonight.mockResolvedValue({ data: { ...TONIGHT, slateId: 's1', isBacktest: false, roster: ROSTER } })
+    archetypesAPI.getCellGames.mockResolvedValue({ data: CELL_GAMES })
+  })
+
+  it('Tonight names open the card on the shown slate; sorting still works', async () => {
+    const open = renderWithCard()
+    fireEvent.click(screen.getByRole('tab', { name: 'Tonight' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Open Guard One card' }))
+    expect(open).toHaveBeenCalledWith({ playerId: '1', slateId: 's1', slateDate: null, name: 'Guard One', headshot: null, team: 'MIA' })
+
+    const names = () => screen.getAllByRole('row').slice(1).map((r) => within(r).getAllByRole('cell')[0].textContent)
+    fireEvent.click(screen.getByRole('button', { name: 'Salary' }))
+    expect(names()).toEqual(['Wing Two', 'Guard One'])
+    fireEvent.click(screen.getByRole('button', { name: 'Salary' }))
+    expect(names()).toEqual(['Guard One', 'Wing Two'])
+    expect(open).toHaveBeenCalledTimes(1)
+  })
+
+  it('backtest: Tonight names open the card for that night', async () => {
+    const BACKTEST = { slateDate: '2026-10-21', slateId: '29805', site: 'fanduel', players: 242 }
+    useSlate.mockReturnValue({
+      ...slateContext({ slate_id: 's1', name: 'Main' }),
+      backtests: [BACKTEST], backtest: BACKTEST, isBacktest: true, setBacktestDate: vi.fn(),
+      rangeMode: 'model', setRangeMode: vi.fn(), workSlateId: '29805',
+    })
+    archetypesAPI.getTonight.mockResolvedValue({
+      data: { ...TONIGHT, slateId: '29805', isBacktest: true, slateDate: '2026-10-21', endDate: '2026-10-20', roster: ROSTER },
+    })
+    const open = renderWithCard()
+    fireEvent.click(screen.getByRole('tab', { name: 'Tonight' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Open Wing Two card' }))
+    expect(open).toHaveBeenCalledWith(expect.objectContaining({ playerId: '2', slateId: '29805', slateDate: '2026-10-21' }))
+  })
+
+  it('drill-down links only players on the slate', async () => {
+    const open = renderWithCard()
+    // Tonight (and its roster) loads with the page, before the Tonight tab is opened
+    await waitFor(() => expect(archetypesAPI.getTonight).toHaveBeenCalled())
+    fireEvent.click(await screen.findByRole('button', { name: /NYK vs Scoring Guard \/ Wing: \+2\.4 FP/ }))
+    const dialog = await screen.findByRole('dialog')
+    const link = await within(dialog).findByRole('button', { name: 'Open Guard One card' })
+    expect(within(dialog).getByText('Gone Guy').closest('button')).toBeNull()
+    expect(within(dialog).queryByRole('button', { name: 'Open Gone Guy card' })).not.toBeInTheDocument()
+
+    fireEvent.click(link)
+    expect(open).toHaveBeenCalledWith({ playerId: '1', slateId: 's1', slateDate: null, name: 'Guard One', headshot: 'g1.png', team: 'MIA' })
+    // The drill-down stays open under the card
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+  })
+})
