@@ -229,3 +229,49 @@ describe('own model service output', () => {
     assert.equal(playerOutput({ ...entry, slate: { salary: 9000, adjusted: null } }, ownPred, weights).blend_point, 40);
   });
 });
+
+describe('own model backtest helpers', () => {
+  test('tierBiasCorrection: a slate is shifted by the other slates\' median tier residual, shrunk', async () => {
+    const m4 = await import('../src/services/modelEval/ownModelBacktest.js');
+    const rows = [];
+    // Cheap players come in 4 over the blend on every slate; expensive ones match it
+    for (const s of ['s1', 's2', 's3']) {
+      for (let i = 0; i < 50; i++) {
+        rows.push({ ...row(s, 10, 10, 14, { salary: 3500 }), date: s });
+        rows.push({ ...row(s, 40, 40, 40, { salary: 9000 }), date: s });
+      }
+    }
+    const name = 'rotowire_adjusted';
+    const tb = m4.tierBiasCorrection(rows, name, { shrink: 100 });
+    assert.equal(tb.name, 'rotowire_adjusted+tierBias');
+    // Each fold trains on 100 cheap rows: 4 x 100 / 200
+    for (const r of rows.filter(x => x.salary === 3500)) close(r.preds[tb.name].dk_points, 12, 1e-6);
+    for (const r of rows.filter(x => x.salary === 9000)) close(r.preds[tb.name].dk_points, 40, 1e-6);
+    close(tb.full['<4K'].offset, 4 * 150 / 250, 1e-3);
+    assert.equal(tb.full['8K+'].offset, 0);
+    // Poison s1's outcomes: s1's corrected points must not move
+    const before = rows.filter(r => r.slateId === 's1').map(r => r.preds[tb.name].dk_points);
+    const poisoned = rows.map(r => ({ ...r, preds: { [name]: r.preds[name] }, actual: r.slateId === 's1' ? { ...r.actual, dk: 99 } : r.actual }));
+    m4.tierBiasCorrection(poisoned, name, { shrink: 100 });
+    assert.deepEqual(poisoned.filter(r => r.slateId === 's1').map(r => r.preds[tb.name].dk_points), before);
+  });
+
+  test('weightsArtifact: the chosen (or named) blend, the blend\'s "ours" and its LOO MAE', async () => {
+    const m4 = await import('../src/services/modelEval/ownModelBacktest.js');
+    const w = (scheme) => ({ kind: 'points', scheme, n: 10, global: 0.6, segments: {}, shrink: 100 });
+    const report = {
+      generatedAt: '2026-11-04T00:00:00.000Z', signature: 'sig', own: 'own_mean_mincorr',
+      slates: [{ date: '2026-11-01', slateId: '1' }],
+      blend: { chosen: 'blend_points_global', weights: { blend_points_global: w('global'), blend_points_minutesGap: w('minutesGap') }, stability: { blend_points_global: {}, blend_points_minutesGap: {} } },
+      leaderboard: { withDnp: [{ projector: 'blend_points_global', mae: 7.5 }, { projector: 'rotowire_adjusted', mae: 7.7 }, { projector: 'own_mean_mincorr', mae: 7.9 }, { projector: 'own_mean', mae: 8.1 }] },
+      disagreement: { points: { buckets: {} }, minutes: { buckets: {} } }
+    };
+    const a = m4.weightsArtifact(report);
+    assert.equal(a.blend.name, 'blend_points_global');
+    assert.equal(a.own, 'own_mean_mincorr');
+    assert.deepEqual(a.looMae.map(x => x.projector), ['blend_points_global', 'rotowire_adjusted', 'own_mean_mincorr']);
+    assert.equal(m4.weightsArtifact(report, 'blend_points_minutesGap').blend.scheme, 'minutesGap');
+    // Older reports (no own): own_mean
+    assert.equal(m4.weightsArtifact({ ...report, own: undefined }).own, 'own_mean');
+  });
+});

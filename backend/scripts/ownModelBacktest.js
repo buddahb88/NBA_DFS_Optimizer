@@ -7,7 +7,11 @@
  *
  *   npm run backtest:own-model -- [--slate-dates 2026-10-21,...] [--no-lineups] [--no-gpp]
  *     [--field-size 5000] [--gpp-seeds 1] [--iterations 1000] [--replay] [--no-cache] [--out report.json]
+ *     [--own own_mean|own_mean_mincorr]   the blends' "ours" (default: own_mean_mincorr when the minutes correction is live)
  *     [--write-weights]   also write src/services/modelEval/ownModelWeights.json (the live service's blend)
+ *     [--tier-bias median,mean|none]   per tier bias correction variants on every blend (default median)
+ *     [--lineup-sources a,b]   extra lineup sources (any scored projector / blend name)
+ *     [--blend <name>]    the blend --write-weights writes (default: the chosen one, lowest LOO MAE incl. DNP)
  *     [--json]
  */
 
@@ -46,9 +50,31 @@ function print(report, file) {
   console.log('\n═══════════════════════════════════════════════════════════════');
   console.log(`  OWN MODEL x ROTOWIRE (data ${report.signature})`);
   console.log('═══════════════════════════════════════════════════════════════');
-  console.log(`Slates: ${report.slates.map(s => `${s.date} (${s.played}/${s.players})`).join(', ')}`);
+  console.log(`Slates (${report.slates.length}): ${report.slates.map(s => `${s.date} (${s.played}/${s.players})`).join(', ')}`);
+  console.log(`Ours: ${report.own}${report.correction ? ` (correction LOSO, global f ${fmt(report.correction.global)})` : ''}`);
   printBoard(`LEAVE-ONE-SLATE-OUT incl. DNP (${L.common} rows)`, L.withDnp, L.paired.withDnp, L.pairedBySlate.withDnp);
   printBoard('LEAVE-ONE-SLATE-OUT played', L.played, L.paired.played, L.pairedBySlate.played);
+
+  for (const [label, v] of [['LIVE WEIGHTS (fixed)', L.vsLive], ['LIVE SCHEME (refit LOSO)', L.vsLiveScheme]]) {
+    if (!v) continue;
+    console.log(`
+VS ${label} = ${v.vs}: MAE diff (negative = better) [95% CI], by slate`);
+    console.log(`${'projector'.padEnd(40)}${'incl. DNP'.padEnd(30)}${'played'.padEnd(30)}${`unseen slates (${v.unseen.slates}) incl. DNP`.padEnd(30)}by row incl. DNP`);
+    for (const p of v.withDnp.filter(x => x.projector.startsWith('blend_') || x.projector === 'rotowire_adjusted' || x.projector === report.own)) {
+      const pl = v.played.find(x => x.projector === p.projector);
+      const un = v.unseen.withDnp.find(x => x.projector === p.projector);
+      const rw = v.rows.find(x => x.projector === p.projector);
+      console.log(`${p.projector.padEnd(40)}${ci(p).padEnd(30)}${ci(pl).padEnd(30)}${ci(un).padEnd(30)}${ci(rw)}`);
+    }
+  }
+  const tierNames = ['rotowire_adjusted', report.own, 'live_weights', report.blend.live?.name, chosen, chosen && `${chosen}+tierBias`, chosen && `${chosen}+tierMean`]
+    .filter(Boolean).filter((n, i, a) => a.indexOf(n) === i && L.tiers.withDnp?.[0]?.mae[n] !== undefined);
+  for (const field of ['withDnp', 'played']) {
+    console.log(`
+BY SALARY TIER (${field}): MAE / bias (projected - actual)`);
+    console.log(`${'tier'.padEnd(10)}${pad('n', 6)}${tierNames.map(n => pad(n.replace('rotowire_', 'rw_').replace('blend_', 'b_').slice(0, 24), 26)).join('')}`);
+    for (const g of L.tiers[field] ?? []) console.log(`${g.tier.padEnd(10)}${pad(g.n, 6)}${tierNames.map(n => pad(`${fmt(g.mae[n])} / ${fmt(g.bias[n])}`, 26)).join('')}`);
+  }
 
   const shown = ['rotowire_raw', 'rotowire_adjusted', 'rates_v1', 'own_mean', chosen].filter(Boolean);
   console.log('\nPER SLATE MAE incl. DNP');
@@ -129,11 +155,18 @@ try {
     fieldSize: argValue('--field-size') ? Number(argValue('--field-size')) : undefined,
     iterations: argValue('--iterations') ? Number(argValue('--iterations')) : undefined,
     replay: args.includes('--replay'),
+    own: argValue('--own') ?? undefined,
+    lineupSources: [...(argValue('--lineup-sources')?.split(',') ?? []), ...(argValue('--blend') ? [argValue('--blend')] : [])],
+    tierBias: argValue('--tier-bias') ? (argValue('--tier-bias') === 'none' ? [] : argValue('--tier-bias').split(',')) : undefined,
     cache: !args.includes('--no-cache'),
     onProgress: (m) => process.stderr.write(`  ${m}\n`)
   });
   const file = m4.writeOwnModelReport(report, argValue('--out'));
-  if (args.includes('--write-weights')) console.error(`Weights: ${m4.writeWeights(report)}`);
+  if (args.includes('--write-weights')) {
+    const name = argValue('--blend') ?? report.blend.chosen;
+    if (!report.blend.weights[name]) throw new Error(`--blend ${name}: not a fitted blend (${Object.keys(report.blend.weights).join(', ')})`);
+    console.error(`Weights (${name}): ${m4.writeWeights(report, undefined, name)}`);
+  }
   if (args.includes('--json')) console.log(JSON.stringify(report, null, 2));
   else print(report, file);
 } catch (error) {
