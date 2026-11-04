@@ -136,6 +136,7 @@ describe('GET /api/players/:slateId/verdicts (backtest)', () => {
     assert.equal(b.slateDate, PAST);
     assert.equal(b.isBacktest, true);
     assert.ok(b.generatedAt);
+    assert.deepEqual(b.thresholds, { core: 66, playable: 54, pivot: 42 });
     const entries = Object.entries(b.players);
     assert.equal(entries.length, pool.length);
     for (const [id, e] of entries) {

@@ -9,7 +9,7 @@
  * as getPlayerCard, so the lineup column and the card can never disagree.
  *
  * Result: { slateId, slateDate, site, isBacktest, projectionSource,
- * generatedAt, dataVersion, cached, timings, warnings,
+ * thresholds (score cut-offs per verdict), generatedAt, dataVersion, cached, timings, warnings,
  * players: { [slate row id]: { id, player_id, player_key, name, team, salary,
  *   cash: { verdict, score, confidence }, gpp: {...}, headline } } }.
  * detail: true adds per player { projection: { active, rotowire, ours, blend,
@@ -32,6 +32,7 @@ import { projectionSanityConfig } from '../../config/projectionSanity.js';
 import { resolveSlate, SlateSourceError } from '../slateSource.js';
 import { dataSignature } from '../modelEval/modelEvalService.js';
 import { prepareSource, loadHistory, assemblePlayer, slatePlayerKey } from './playerCardService.js';
+import { THRESHOLDS } from './verdict.js';
 
 const TTL_MS = { live: 10 * 60 * 1000, backtest: 6 * 60 * 60 * 1000 };
 const CACHE_LIMIT = 40;
@@ -158,6 +159,7 @@ export async function getSlateVerdicts({
           isBacktest: Boolean(source.isBacktest),
           asOf: prep.asOf,
           projectionSource: chosen,
+          thresholds: THRESHOLDS,
           generatedAt: new Date().toISOString(),
           dataVersion: version,
           timings,
