@@ -6,6 +6,7 @@ import {
   GameLogChart,
   LeverageMap,
   MatchupBars,
+  MinutesBand,
   MinutesChart,
   OutcomeRange,
   RoleRadar,
@@ -256,6 +257,37 @@ function ProjectionSection({ card }) {
   );
 }
 
+const UPSIDE_TONE = (score) => (score >= 50 ? 'positive' : score >= 25 ? 'info' : 'fg-subtle');
+
+function MinutesUpsideSection({ card }) {
+  const u = card.projection.minutes_upside;
+  if (!u) return null;
+  const c = u.correction;
+  return (
+    <Section title="Minutes upside" aside={isNum(u.gap) ? `RotoWire ${fmtSigned(u.gap)} min vs ours` : null}>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-[11rem_1fr]">
+        <div className="space-y-2">
+          <ScoreMeter label="Upside score" value={u.score} tone={UPSIDE_TONE(u.score)} />
+          {u.reasons?.length > 0 && (
+            <ul className="flex flex-wrap gap-1" aria-label="Minutes upside reasons">
+              {u.reasons.map((r) => (
+                <li key={r}><Badge size="sm" tone={u.score >= 50 ? 'positive' : 'neutral'}>{r}</Badge></li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <MinutesBand upside={u} actual={card.actual?.minutes} />
+      </div>
+      <p className="mt-2 text-2xs text-fg-muted">
+        {c
+          ? <>Our minutes moved <span className="num font-semibold text-fg">{Math.round(c.factor * 100)}%</span> of the way to RotoWire ({c.bucket}, {c.band}): on 14 saved slates the actual landed between the two.</>
+          : 'When RotoWire is 3+ minutes above us the actual has landed about two thirds of the way to RotoWire.'}
+        {' '}Score 50+: 28% beat our minutes by 8+ on the saved slates (8% overall).
+      </p>
+    </Section>
+  );
+}
+
 function FormSection({ card }) {
   const f = card.form;
   const c = f.consistency;
@@ -488,6 +520,7 @@ export default function PlayerCardView({ card, onClose, controls, onAskAi }) {
         </div>
         <VerdictSection card={card} onAskAi={onAskAi} />
         <ProjectionSection card={card} />
+        <MinutesUpsideSection card={card} />
         <FormSection card={card} />
         <div className="grid gap-3 lg:grid-cols-2">
           <MatchupSection card={card} />

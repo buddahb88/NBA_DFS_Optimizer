@@ -4,6 +4,7 @@ import { formatSalary } from './lineupMath';
 import { formatActual } from '../slate/backtest';
 import ResultBadge from '../slate/ResultBadge';
 import ProjectionCell from '../slate/ProjectionCell';
+import MinutesUpsideCell from '../slate/MinutesUpsideCell';
 import PlayerCardTrigger from '../playerCard/PlayerCardTrigger';
 import InjuryRiskBadge from '../playerPool/InjuryRiskBadge';
 
@@ -96,6 +97,14 @@ export default function PlayerPoolTable({ players, locked, excluded, onToggleLoc
         meta: { numeric: true },
       },
       { id: 'own', header: 'Own', accessorFn: (p) => p.rostership || 0, cell: (c) => `${c.getValue().toFixed(1)}%`, meta: { numeric: true } },
+      {
+        id: 'minUpside',
+        header: 'Min↑',
+        // Players without a score (RotoWire source) sort last
+        accessorFn: (p) => (Number.isFinite(Number(p.minutes_upside)) && p.minutes_upside !== null ? Number(p.minutes_upside) : -1),
+        cell: (c) => <MinutesUpsideCell player={c.row.original} />,
+        meta: { numeric: true },
+      },
     ],
     [locked, excluded, onToggleLock, onToggleExclude, showActual],
   );

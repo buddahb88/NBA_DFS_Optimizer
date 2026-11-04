@@ -3,6 +3,7 @@ import { bandTone, injuryCode } from './playerPool';
 import InjuryRiskBadge from './InjuryRiskBadge';
 import { ControlButton, Dash, IconBan, IconLock, MatchupCell, Num, NumberCell, OwnershipCell } from './cells';
 import ProjectionCell from '../slate/ProjectionCell';
+import MinutesUpsideCell from '../slate/MinutesUpsideCell';
 import PlayerCardTrigger from '../playerCard/PlayerCardTrigger';
 
 // tanstack sorts `undefined` last with sortUndefined: 'last'
@@ -181,6 +182,14 @@ export function buildColumns({ stats, onUpdate, cardTarget }) {
       ...numericCol,
       meta: { numeric: true, label: 'Minutes' },
       cell: ({ getValue }) => <Num value={getValue()} digits={0} />,
+    },
+    {
+      id: 'minUpside',
+      header: 'Min↑',
+      accessorFn: (p) => orUndef(p.minutes_upside),
+      ...numericCol,
+      meta: { numeric: true, label: 'Minutes upside' },
+      cell: ({ row }) => <MinutesUpsideCell player={row.original} />,
     },
     {
       id: 'vegas',

@@ -478,3 +478,68 @@ export function ScoreMeter({ label, value, tone = 'accent' }) {
     </div>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Minutes band: our p10-p90 minutes, ours (and before the RotoWire correction),
+// RotoWire's minutes, the actual on a backtest night
+// ---------------------------------------------------------------------------
+
+export function MinutesBand({ upside, actual }) {
+  const u = upside ?? {};
+  const marks = [
+    { key: 'ours', label: 'Ours', value: u.ours, className: 'bg-fg', solid: true },
+    { key: 'raw', label: 'Before correction', value: isNum(u.ours_raw) && isNum(u.ours) && Math.abs(u.ours_raw - u.ours) >= 0.5 ? u.ours_raw : null, className: 'border-l-2 border-dashed border-fg-muted' },
+    { key: 'rw', label: 'RotoWire', value: u.rotowire, className: 'border-l-2', style: { borderColor: 'rgb(var(--chart-1))' } },
+  ].filter((m) => isNum(m.value));
+  const hasBand = isNum(u.p10) && isNum(u.p90);
+  if (!hasBand && !marks.length) return <ChartEmpty>No minutes projection</ChartEmpty>;
+  const values = [u.p10, u.p90, actual, ...marks.map((m) => m.value)].filter(isNum).map(Number);
+  const lo = Math.max(0, Math.floor((Math.min(...values) - 3) / 5) * 5);
+  const hi = Math.min(48, Math.ceil((Math.max(...values) + 3) / 5) * 5);
+  const at = (x) => pctAlong(Number(x), lo, hi);
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map((t) => Math.round(lo + t * (hi - lo)));
+  return (
+    <div className="space-y-2 pt-4" role="img" aria-label={`Minutes: ours ${fmt(u.ours)}${hasBand ? `, p10 ${fmt(u.p10)} to p90 ${fmt(u.p90)}` : ''}, RotoWire ${fmt(u.rotowire)}`}>
+      <div className="relative h-8">
+        <div className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-line" />
+        {hasBand && (
+          <div
+            className="absolute top-1.5 h-5 rounded"
+            style={{
+              left: `${at(u.p10)}%`,
+              width: `${Math.max(1, at(u.p90) - at(u.p10))}%`,
+              background: 'linear-gradient(90deg, rgb(var(--chart-2) / 0.15), rgb(var(--chart-2) / 0.5) 50%, rgb(var(--chart-2) / 0.15))',
+              border: '1px solid rgb(var(--chart-2) / 0.6)',
+            }}
+            title={`Our minutes p10 ${fmt(u.p10)} · p90 ${fmt(u.p90)}`}
+          />
+        )}
+        {marks.map((m) => (
+          <div key={m.key} className={cn('absolute top-0 h-8', m.solid ? 'w-0.5 rounded' : 'w-0', m.className)} style={{ ...m.style, left: `${at(m.value)}%` }} title={`${m.label} ${fmt(m.value)}`} />
+        ))}
+        {isNum(actual) && (
+          <div className="absolute inset-y-[-4px] border-l-2 border-accent" style={{ left: `${at(actual)}%` }}>
+            <span className={cn('absolute -top-4 whitespace-nowrap rounded bg-accent px-1 text-[10px] font-semibold text-accent-fg', at(actual) > 80 ? 'right-1' : 'left-1')}>Actual {fmt(actual, 0)}</span>
+          </div>
+        )}
+      </div>
+      <div className="flex justify-between text-[10px] text-fg-subtle">
+        {ticks.map((t) => <span key={t} className="num">{t}</span>)}
+      </div>
+      <ul className="flex flex-wrap gap-x-3 gap-y-1 text-2xs text-fg-muted">
+        {hasBand && (
+          <li className="flex items-center gap-1.5">
+            <span className="inline-block h-2.5 w-3.5 rounded-sm" style={{ background: 'rgb(var(--chart-2) / 0.45)', border: '1px solid rgb(var(--chart-2) / 0.7)' }} />
+            Ours p10–p90 <span className="num text-fg">{fmt(u.p10, 0)}–{fmt(u.p90, 0)}</span>
+          </li>
+        )}
+        {marks.map((m) => (
+          <li key={m.key} className="flex items-center gap-1.5">
+            <span className={cn('inline-block h-3', m.solid ? 'w-0.5 bg-fg' : 'w-0', !m.solid && m.className)} style={m.style} />
+            {m.label} <span className="num text-fg">{fmt(m.value)}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
