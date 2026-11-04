@@ -23,6 +23,10 @@
  *   projection_rotowire   RotoWire after the sanity layer (as read)
  *   projection_ours, projection_blend, ours_minutes, p_play
  *   projection_fade       FADE call or null (fadeCall)
+ *   minutes upside (Q2): ours_minutes_p10 / ours_minutes_p90 (our minutes band),
+ *   rw_minutes_gap (RotoWire's posted minutes - ours, before any correction),
+ *   minutes_upside (0-100) and minutes_upside_reasons, minutes_correction
+ *   ({ factor, bucket, band } when the live correction moved ours, else null)
  * Players RotoWire projects at 0 (ruled out) keep their row: the pool is
  * RotoWire's, as with the sanity layer.
  */
@@ -63,6 +67,18 @@ export function fadeCall(own, { threshold = FADE_THRESHOLD } = {}) {
   };
 }
 
+/** The minutes upside fields of an own-model row (nulls without one). */
+export function minutesUpsideFields(own) {
+  return {
+    ours_minutes_p10: own?.minutes_p10 ?? null,
+    ours_minutes_p90: own?.minutes_p90 ?? null,
+    rw_minutes_gap: own?.rw_minutes_gap ?? null,
+    minutes_upside: own?.minutes_upside ?? null,
+    minutes_upside_reasons: own?.minutes_upside_reasons ?? [],
+    minutes_correction: own?.minutes_correction ?? null
+  };
+}
+
 const scaled = (v, ratio) => (v === null || v === undefined || !Number.isFinite(Number(v)) ? v : round(Number(v) * ratio));
 
 /** The source's { point, p10, p90, pBoom } from an own-model row, or null when it has none. */
@@ -88,7 +104,8 @@ export function applySource(player, own, source, { reason = null, threshold = FA
     projection_blend: own?.blend_point ?? null,
     ours_minutes: own?.ours_minutes ?? null,
     p_play: own?.p_play ?? null,
-    projection_fade: own ? fadeCall(own, { threshold }) : null
+    projection_fade: own ? fadeCall(own, { threshold }) : null,
+    ...minutesUpsideFields(own)
   };
   // The pool is RotoWire's: a ruled-out player keeps his 0
   if (!(rotowire > 0)) return { ...player, ...fields, projection_source: 'rotowire', projection_fallback: false };
@@ -194,7 +211,8 @@ export function chatInjuryFields(p) {
 
 export const SOURCE_FIELDS = Object.freeze([
   'projection_source', 'projection_requested', 'projection_fallback', 'projection_fallback_reason',
-  'projection_rotowire', 'projection_ours', 'projection_blend', 'ours_minutes', 'p_play', 'projection_fade'
+  'projection_rotowire', 'projection_ours', 'projection_blend', 'ours_minutes', 'p_play', 'projection_fade',
+  'ours_minutes_p10', 'ours_minutes_p90', 'rw_minutes_gap', 'minutes_upside', 'minutes_upside_reasons', 'minutes_correction'
 ]);
 
 /** The layer's fields of a row ({} for a RotoWire read), for rows rebuilt field by field. */
@@ -219,6 +237,7 @@ export function chatSourceFields(p) {
     blendProjection: p.projection_blend,
     oursMinutes: p.ours_minutes,
     pPlay: p.p_play,
+    ...(Number.isFinite(p.minutes_upside) ? { minutesUpside: p.minutes_upside, rwMinutesGap: p.rw_minutes_gap, oursMinutesP90: p.ours_minutes_p90 } : {}),
     ...(fade ? { fade: { pointsDiff: fade.points_diff, hitRate: fade.hit_rate, calls: fade.n, note: fade.text } } : {}),
     ...chatInjuryFields(p)
   };
@@ -226,5 +245,5 @@ export function chatSourceFields(p) {
 
 export default {
   FADE_THRESHOLD, SOURCE_FIELDS, INJURY_FIELDS, fadeCall, sourceNumbers, applySource, applyInjuryRisk,
-  pickSourceFields, pickInjuryFields, chatSourceFields, chatInjuryFields
+  pickSourceFields, pickInjuryFields, chatSourceFields, chatInjuryFields, minutesUpsideFields
 };

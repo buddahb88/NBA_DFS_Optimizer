@@ -64,6 +64,27 @@ const num = (v) => (v === null || v === undefined || v === '' || !Number.isFinit
 const r1 = (x) => (x === null || !Number.isFinite(x) ? null : Math.round(x * 10) / 10 + 0);
 const r2 = (x) => (x === null || !Number.isFinite(x) ? null : Math.round(x * 100) / 100 + 0);
 const r3 = (x) => (x === null || !Number.isFinite(x) ? null : Math.round(x * 1000) / 1000 + 0);
+/**
+ * The card's "Minutes upside" block from the own-model row (else the slate
+ * row's source-layer fields): { score, reasons, ours, ours_raw, p10, p90,
+ * rotowire, gap, correction } or null when neither carries a score.
+ */
+export function minutesUpsideBlock(own, p = {}) {
+  const score = num(own?.minutes_upside) ?? num(p.minutes_upside);
+  if (score === null) return null;
+  return {
+    score,
+    reasons: own?.minutes_upside_reasons ?? p.minutes_upside_reasons ?? [],
+    ours: num(own?.ours_minutes) ?? num(p.ours_minutes),
+    ours_raw: num(own?.ours_minutes_raw),
+    p10: num(own?.minutes_p10) ?? num(p.ours_minutes_p10),
+    p90: num(own?.minutes_p90) ?? num(p.ours_minutes_p90),
+    rotowire: num(own?.rotowire_minutes_posted) ?? num(p.projected_minutes),
+    gap: num(own?.rw_minutes_gap) ?? num(p.rw_minutes_gap),
+    correction: own?.minutes_correction ?? p.minutes_correction ?? null,
+  };
+}
+
 const dayBefore = (date) => new Date(Date.parse(`${date}T00:00:00Z`) - 86400000).toISOString().slice(0, 10);
 
 function remember(map, key, value) {
@@ -285,6 +306,7 @@ export function assemblePlayer(p, prep, history) {
     ours_minutes: num(own?.ours_minutes) ?? num(p.ours_minutes),
     rotowire_minutes: num(p.projected_minutes),
     p_play: num(own?.p_play) ?? num(p.p_play),
+    minutes_upside: minutesUpsideBlock(own, p),
     fade,
     ours_diff: num(own?.disagreement?.points_diff),
     floor: num(p.floor),

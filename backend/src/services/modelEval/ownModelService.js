@@ -14,6 +14,13 @@
  *     --write-weights); null without that file
  *   disagreement  ours vs RotoWire (sanity-adjusted) in minutes and DK points,
  *     the lean bucket and how that bucket's calls did on the saved slates
+ *   minutes upside (Q2): minutes_p10 / minutes_p90 (ours), rw_minutes_gap
+ *     (RotoWire's posted minutes - our conditional minutes, before any
+ *     correction), minutes_upside 0-100 + reasons (minutesUpside.js)
+ *   minutes correction (Q2): when minutesCorrectionParams.json is `live` (the
+ *     corrected model beat own_mean leave-one-slate-out), our conditional
+ *     minutes move toward RotoWire's first (minutesCorrection.js) and every
+ *     number above follows; ours_minutes_raw / minutes_correction show it
  *
  * The models are the harness fits (2024-25, the evaluated configuration),
  * cached on disk per training data; the feature store is cached in memory per
@@ -36,6 +43,7 @@ import { slateDay } from './evaluate.js';
 import { createOwnModelProjector, ownPrediction, prepareOwnMaps } from './ownModel.js';
 import { blendPrediction, leanBucket } from './blend.js';
 import { WEIGHTS_FILE } from './ownModelBacktest.js';
+import { PARAMS_FILE as CORRECTION_FILE, readCorrectionParams } from './minutesCorrection.js';
 import { projectionSanityConfig } from '../../config/projectionSanity.js';
 
 export const MODEL_VERSION = '1';
@@ -141,6 +149,16 @@ export function playerOutput(entry, ownPred, weights) {
     p_boom: round(ownPred?.p_boom, 3),
     boom_at: round(ownPred?.boom_at, 1),
     p_dd: round(ownPred?.p_dd, 3),
+    ours_minutes_raw: round(ownPred?.minutes_raw ?? ownPred?.minutes, 1),
+    minutes_p10: round(ownPred?.minutes_p10, 1),
+    minutes_p90: round(ownPred?.minutes_p90, 1),
+    rotowire_minutes_posted: round(s.rotowireMinutes, 1),
+    rw_minutes_gap: round(ownPred?.rw_minutes_gap, 1),
+    minutes_correction: ownPred?.minutes_correction?.applied
+      ? { factor: round(ownPred.minutes_correction.factor, 3), bucket: ownPred.minutes_correction.bucket, band: ownPred.minutes_correction.band }
+      : null,
+    minutes_upside: ownPred ? ownPred.minutes_upside ?? null : null,
+    minutes_upside_reasons: ownPred?.minutes_upside_reasons ?? [],
     blend_point: round(b?.dk_points),
     blend_p10: round(b?.p10),
     blend_p90: round(b?.p90),
@@ -157,17 +175,24 @@ export function playerOutput(entry, ownPred, weights) {
   };
 }
 
+/** The correction the live service applies: the params file when it is `live`, else none. */
+export function liveCorrection(file = CORRECTION_FILE) {
+  const p = readCorrectionParams(file);
+  return p?.live ? p : null;
+}
+
 /**
  * Own-model projections for a slate. options: { site, slateDate, source,
- * refresh, weightsFile, cacheDir, now }. source: an already resolved slate
+ * refresh, weightsFile, correctionFile, cacheDir, now }. source: an already resolved slate
  * (slateSource.resolveSlate) - the projection source layer passes its own,
  * so a backtest night projects as of that date; slateDate resolves a past
  * night's saved slate. Returns { slateId, date, site, label, generatedAt, cached,
- * weights: { name, generatedAt, slates } | null, timings, players }.
+ * weights: { name, generatedAt, slates } | null, minutesCorrection: { generatedAt,
+ * slates } | null (applied), timings, players }.
  */
 export async function projectSlateOwnModel(slateId, {
   site = null, slateDate = null, source: resolved = null, refresh = false, weightsFile = WEIGHTS_FILE,
-  cacheDir = DEFAULT_CACHE_DIR, now = new Date()
+  correctionFile = CORRECTION_FILE, cacheDir = DEFAULT_CACHE_DIR, now = new Date()
 } = {}) {
   const tStart = Date.now();
   const timings = {};
@@ -175,10 +200,11 @@ export async function projectSlateOwnModel(slateId, {
   if (!source) throw Object.assign(new Error('No slate'), { status: 404 });
   const siteKey = getSiteConfig(source.site).key;
   const weights = readWeights(weightsFile);
+  const correction = liveCorrection(correctionFile);
   const signature = await dataSignature();
   // RotoWire "adjusted" (the blend's and the fade's comparison) follows the sanity components
   const sanityKey = JSON.stringify(projectionSanityConfig());
-  const cacheKey = [source.slateId, source.slateDate, siteKey, signature, await slateSignature(source), weights?.generatedAt ?? 'none', sanityKey].join('|');
+  const cacheKey = [source.slateId, source.slateDate, siteKey, signature, await slateSignature(source), weights?.generatedAt ?? 'none', correction?.generatedAt ?? 'no-correction', sanityKey].join('|');
   if (!refresh && results.has(cacheKey)) {
     return { ...results.get(cacheKey), cached: true, timings: { totalMs: ms(tStart) } };
   }
@@ -219,7 +245,7 @@ export async function projectSlateOwnModel(slateId, {
   const maps = prepareOwnMaps(dateCtx, models);
   const out = players.map((p, i) => {
     const ctx = { ...dateCtx, player: contexts[i], slate: p.slate };
-    const own = ownPrediction(ctx, maps, models, { minutesGrid: weights?.blend?.kind === 'minutes' ? undefined : [] });
+    const own = ownPrediction(ctx, maps, models, { minutesGrid: weights?.blend?.kind === 'minutes' ? undefined : [], correction });
     const teammateOut = contexts[i].teamOut.some(o => o.expectedMinutes >= TEAMMATE_OUT_MINUTES) ? 'teammate out' : 'none out';
     return playerOutput({ ...p, teammateOut }, own, weights);
   }).sort((a, b) => (b.blend_point ?? b.ours_mean ?? 0) - (a.blend_point ?? a.ours_mean ?? 0));
@@ -236,6 +262,7 @@ export async function projectSlateOwnModel(slateId, {
     cached: false,
     signature,
     weights: weights?.blend ? { name: weights.blend.name, kind: weights.blend.kind, scheme: weights.blend.scheme, generatedAt: weights.generatedAt, slates: weights.slates } : null,
+    minutesCorrection: correction ? { generatedAt: correction.generatedAt, slates: correction.slates, looMae: correction.looMae ?? null } : null,
     timings,
     players: out
   };
@@ -251,4 +278,4 @@ export function clearOwnModelCache() {
   results.clear();
 }
 
-export default { projectSlateOwnModel, playerOutput, readWeights, clearOwnModelCache };
+export default { projectSlateOwnModel, playerOutput, readWeights, liveCorrection, clearOwnModelCache };
