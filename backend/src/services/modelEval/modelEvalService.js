@@ -200,6 +200,7 @@ const ms = (t0) => Date.now() - t0;
  * @param {Object} options
  * @param {'replay'|'slate'|'both'} [options.mode='both']
  * @param {string[]} [options.projectors] - registered names (default: all)
+ * @param {Object} [options.projectorOptions] - { name: factory options }; a projector run with options is not cached
  * @param {string[]} [options.seasons] - replay seasons (default: all)
  * @param {string} [options.from] / [options.to] - replay date range
  * @param {string[]} [options.slateDates] - limit slate mode to these dates
@@ -234,9 +235,10 @@ export async function runModelEval(options = {}) {
 
   const names = o.projectors?.length ? o.projectors : DEFAULT_PROJECTORS;
   const caches = new Map();
+  const projectorOptions = o.projectorOptions ?? {};
   const projectors = names.map(name => {
-    const p = createProjector(name);
-    if (!o.cache || !p.cacheable || o.store) return p;
+    const p = createProjector(name, projectorOptions[name] ?? {});
+    if (!o.cache || !p.cacheable || o.store || projectorOptions[name]) return p;
     const file = path.join(cacheDir, 'predictions', `${name}-v${p.version}-${site}-${signature}.json`);
     const cache = readCache(file);
     caches.set(name, { file, cache, size: cache.size });

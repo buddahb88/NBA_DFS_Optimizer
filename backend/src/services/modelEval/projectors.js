@@ -41,6 +41,7 @@ import { STAT_FIELDS } from './featureStore.js';
 import { createMinutesV2Projector } from './minutesV2.js';
 import { createRatesV1Projector } from './ratesV1.js';
 import { createOwnModelProjector } from './ownModel.js';
+import { readCorrectionParams } from './minutesCorrection.js';
 
 const n = (v) => Number(v) || 0;
 const mean = (xs) => (xs.length ? xs.reduce((s, v) => s + v, 0) / xs.length : null);
@@ -277,8 +278,14 @@ registerProjector('rates_v1_rotowire_minutes', (options) => createRatesV1Project
   description: 'rates_v1 per-minute production x RotoWire projected minutes (rates compared with the minutes held equal)'
 });
 registerProjector('own_mean', (options) => createOwnModelProjector(options), {
-  label: 'Own model (mean)', modes: ['slate'], version: '1',
-  description: 'rates_v1 x minutes_v2 with the DK MEAN incl. DNP as the point (sums in an optimizer); quantiles and minutes-blend means for blend.js'
+  label: 'Own model (mean)', modes: ['slate'], version: '2',
+  description: 'rates_v1 x minutes_v2 with the DK MEAN incl. DNP as the point (sums in an optimizer); quantiles and minutes-blend means for blend.js; minutes upside signal'
+});
+// options.correction: params or { bySlate } (leave-one-slate-out runs); default: minutesCorrectionParams.json.
+// Not cached: its output follows the params file.
+registerProjector('own_mean_mincorr', (options = {}) => createOwnModelProjector({ ...options, correction: options.correction ?? readCorrectionParams() }), {
+  label: 'Own model (minutes corr.)', modes: ['slate'], version: '1', cacheable: false,
+  description: 'own_mean with our conditional minutes moved toward RotoWire minutes by a factor per gap bucket x salary band (minutesCorrection.js); points and ranges follow'
 });
 registerProjector('rotowire_minutes_x_fppm', rotowireMinutesTimesFppm, {
   label: 'RotoWire min x FPPM', modes: ['slate'],
