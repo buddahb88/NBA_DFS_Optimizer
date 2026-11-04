@@ -12,6 +12,7 @@ import { getSlateMatchups } from '../services/archetypeDefenseService.js';
 import { loadSlatePlayers, resolveSlate, withActuals } from '../services/slateSource.js';
 import { SOURCES, parseSource } from '../config/projectionSource.js';
 import { DEFAULT_SITE, isValidSite } from '../config/sites.js';
+import { getPlayerCard } from '../services/playerCard/playerCardService.js';
 
 const router = express.Router();
 
@@ -66,6 +67,30 @@ router.get('/:slateId', async (req, res) => {
     const players = await loadSlatePlayers(await resolveSlate({ slateId }), { filters, projectionSource });
     res.json(await withMatchups(slateId, players, req.query));
   } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
+  }
+});
+
+// Player card: identity, projections (RotoWire / ours / blend, fade), recent
+// form, role, matchup, context, track record and a cash / GPP verdict in one
+// request (services/playerCard). playerId: slate row id, player_id or
+// player_key. slateDate (past) = backtest: everything as of that date plus
+// what actually happened. projectionSource overrides the active source.
+router.get('/:slateId/card/:playerId', async (req, res) => {
+  try {
+    const projectionSource = req.query.projectionSource || null;
+    if (projectionSource && !parseSource(projectionSource)) {
+      return res.status(400).json({ error: `projectionSource must be one of: ${SOURCES.join(', ')}` });
+    }
+    const card = await getPlayerCard({
+      slateId: req.params.slateId,
+      playerId: req.params.playerId,
+      slateDate: req.query.slateDate || null,
+      projectionSource
+    });
+    res.json(card);
+  } catch (error) {
+    if (!error.status) console.error('Player card error:', error);
     res.status(error.status || 500).json({ error: error.message });
   }
 });
