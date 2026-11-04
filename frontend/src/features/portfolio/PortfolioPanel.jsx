@@ -5,6 +5,7 @@ import VerdictPills, { LineupVerdictSummary } from '../playerCard/VerdictPills';
 import { exportAPI } from '../../services/api';
 import { Badge, Button, Card, DataTable, EmptyState, IconChart, Stat, Tabs, cn } from '../../components/ui';
 import { downloadText, formatSalary } from '../lineupStudio/lineupMath';
+import { ROW_NAME } from '../lineupStudio/rowStyles';
 import { LeverageChart, ScoreHistogram } from './charts';
 import {
   PORTFOLIO_SITE,
@@ -319,15 +320,15 @@ function Results({ state, slateId, onNotice, onNewBuild }) {
               {isBacktest && ` · ${formatActual(focus.actual)} actual`}
             </span>
           </div>
-          <ul className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs sm:grid-cols-4">
+          <ul className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,17rem),1fr))] gap-x-4 gap-y-1 text-xs">
             {focus.players.map((slot) => (
               <li key={slot.position} className="flex items-center gap-2">
                 <Badge size="sm" className="w-10 justify-center">
                   {slot.position}
                 </Badge>
-                <PlayerCardTrigger target={{ playerId: slot.player.id, name: slot.player.name, headshot: slot.player.headshot }} className="truncate text-fg">{slot.player.name}</PlayerCardTrigger>
-                {isBacktest && <span className="num ml-auto font-medium text-fg">{formatActual(slot.player.actualPoints)}</span>}
-                <span className={cn('num text-fg-subtle', !isBacktest && 'ml-auto')}>{slot.player.rostership.toFixed(0)}%</span>
+                <PlayerCardTrigger target={{ playerId: slot.player.id, name: slot.player.name, headshot: slot.player.headshot }} title={slot.player.name} className={cn(ROW_NAME, 'text-fg')}>{slot.player.name}</PlayerCardTrigger>
+                {isBacktest && <span className="num shrink-0 font-medium text-fg">{formatActual(slot.player.actualPoints)}</span>}
+                <span className="num shrink-0 text-fg-subtle">{slot.player.rostership.toFixed(0)}%</span>
                 <VerdictPills entry={verdicts.lookup(slot.player)} />
               </li>
             ))}

@@ -3,6 +3,7 @@ import { formatSalary, lineupTotals } from './lineupMath';
 import PlayerCardTrigger from '../playerCard/PlayerCardTrigger';
 import { formatActual, lineupActual } from '../slate/backtest';
 import VerdictPills, { LineupVerdictSummary } from '../playerCard/VerdictPills';
+import { ROW_NAME } from './rowStyles';
 
 /**
  * One generated lineup. `lineup` = { key, number, slots: [{ slot, player }] }.
@@ -80,20 +81,20 @@ export default function LineupCard({
 
       <ul className="flex-1 divide-y divide-line/60 px-3 py-1">
         {lineup.slots.map(({ slot, player }, i) => (
-          <li key={`${slot}-${i}`} className="flex items-center gap-2 py-1 text-xs">
-            <span className="w-9 shrink-0 font-mono text-2xs font-semibold text-fg-subtle">{slot}</span>
+          <li key={`${slot}-${i}`} className="flex items-center gap-1.5 py-1 text-xs">
+            <span className="w-8 shrink-0 font-mono text-2xs font-semibold text-fg-subtle">{slot}</span>
             {player ? (
-              <PlayerCardTrigger target={{ playerId: player.id, name: player.name, headshot: player.headshot }} className="min-w-0 flex-1 truncate text-fg">
+              <PlayerCardTrigger target={{ playerId: player.id, name: player.name, headshot: player.headshot }} title={player.name} className={cn(ROW_NAME, 'text-fg')}>
                 {player.name}
               </PlayerCardTrigger>
             ) : (
-              <span className="min-w-0 flex-1 truncate text-fg">-</span>
+              <span className={cn(ROW_NAME, 'text-fg')}>-</span>
             )}
-            <span className="w-9 shrink-0 text-2xs text-fg-subtle">{player?.team}</span>
-            <span className="num w-14 shrink-0 text-right text-fg-muted">{player ? formatSalary(player.salary) : ''}</span>
-            <span className="num w-10 shrink-0 text-right font-medium text-fg">{player?.projected_points?.toFixed(1)}</span>
+            <span className="w-7 shrink-0 text-2xs text-fg-subtle">{player?.team}</span>
+            <span className="num w-[3.25rem] shrink-0 text-right text-fg-muted">{player ? formatSalary(player.salary) : ''}</span>
+            <span className="num w-9 shrink-0 text-right font-medium text-fg">{player?.projected_points?.toFixed(1)}</span>
             {showActual && (
-              <span className="num w-10 shrink-0 text-right font-semibold text-fg" title="Actual DK points">
+              <span className="num w-9 shrink-0 text-right font-semibold text-fg" title="Actual DK points">
                 {player ? formatActual(player.actualPoints) : ''}
               </span>
             )}

@@ -139,6 +139,9 @@ describe('LineupStudioPage', () => {
     const card = screen.getByText('#1').closest('article')
     expect(within(card).getByText('$48,000')).toBeInTheDocument()
     expect(within(card).getByText('80%')).toBeInTheDocument()
+    // Content-driven grid: cards are at least wide enough for a full name row, one per row on phones
+    expect(card.parentElement.className).toContain('grid-cols-[repeat(auto-fill,minmax(min(100%,24rem),1fr))]')
+    expect(card.parentElement.className).not.toMatch(/md:grid-cols-2/)
 
     fireEvent.click(screen.getByRole('button', { name: 'Export 2 for DraftKings' }))
     await waitFor(() => expect(exportAPI.lineups).toHaveBeenCalled())

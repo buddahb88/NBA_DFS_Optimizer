@@ -591,7 +591,7 @@ export default function LineupStudioPage() {
                   Solving {run.requested} lineup{run.requested === 1 ? '' : 's'}…
                   {run.requested > 20 && <span className="text-xs text-fg-subtle">Large batches can take a minute.</span>}
                 </div>
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-2 2xl:grid-cols-3" aria-hidden="true">
+                <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,24rem),1fr))] gap-3" aria-hidden="true">
                   {Array.from({ length: Math.min(run.requested, 6) }, (_, i) => (
                     <div key={i} className="h-80 animate-pulse rounded-md border border-line bg-surface" />
                   ))}
@@ -664,7 +664,7 @@ export default function LineupStudioPage() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-2 2xl:grid-cols-3">
+                <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,24rem),1fr))] gap-3">
                   {sortedLineups.map((l) => (
                     <LineupCard
                       key={l.key}

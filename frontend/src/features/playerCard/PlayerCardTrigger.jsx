@@ -7,17 +7,18 @@ import { usePlayerCard } from './playerCardContext';
  * Without a PlayerCardProvider, or without an id, it renders the children as is.
  *
  * target: { playerId, slateId?, slateDate?, name?, headshot?, controls? } (see playerCardContext)
+ * title: hover text (default "Open player card"); pass the full name where it may be clamped.
  */
-export default function PlayerCardTrigger({ target, className, children, label }) {
+export default function PlayerCardTrigger({ target, className, children, label, title }) {
   const { open } = usePlayerCard();
-  if (!open || target?.playerId == null) return <span className={className}>{children}</span>;
+  if (!open || target?.playerId == null) return <span className={className} title={title}>{children}</span>;
   const stop = (e) => e.stopPropagation();
   return (
     <button
       type="button"
       aria-haspopup="dialog"
       aria-label={label ?? `Open ${target.name ?? 'player'} card`}
-      title="Open player card"
+      title={title ?? 'Open player card'}
       onClick={(e) => {
         e.stopPropagation();
         e.preventDefault();

@@ -92,6 +92,15 @@ describe('VerdictPills', () => {
 })
 
 describe('lineup verdict column', () => {
+  it('player names are never truncated: the name cell clamps to 2 lines with the full name in a tooltip', () => {
+    render(<Studio count={1} />)
+    const card = screen.getAllByRole('article')[0]
+    const name = within(card).getByText('Nikola Jokic')
+    expect(name).toHaveAttribute('title', 'Nikola Jokic')
+    expect(name.className).toContain('line-clamp-2')
+    expect(name.className).not.toMatch(/truncate/)
+  })
+
   it('generated lineup cards show the column per row and one request serves every card', async () => {
     render(<Studio count={3} />)
     await waitFor(() => expect(screen.getAllByTestId('verdict-cash')).toHaveLength(6))

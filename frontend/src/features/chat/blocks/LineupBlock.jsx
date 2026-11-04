@@ -8,6 +8,7 @@ import { useChatBlocks } from './blocksContext';
 import { useToast } from './toastContext';
 import useSlateVerdicts from '../../playerCard/useSlateVerdicts';
 import VerdictPills, { LineupVerdictSummary } from '../../playerCard/VerdictPills';
+import { ROW_NAME } from '../../lineupStudio/rowStyles';
 
 const errorMessage = (err) => err?.response?.data?.error || err?.message || 'Request failed';
 
@@ -87,12 +88,12 @@ export default function LineupBlock({ block, compact = false }) {
 
       <ul className="flex-1 divide-y divide-line/60 px-3 py-1">
         {entries.map(({ slot, player, onSlate }, i) => (
-          <li key={`${slot}-${i}`} className="flex items-center gap-2 py-1 text-xs">
-            <span className="w-9 shrink-0 font-mono text-2xs font-semibold text-fg-subtle">{slot}</span>
-            <span className={cn('min-w-0 flex-1 truncate', onSlate ? 'text-fg' : 'text-fg-muted line-through decoration-negative/60')}>{player.name || '-'}</span>
-            <span className="w-9 shrink-0 text-2xs text-fg-subtle">{player.team}</span>
-            <span className="num w-14 shrink-0 text-right text-fg-muted">{player.salary != null ? formatSalary(player.salary) : ''}</span>
-            <span className="num w-10 shrink-0 text-right font-medium text-fg">{player.projected_points != null ? Number(player.projected_points).toFixed(1) : ''}</span>
+          <li key={`${slot}-${i}`} className="flex items-center gap-1.5 py-1 text-xs">
+            <span className="w-8 shrink-0 font-mono text-2xs font-semibold text-fg-subtle">{slot}</span>
+            <span title={player.name || undefined} className={cn(ROW_NAME, onSlate ? 'text-fg' : 'text-fg-muted line-through decoration-negative/60')}>{player.name || '-'}</span>
+            <span className="w-7 shrink-0 text-2xs text-fg-subtle">{player.team}</span>
+            <span className="num w-[3.25rem] shrink-0 text-right text-fg-muted">{player.salary != null ? formatSalary(player.salary) : ''}</span>
+            <span className="num w-9 shrink-0 text-right font-medium text-fg">{player.projected_points != null ? Number(player.projected_points).toFixed(1) : ''}</span>
             {verdicts.status !== 'idle' && <VerdictPills entry={rowVerdicts[i]} />}
           </li>
         ))}
