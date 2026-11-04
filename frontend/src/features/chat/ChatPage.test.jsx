@@ -100,6 +100,15 @@ describe('ChatPage shell', () => {
     expect(playersAPI.getBySlateId).toHaveBeenCalledWith('42')
   })
 
+  it('prefills the composer from a player card "Ask AI" (not sent)', async () => {
+    render(
+      <MemoryRouter initialEntries={[{ pathname: '/chat', state: { chatPrefill: 'Deeper take on Test Guard' } }]}>
+        <ChatPage />
+      </MemoryRouter>,
+    )
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Message' })).toHaveValue('Deeper take on Test Guard'))
+  })
+
   it('sends the selected Cash/GPP mode with chat requests', async () => {
     renderPage()
     const modes = screen.getByRole('group', { name: 'Contest mode' })
@@ -172,7 +181,7 @@ describe('ChatPage shell', () => {
         ],
       },
     })
-    render(<ChatPage />)
+    renderPage()
     expect(chatAPI.getSuggestions).toHaveBeenCalledWith('42')
     const prompts = screen.getByRole('region', { name: 'Suggested prompts' })
     const stack = await within(prompts).findByRole('button', { name: /BOS vs NYK game stack/ })
@@ -187,7 +196,7 @@ describe('ChatPage shell', () => {
   it('welcome screen falls back to static prompts when suggestions fail to load', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     chatAPI.getSuggestions.mockRejectedValue(new Error('Network Error'))
-    render(<ChatPage />)
+    renderPage()
     const prompts = screen.getByRole('region', { name: 'Suggested prompts' })
     expect(await within(prompts).findByRole('button', { name: /top value plays under \$6,000/ })).toBeInTheDocument()
     expect(within(prompts).getAllByRole('button')).toHaveLength(4)
@@ -196,7 +205,7 @@ describe('ChatPage shell', () => {
   it('shows an error with retry when a saved chat fails to load', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     chatAPI.getSessionHistory.mockRejectedValueOnce(new Error('boom'))
-    render(<ChatPage />)
+    renderPage()
     fireEvent.click(await screen.findByRole('button', { name: /^Lakers stack ideas/ }))
     expect(await screen.findByText("Couldn't load this conversation")).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
@@ -215,7 +224,7 @@ describe('ChatPage shell', () => {
 
   it('regenerate replaces the last answer by re-sending the previous prompt', async () => {
     fetch.mockResolvedValueOnce(answerStream('First take: Jokic.')).mockResolvedValueOnce(answerStream('Second take: Doncic.'))
-    render(<ChatPage />)
+    renderPage()
     send('Who is the top C?')
     expect(await screen.findByText('First take: Jokic.')).toBeInTheDocument()
 
@@ -230,7 +239,7 @@ describe('ChatPage shell', () => {
   it('posts thumbs feedback for an answer', async () => {
     fetch.mockResolvedValueOnce(answerStream('Fade the chalk.'))
     chatAPI.sendFeedback.mockResolvedValue({ data: { success: true, id: 1 } })
-    render(<ChatPage />)
+    renderPage()
     send('Leverage spots?')
     await screen.findByText('Fade the chalk.')
 
@@ -244,7 +253,7 @@ describe('ChatPage shell', () => {
   it('shows a loading skeleton while a conversation loads', async () => {
     let resolveHistory
     chatAPI.getSessionHistory.mockReturnValue(new Promise((r) => (resolveHistory = r)))
-    render(<ChatPage />)
+    renderPage()
     fireEvent.click(await screen.findByRole('button', { name: /^Lakers stack ideas/ }))
     expect(await screen.findByRole('status', { name: 'Loading conversation' })).toBeInTheDocument()
     resolveHistory({ data: { success: true, messages: [{ role: 'user', content: 'Who is chalk?', created_at: new Date().toISOString() }] } })
@@ -268,7 +277,7 @@ describe('ChatPage shell', () => {
       return Promise.resolve({ ok: true, body: { getReader: () => ({ read }) } })
     })
 
-    render(<ChatPage />)
+    renderPage()
     send('Who is chalk tonight?')
     expect(await screen.findByText('Partial answer')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Send message' })).not.toBeInTheDocument()
@@ -286,12 +295,12 @@ describe('ChatPage shell', () => {
   })
 
   it('restores the composer draft per session after a reload', async () => {
-    const { unmount } = render(<ChatPage />)
+    const { unmount } = renderPage()
     fireEvent.change(screen.getByRole('textbox', { name: 'Message' }), { target: { value: 'half-written thought' } })
     expect(JSON.parse(localStorage.getItem('nba-dfs:chat-draft:new'))).toMatchObject({ text: 'half-written thought' })
 
     unmount()
-    render(<ChatPage />)
+    renderPage()
     expect(screen.getByRole('textbox', { name: 'Message' })).toHaveValue('half-written thought')
 
     localStorage.setItem('nba-dfs:chat-draft:7', JSON.stringify({ text: 'session 7 draft', mentions: [] }))
@@ -306,7 +315,7 @@ describe('ChatPage shell', () => {
     const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
       throw new Error('quota')
     })
-    render(<ChatPage />)
+    renderPage()
     expect(screen.getByRole('textbox', { name: 'Message' })).toHaveValue('')
     fireEvent.change(screen.getByRole('textbox', { name: 'Message' }), { target: { value: 'still typable' } })
     expect(screen.getByRole('textbox', { name: 'Message' })).toHaveValue('still typable')
@@ -314,7 +323,7 @@ describe('ChatPage shell', () => {
   })
 
   it('clears the draft on send, sends mentions, and Up arrow recalls the last message', async () => {
-    render(<ChatPage />)
+    renderPage()
     const box = screen.getByRole('textbox', { name: 'Message' })
     await waitFor(() => expect(playersAPI.getBySlateId).toHaveBeenCalled())
     fireEvent.change(box, { target: { value: 'Fade @C T', selectionStart: 9 } })
@@ -350,7 +359,7 @@ describe('ChatPage agent timeline', () => {
           sse('done', { sessionId: 7, toolsUsed: [], agentsUsed: ['research'], iterations: 2, timestamp: T(700) }),
       ),
     )
-    render(<ChatPage />)
+    renderPage()
     send('Value plays?')
     await waitFor(() => expect(screen.getByText('Here are the plays.')).toBeInTheDocument())
     expect(screen.getByRole('button', { name: /^Used 1 tool across 1 agent · / })).toHaveAttribute('aria-expanded', 'false')
@@ -372,7 +381,7 @@ describe('ChatPage agent timeline', () => {
         ],
       },
     })
-    render(<ChatPage />)
+    renderPage()
     fireEvent.click(await screen.findByText('Lakers stack ideas'))
     const chip = await screen.findByRole('button', { name: 'Used 1 tool across 1 agent' })
     fireEvent.click(chip)

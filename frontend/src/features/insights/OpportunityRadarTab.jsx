@@ -7,6 +7,7 @@ import SlateModeSelect from '../slate/SlateModeSelect';
 import ProjectionCell from '../slate/ProjectionCell';
 import { ACTUAL_COLUMN, RESULT_COLUMN } from '../slate/backtestColumns';
 import useOpportunityRadar from './useOpportunityRadar';
+import PlayerCardTrigger from '../playerCard/PlayerCardTrigger';
 import {
   DEFAULT_RADAR_FILTERS,
   POSITIONS,
@@ -25,10 +26,13 @@ const money = (v) => (v === null || v === undefined ? '—' : `$${Number(v).toLo
 function PlayerCell({ row }) {
   return (
     <div className="flex min-w-[200px] max-w-[320px] items-center gap-2 py-1">
-      <Headshot name={row.name} src={row.headshot} size="sm" />
+      <PlayerCardTrigger target={{ playerId: row.id, name: row.name, headshot: row.headshot }} label={`Open ${row.name} card (headshot)`} className="shrink-0 rounded-full">
+        <Headshot name={row.name} src={row.headshot} size="sm" />
+      </PlayerCardTrigger>
       <div className="min-w-0">
         <div className="truncate font-medium text-fg">
-          {row.name} <span className="text-2xs font-normal text-fg-subtle">{row.position}</span>
+          <PlayerCardTrigger target={{ playerId: row.id, name: row.name, headshot: row.headshot }}>{row.name}</PlayerCardTrigger>{' '}
+          <span className="text-2xs font-normal text-fg-subtle">{row.position}</span>
         </div>
         {row.reason && (
           <Tooltip content={row.reason}>

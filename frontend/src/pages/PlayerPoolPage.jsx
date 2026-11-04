@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { playersAPI } from '../services/api';
 import { useSlate } from '../context/SlateContext';
@@ -252,7 +252,24 @@ function PlayerPoolPage() {
   const stats = useMemo(() => slateStats(rows), [rows]);
   const visibleRows = useMemo(() => applyQuickView(applyFilters(rows, filters), view, stats), [rows, filters, view, stats]);
   const optimizerPlayers = useMemo(() => toOptimizerPlayers(players, settings), [players, settings]);
-  const columns = useMemo(() => buildColumns({ stats, onUpdate: update }), [stats, update]);
+  // Player card: the pool's own slate (live), driving this page's saved controls
+  const cardTarget = useCallback(
+    (p) => ({
+      playerId: p.id,
+      slateId,
+      slateDate: null,
+      name: p.name,
+      headshot: p.headshot,
+      controls: {
+        lock: p.settings?.lock,
+        exclude: p.settings?.exclude,
+        maxExposure: p.settings?.maxExposure ?? null,
+        onUpdate: (patch) => update(p.player_id, patch),
+      },
+    }),
+    [slateId, update],
+  );
+  const columns = useMemo(() => buildColumns({ stats, onUpdate: update, cardTarget }), [stats, update, cardTarget]);
 
   const { games, teams, archetypes, salaryBounds } = useMemo(() => {
     const salaries = players.map((p) => p.salary).filter(Boolean);

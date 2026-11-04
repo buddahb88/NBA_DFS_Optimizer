@@ -4,6 +4,7 @@ import { formatDelta } from '../../archetypes/archetypes';
 import { formatSalary } from '../../lineupStudio/lineupMath';
 import { TONE_TEXT, edgeTone, playerFlags, valuePer1k } from './blockModel';
 import { useChatBlocks } from './blocksContext';
+import PlayerCardTrigger from '../../playerCard/PlayerCardTrigger';
 
 const initials = (name) =>
   String(name || '?')
@@ -143,20 +144,26 @@ function Metric({ label, children, className }) {
 
 /** One player result: identity, salary/projection/value, matchup edge, minutes, flags, actions. */
 export default function PlayerCard({ player, className }) {
-  const { findSlatePlayer, toggleControl, togglePin } = useChatBlocks();
+  const { slateId, findSlatePlayer, toggleControl, togglePin } = useChatBlocks();
   const slatePlayer = findSlatePlayer(player);
   const salary = player.salary ?? slatePlayer?.salary ?? null;
   const projection = player.projection ?? slatePlayer?.projected_points ?? null;
   const value = valuePer1k(projection, salary);
   const edge = player.adjustedEdge ?? player.matchupEdge;
   const matchup = [player.team, player.opponent && `vs ${player.opponent}`, player.position].filter(Boolean).join(' · ');
+  // The card opens for the chat's slate player (on the app's working slate)
+  const cardTarget = slatePlayer && slateId ? { playerId: slatePlayer.id, slateId, slateDate: null, name: player.name, headshot: player.headshot ?? slatePlayer.headshot } : null;
 
   return (
     <article aria-label={player.name} className={cn('flex flex-col gap-2.5 rounded-md border border-line bg-surface p-3 transition-colors hover:border-line-strong', className)}>
       <header className="flex items-start gap-2.5">
-        <Headshot name={player.name} src={player.headshot ?? slatePlayer?.headshot} />
+        <PlayerCardTrigger target={cardTarget} label={`Open ${player.name} card (headshot)`} className="shrink-0 rounded-full">
+          <Headshot name={player.name} src={player.headshot ?? slatePlayer?.headshot} />
+        </PlayerCardTrigger>
         <div className="min-w-0 flex-1">
-          <h4 className="truncate text-sm font-semibold text-fg">{player.name}</h4>
+          <h4 className="truncate text-sm font-semibold text-fg">
+            <PlayerCardTrigger target={cardTarget}>{player.name}</PlayerCardTrigger>
+          </h4>
           {matchup && <p className="truncate text-2xs text-fg-muted">{matchup}</p>}
           {player.archetypeLabel && (
             <Badge size="sm" tone="accent" className="mt-1 max-w-full truncate">

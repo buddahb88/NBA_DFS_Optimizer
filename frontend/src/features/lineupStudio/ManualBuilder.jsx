@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import { Badge, Button, Card, CardHeader, DataTable, IconSearch, IconX, Input, Stat, Tabs, cn } from '../../components/ui';
+import { Badge, Button, Card, CardHeader, DataTable, IconInfo, IconSearch, IconX, Input, Stat, Tabs, cn } from '../../components/ui';
+import PlayerCardTrigger from '../playerCard/PlayerCardTrigger';
 import { canFillSlot, eligibleSlotIndexes, formatSalary, lineupTotals, pickSlot, playerPositions } from './lineupMath';
 
 const slotHint = (slotDef) => (slotDef.eligible || [slotDef.slot]).join('/');
@@ -84,7 +85,24 @@ export default function ManualBuilder({ siteConfig, players, slots, onSlotsChang
         );
       },
     },
-    { id: 'name', header: 'Player', accessorKey: 'name', meta: { className: 'font-medium' } },
+    {
+      id: 'name',
+      header: 'Player',
+      accessorKey: 'name',
+      meta: { className: 'font-medium' },
+      cell: ({ row }) => (
+        <span className="inline-flex max-w-full items-center gap-1">
+          <span className="truncate">{row.original.name}</span>
+          <PlayerCardTrigger
+            target={{ playerId: row.original.id, name: row.original.name, headshot: row.original.headshot }}
+            label={`Open ${row.original.name} card`}
+            className="shrink-0 p-0.5 text-fg-subtle hover:no-underline"
+          >
+            <IconInfo size={12} />
+          </PlayerCardTrigger>
+        </span>
+      ),
+    },
     { id: 'pos', header: 'Pos', accessorKey: 'position', size: 70 },
     { id: 'team', header: 'Team', accessorFn: (p) => `${p.team ?? ''} v ${p.opponent ?? ''}`, size: 90 },
     { id: 'salary', header: 'Salary', accessorKey: 'salary', cell: (c) => formatSalary(c.getValue()), meta: { numeric: true } },

@@ -1,5 +1,6 @@
 import { Badge, Button, IconCheck, Tooltip, cn } from '../../components/ui';
 import { formatSalary, lineupTotals } from './lineupMath';
+import PlayerCardTrigger from '../playerCard/PlayerCardTrigger';
 import { formatActual, lineupActual } from '../slate/backtest';
 
 /**
@@ -72,7 +73,13 @@ export default function LineupCard({ lineup, salaryCap, selected, onToggleSelect
         {lineup.slots.map(({ slot, player }, i) => (
           <li key={`${slot}-${i}`} className="flex items-center gap-2 py-1 text-xs">
             <span className="w-9 shrink-0 font-mono text-2xs font-semibold text-fg-subtle">{slot}</span>
-            <span className="min-w-0 flex-1 truncate text-fg">{player?.name ?? '-'}</span>
+            {player ? (
+              <PlayerCardTrigger target={{ playerId: player.id, name: player.name, headshot: player.headshot }} className="min-w-0 flex-1 truncate text-fg">
+                {player.name}
+              </PlayerCardTrigger>
+            ) : (
+              <span className="min-w-0 flex-1 truncate text-fg">-</span>
+            )}
             <span className="w-9 shrink-0 text-2xs text-fg-subtle">{player?.team}</span>
             <span className="num w-14 shrink-0 text-right text-fg-muted">{player ? formatSalary(player.salary) : ''}</span>
             <span className="num w-10 shrink-0 text-right font-medium text-fg">{player?.projected_points?.toFixed(1)}</span>

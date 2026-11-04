@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { IconSettings, Tooltip } from '../components/ui';
 import { useSlate } from '../context/SlateContext';
 import { chatAPI } from '../services/api';
@@ -35,6 +36,17 @@ export default function ChatPage() {
   const [showReasoning, setShowReasoning] = useState(true);
   const [history, setHistory] = useState({ loadingId: null, failedId: null });
   const inputRef = useRef(null);
+
+  // "Ask AI" from a player card: drop its summary into the composer (the user sends it)
+  const location = useLocation();
+  const navigate = useNavigate();
+  const prefill = location.state?.chatPrefill;
+  useEffect(() => {
+    if (!prefill) return;
+    setDraft({ text: prefill, mentions: [] });
+    navigate(location.pathname + location.search, { replace: true, state: null });
+    inputRef.current?.focus();
+  }, [prefill, setDraft, navigate, location.pathname, location.search]);
 
   const pins = useChatPins(activeSessionId);
   const { adoptDraft, clearDraft } = pins;

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import PlayerCardTrigger from '../playerCard/PlayerCardTrigger';
 import { exportAPI } from '../../services/api';
 import { Badge, Button, Card, DataTable, EmptyState, IconChart, Stat, Tabs, cn } from '../../components/ui';
 import { downloadText, formatSalary } from '../lineupStudio/lineupMath';
@@ -185,7 +186,11 @@ function Results({ state, slateId, onNotice, onNewBuild }) {
 
   const playerColumns = useMemo(
     () => [
-      { accessorKey: 'name', header: 'Player', cell: ({ row }) => <span className="font-medium">{row.original.name}</span> },
+      { accessorKey: 'name', header: 'Player', cell: ({ row }) => (
+          <PlayerCardTrigger target={{ playerId: row.original.id, name: row.original.name, headshot: row.original.headshot }} className="font-medium">
+            {row.original.name}
+          </PlayerCardTrigger>
+        ) },
       { accessorKey: 'team', header: 'Team', size: 56 },
       { accessorKey: 'position', header: 'Pos', size: 64 },
       { accessorKey: 'salary', header: 'Salary', meta: { numeric: true }, cell: ({ getValue }) => formatSalary(getValue()) },
@@ -313,7 +318,7 @@ function Results({ state, slateId, onNotice, onNewBuild }) {
                 <Badge size="sm" className="w-10 justify-center">
                   {slot.position}
                 </Badge>
-                <span className="truncate text-fg">{slot.player.name}</span>
+                <PlayerCardTrigger target={{ playerId: slot.player.id, name: slot.player.name, headshot: slot.player.headshot }} className="truncate text-fg">{slot.player.name}</PlayerCardTrigger>
                 {isBacktest && <span className="num ml-auto font-medium text-fg">{formatActual(slot.player.actualPoints)}</span>}
                 <span className={cn('num text-fg-subtle', !isBacktest && 'ml-auto')}>{slot.player.rostership.toFixed(0)}%</span>
               </li>

@@ -1,13 +1,17 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Badge, Button, DataTable, IconSearch, Input, cn } from '../../components/ui';
 import { formatSalary } from './lineupMath';
 import { formatActual } from '../slate/backtest';
 import ResultBadge from '../slate/ResultBadge';
 import ProjectionCell from '../slate/ProjectionCell';
+import PlayerCardTrigger from '../playerCard/PlayerCardTrigger';
 
 /** Optimizer pool with lock / exclude toggles; showActual (backtest) adds actual DK points and the result. */
 export default function PlayerPoolTable({ players, locked, excluded, onToggleLock, onToggleExclude, onClear, showActual = false }) {
   const [search, setSearch] = useState('');
+  // The card's lock / exclude drive this table's sets; refs so a card opened earlier sees the current ones
+  const sets = useRef({ locked, excluded, onToggleLock, onToggleExclude });
+  sets.current = { locked, excluded, onToggleLock, onToggleExclude };
 
   const columns = useMemo(
     () => [
@@ -32,7 +36,36 @@ export default function PlayerPoolTable({ players, locked, excluded, onToggleLoc
           );
         },
       },
-      { id: 'name', header: 'Player', accessorKey: 'name', meta: { className: 'font-medium' } },
+      {
+        id: 'name',
+        header: 'Player',
+        accessorKey: 'name',
+        meta: { className: 'font-medium' },
+        cell: ({ row }) => {
+          const p = row.original;
+          return (
+            <PlayerCardTrigger
+              target={{
+                playerId: p.id,
+                name: p.name,
+                headshot: p.headshot,
+                controls: {
+                  lock: locked.has(p.id),
+                  exclude: excluded.has(p.id),
+                  exposure: false,
+                  onUpdate: (patch) => {
+                    const s = sets.current;
+                    if (patch.lock !== undefined && patch.lock !== s.locked.has(p.id)) s.onToggleLock(p.id);
+                    else if (patch.exclude !== undefined && patch.exclude !== s.excluded.has(p.id)) s.onToggleExclude(p.id);
+                  },
+                },
+              }}
+            >
+              {p.name}
+            </PlayerCardTrigger>
+          );
+        },
+      },
       { id: 'pos', header: 'Pos', accessorKey: 'position', size: 70 },
       { id: 'team', header: 'Team', accessorFn: (p) => `${p.team ?? ''} v ${p.opponent ?? ''}`, size: 90 },
       { id: 'salary', header: 'Salary', accessorKey: 'salary', cell: (c) => formatSalary(c.getValue()), meta: { numeric: true } },

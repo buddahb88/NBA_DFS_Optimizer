@@ -2,6 +2,7 @@ import { Badge, Tooltip, cn } from '../../components/ui';
 import { bandTone, injuryCode, injuryTone } from './playerPool';
 import { ControlButton, Dash, IconBan, IconLock, MatchupCell, Num, NumberCell, OwnershipCell } from './cells';
 import ProjectionCell from '../slate/ProjectionCell';
+import PlayerCardTrigger from '../playerCard/PlayerCardTrigger';
 
 // tanstack sorts `undefined` last with sortUndefined: 'last'
 const orUndef = (v) => (v == null || Number.isNaN(Number(v)) ? undefined : Number(v));
@@ -10,8 +11,9 @@ const numericCol = { meta: { numeric: true }, sortUndefined: 'last', sortDescFir
 /**
  * @param stats    slateStats() of the whole pool (for percentile colouring)
  * @param onUpdate (playerId, patch) => error string | null
+ * @param cardTarget (player) => player card target (playerCard/playerCardContext); omitted = plain name
  */
-export function buildColumns({ stats, onUpdate }) {
+export function buildColumns({ stats, onUpdate, cardTarget }) {
   return [
     {
       id: 'controls',
@@ -45,7 +47,13 @@ export function buildColumns({ stats, onUpdate }) {
         const p = row.original;
         return (
           <span className="flex min-w-[10rem] flex-col leading-tight">
-            <span className={cn('truncate font-medium', p.settings?.exclude && 'text-fg-subtle line-through')}>{p.name}</span>
+            {cardTarget ? (
+              <PlayerCardTrigger target={cardTarget(p)} className={cn('truncate font-medium', p.settings?.exclude && 'text-fg-subtle line-through')}>
+                {p.name}
+              </PlayerCardTrigger>
+            ) : (
+              <span className={cn('truncate font-medium', p.settings?.exclude && 'text-fg-subtle line-through')}>{p.name}</span>
+            )}
             <span className="text-2xs text-fg-subtle">
               {p.team ?? '—'} <span className="opacity-70">vs</span> {p.opponent ?? '—'}
             </span>
