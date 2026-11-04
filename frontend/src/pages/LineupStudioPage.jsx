@@ -21,6 +21,7 @@ import {
 } from '../components/ui';
 import SettingsPanel from '../features/lineupStudio/SettingsPanel';
 import LineupCard from '../features/lineupStudio/LineupCard';
+import useSlateVerdicts from '../features/playerCard/useSlateVerdicts';
 import ExposurePanel from '../features/lineupStudio/ExposurePanel';
 import PlayerPoolTable from '../features/lineupStudio/PlayerPoolTable';
 import ManualBuilder from '../features/lineupStudio/ManualBuilder';
@@ -282,6 +283,8 @@ export default function LineupStudioPage() {
     return [...lineups].sort((a, b) => metric(a) - metric(b));
   }, [lineups, sortBy, salaryCap]);
   const lineupSlots = useMemo(() => lineups.map((l) => l.slots), [lineups]);
+  // Card verdicts for the lineup rows: one request per slate, shared by every card
+  const verdicts = useSlateVerdicts({ slateId, slateDate: slateParams?.slateDate ?? null, enabled: lineups.length > 0 });
   const target = selected.size ? lineups.filter((l) => selected.has(l.key)) : lineups;
 
   const summary = useMemo(() => {
@@ -677,6 +680,8 @@ export default function LineupStudioPage() {
                       reviewing={review.loading && review.key === l.key}
                       showActual={isBacktest}
                       readOnly={isBacktest}
+                      verdictFor={verdicts.lookup}
+                      verdictThresholds={verdicts.data?.thresholds}
                     />
                   ))}
                 </div>

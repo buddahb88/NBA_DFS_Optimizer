@@ -2,14 +2,22 @@ import { Badge, Button, IconCheck, Tooltip, cn } from '../../components/ui';
 import { formatSalary, lineupTotals } from './lineupMath';
 import PlayerCardTrigger from '../playerCard/PlayerCardTrigger';
 import { formatActual, lineupActual } from '../slate/backtest';
+import VerdictPills, { LineupVerdictSummary } from '../playerCard/VerdictPills';
 
 /**
  * One generated lineup. `lineup` = { key, number, slots: [{ slot, player }] }.
  * showActual (backtest): actual DK points per player and an Actual total.
  * readOnly: no Save (a past slate's lineups are not entries).
+ * verdictFor(player): the player's card verdict entry (useSlateVerdicts lookup);
+ * shows the Cash / GPP column and the lineup average. verdictThresholds: the
+ * verdicts payload's score cut-offs.
  */
-export default function LineupCard({ lineup, salaryCap, selected, onToggleSelect, saved, saving, onSave, onEdit, onReview, reviewing, showActual = false, readOnly = false }) {
+export default function LineupCard({
+  lineup, salaryCap, selected, onToggleSelect, saved, saving, onSave, onEdit, onReview, reviewing,
+  showActual = false, readOnly = false, verdictFor = null, verdictThresholds = null,
+}) {
   const totals = lineupTotals(lineup.slots, salaryCap);
+  const verdicts = verdictFor ? lineup.slots.map(({ player }) => verdictFor(player)) : [];
   const usedPct = Math.min(100, (totals.salary / salaryCap) * 100);
   const actual = showActual ? lineupActual(lineup.slots) : null;
 
@@ -32,6 +40,7 @@ export default function LineupCard({ lineup, salaryCap, selected, onToggleSelect
           <span className="text-sm font-semibold text-fg">#{lineup.number}</span>
         </label>
         <div className="flex items-center gap-1">
+          {verdictFor && <LineupVerdictSummary entries={verdicts} thresholds={verdictThresholds} />}
           {saved && (
             <Badge tone="positive" size="sm">
               <IconCheck size={10} /> Saved
@@ -88,6 +97,7 @@ export default function LineupCard({ lineup, salaryCap, selected, onToggleSelect
                 {player ? formatActual(player.actualPoints) : ''}
               </span>
             )}
+            {verdictFor && <VerdictPills entry={verdicts[i]} />}
           </li>
         ))}
       </ul>

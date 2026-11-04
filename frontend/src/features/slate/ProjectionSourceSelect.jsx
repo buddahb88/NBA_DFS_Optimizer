@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Badge, Tooltip, cn } from '../../components/ui';
 import { projectionsAPI } from '../../services/api';
 import { SOURCE_HINTS, SOURCE_LABELS } from './projectionSource';
+import { clearSlateVerdicts } from '../playerCard/useSlateVerdicts';
 
 /**
  * "Projections: RotoWire | Ours | Blend" control (GET / PUT
@@ -38,6 +39,8 @@ export default function ProjectionSourceSelect({ slateParams = null, onChange, c
     try {
       const res = await projectionsAPI.setSource({ source });
       setStatus((s) => ({ ...res.data, slate: s?.slate?.source === res.data.source ? s.slate : undefined }));
+      // Verdicts follow the active source: refetch them
+      clearSlateVerdicts();
       onChange?.(res.data.source);
       // counts for the new source (runs the own model if it is cold)
       const params = JSON.parse(paramsKey);

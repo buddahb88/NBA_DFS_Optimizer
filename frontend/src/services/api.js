@@ -41,6 +41,8 @@ export const playersAPI = {
   // Player card: everything the card shows in one request; params { slateDate?, projectionSource? }
   getCard: (slateId, playerId, params = {}) =>
     api.get(`/players/${slateId}/card/${encodeURIComponent(playerId)}`, { params }),
+  // Card verdicts (cash / gpp verdict, score, confidence, headline) for every slate player, keyed by row id
+  getVerdicts: (slateId, params = {}) => api.get(`/players/${slateId}/verdicts`, { params, timeout: 120000 }),
   recalculateProjections: (slateId) => api.post(`/players/${slateId}/recalculate-projections`),
   resetProjections: (slateId) => api.post(`/players/${slateId}/reset-projections`),
 };

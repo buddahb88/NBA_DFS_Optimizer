@@ -6,6 +6,8 @@ import { FALLBACK_SITE, formatSalary, lineupTotals } from '../../lineupStudio/li
 import { lineupEntries, optimizerHandoff } from './blockModel';
 import { useChatBlocks } from './blocksContext';
 import { useToast } from './toastContext';
+import useSlateVerdicts from '../../playerCard/useSlateVerdicts';
+import VerdictPills, { LineupVerdictSummary } from '../../playerCard/VerdictPills';
 
 const errorMessage = (err) => err?.response?.data?.error || err?.message || 'Request failed';
 
@@ -21,6 +23,9 @@ export default function LineupBlock({ block, compact = false }) {
   const [saved, setSaved] = useState(false);
 
   const entries = useMemo(() => lineupEntries(block.data, slatePlayers), [block.data, slatePlayers]);
+  // Card verdicts for the rows on the slate (one cached request per slate)
+  const verdicts = useSlateVerdicts({ slateId, enabled: entries.some((e) => e.onSlate) });
+  const rowVerdicts = entries.map((e) => (e.onSlate ? verdicts.lookup(e.player) : null));
   const salaryCap = siteConfig?.salaryCap ?? FALLBACK_SITE.salaryCap;
   const totals = lineupTotals(entries, salaryCap);
   const usedPct = Math.min(100, (totals.salary / salaryCap) * 100);
@@ -52,11 +57,14 @@ export default function LineupBlock({ block, compact = false }) {
     <article aria-label={name} className={cn('flex flex-col rounded-md border border-line bg-surface transition-colors hover:border-line-strong', !compact && 'my-3 max-w-md')}>
       <header className="flex items-center justify-between gap-2 border-b border-line px-3 py-2">
         <h3 className="truncate text-sm font-semibold text-fg">{name}</h3>
-        {saved && (
-          <Badge tone="positive" size="sm">
-            <IconCheck size={10} /> Saved
-          </Badge>
-        )}
+        <div className="flex shrink-0 items-center gap-1">
+          <LineupVerdictSummary entries={rowVerdicts} thresholds={verdicts.data?.thresholds} />
+          {saved && (
+            <Badge tone="positive" size="sm">
+              <IconCheck size={10} /> Saved
+            </Badge>
+          )}
+        </div>
       </header>
 
       <dl className="grid grid-cols-3 gap-2 border-b border-line px-3 py-2">
@@ -85,6 +93,7 @@ export default function LineupBlock({ block, compact = false }) {
             <span className="w-9 shrink-0 text-2xs text-fg-subtle">{player.team}</span>
             <span className="num w-14 shrink-0 text-right text-fg-muted">{player.salary != null ? formatSalary(player.salary) : ''}</span>
             <span className="num w-10 shrink-0 text-right font-medium text-fg">{player.projected_points != null ? Number(player.projected_points).toFixed(1) : ''}</span>
+            {verdicts.status !== 'idle' && <VerdictPills entry={rowVerdicts[i]} />}
           </li>
         ))}
       </ul>

@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import PlayerCardTrigger from '../playerCard/PlayerCardTrigger';
+import useSlateVerdicts from '../playerCard/useSlateVerdicts';
+import VerdictPills, { LineupVerdictSummary } from '../playerCard/VerdictPills';
 import { exportAPI } from '../../services/api';
 import { Badge, Button, Card, DataTable, EmptyState, IconChart, Stat, Tabs, cn } from '../../components/ui';
 import { downloadText, formatSalary } from '../lineupStudio/lineupMath';
@@ -113,6 +115,8 @@ function Results({ state, slateId, onNotice, onNewBuild }) {
   const [exporting, setExporting] = useState(false);
   const metrics = result.portfolio.metrics;
   const entryFee = result.contest.entryFee;
+  // Card verdicts for the inspected lineup (same cached request as the Lineup Studio cards)
+  const verdicts = useSlateVerdicts({ slateId: state.request?.slateId ?? slateId, slateDate: state.request?.slateDate ?? null });
 
   const allSelected = selected.size === rows.length;
   const toggle = (key) =>
@@ -306,7 +310,10 @@ function Results({ state, slateId, onNotice, onNewBuild }) {
       {focus && (
         <Card className="p-3">
           <div className="mb-2 flex items-center justify-between gap-2">
-            <h3 className="text-sm font-semibold text-fg">Lineup #{focus.number}</h3>
+            <h3 className="flex items-center gap-2 text-sm font-semibold text-fg">
+              Lineup #{focus.number}
+              <LineupVerdictSummary entries={focus.players.map((slot) => verdicts.lookup(slot.player))} thresholds={verdicts.data?.thresholds} />
+            </h3>
             <span className="num text-xs text-fg-muted">
               {formatSalary(focus.salary)} · {focus.projection.toFixed(1)} proj · {focus.totalOwnership.toFixed(0)}% own
               {isBacktest && ` · ${formatActual(focus.actual)} actual`}
@@ -321,6 +328,7 @@ function Results({ state, slateId, onNotice, onNewBuild }) {
                 <PlayerCardTrigger target={{ playerId: slot.player.id, name: slot.player.name, headshot: slot.player.headshot }} className="truncate text-fg">{slot.player.name}</PlayerCardTrigger>
                 {isBacktest && <span className="num ml-auto font-medium text-fg">{formatActual(slot.player.actualPoints)}</span>}
                 <span className={cn('num text-fg-subtle', !isBacktest && 'ml-auto')}>{slot.player.rostership.toFixed(0)}%</span>
+                <VerdictPills entry={verdicts.lookup(slot.player)} />
               </li>
             ))}
           </ul>

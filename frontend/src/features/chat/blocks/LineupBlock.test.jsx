@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
-import { lineupsAPI, playerSettingsAPI } from '../../../services/api'
+import { lineupsAPI, playerSettingsAPI, playersAPI } from '../../../services/api'
+import { clearSlateVerdicts } from '../../playerCard/useSlateVerdicts'
 import ChatBlock from './ChatBlock'
 import { normalizeBlock } from './blockModel'
 import { currentLocation, renderWithBlocks } from './renderBlock.testUtils'
@@ -8,6 +9,7 @@ import { currentLocation, renderWithBlocks } from './renderBlock.testUtils'
 vi.mock('../../../services/api', () => ({
   playerSettingsAPI: { getBySlateId: vi.fn(), save: vi.fn() },
   lineupsAPI: { create: vi.fn() },
+  playersAPI: { getVerdicts: vi.fn() },
 }))
 
 // Backend lineup block (uiBlocks.js): slots of { slot, player }
@@ -20,9 +22,31 @@ beforeEach(() => {
   vi.clearAllMocks()
   playerSettingsAPI.getBySlateId.mockResolvedValue({ data: [] })
   lineupsAPI.create.mockResolvedValue({ data: { id: 9 } })
+  clearSlateVerdicts()
+  playersAPI.getVerdicts.mockResolvedValue({ data: { players: {} } })
 })
 
 describe('LineupBlock', () => {
+  it('shows the card verdict column for slate players, one request for the slate', async () => {
+    const vd = (verdict, score, confidence) => ({ verdict, score, confidence })
+    playersAPI.getVerdicts.mockResolvedValue({
+      data: {
+        players: {
+          1: { id: 1, player_id: 'p1', cash: vd('Core play', 70, 68), gpp: vd('Fade', 30, 68), headline: 'h' },
+          2: { id: 2, player_id: 'p2', cash: vd('Playable', 58, 51), gpp: vd('Pivot', 48, 42), headline: 'h' },
+        },
+      },
+    })
+    renderWithBlocks(<><ChatBlock block={lineup(CORE)} /><ChatBlock block={lineup(CORE)} /></>)
+    const [card] = await screen.findAllByRole('article', { name: 'GPP core' })
+    await within(card).findByRole('img', { name: 'Cash Core play 68, GPP Fade 68' })
+    expect(within(card).getByRole('img', { name: 'Cash Playable 51, GPP Pivot 42' })).toBeInTheDocument()
+    expect(within(card).getAllByTestId('verdict-cash')).toHaveLength(2)
+    expect(within(card).getByTestId('lineup-verdict-cash')).toHaveTextContent('Cash 60')
+    expect(playersAPI.getVerdicts).toHaveBeenCalledTimes(1)
+    expect(playersAPI.getVerdicts).toHaveBeenCalledWith('42', {})
+  })
+
   it('shows slots with slate salaries and totals', () => {
     renderWithBlocks(<ChatBlock block={lineup(CORE)} />)
     const card = screen.getByRole('article', { name: 'GPP core' })

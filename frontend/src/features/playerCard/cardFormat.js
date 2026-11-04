@@ -7,6 +7,37 @@ export const VERDICT_TONE = {
   Fade: 'negative',
 };
 
+// Backend verdict.js THRESHOLDS (the verdicts endpoint sends them; this is the fallback)
+export const VERDICT_THRESHOLDS = { core: 66, playable: 54, pivot: 42 };
+
+/** Verdict label for a 0-100 score (backend verdictFor). */
+export function verdictForScore(score, thresholds = VERDICT_THRESHOLDS) {
+  const t = thresholds ?? VERDICT_THRESHOLDS;
+  if (score >= t.core) return 'Core play';
+  if (score >= t.playable) return 'Playable';
+  if (score >= t.pivot) return 'Pivot';
+  return 'Fade';
+}
+
+/** Badge tone of a verdict label ('neutral' when unknown). */
+export const verdictTone = (verdict) => VERDICT_TONE[verdict] ?? 'neutral';
+
+/**
+ * Lineup-level verdict summary of slate-verdict entries (null = no verdict):
+ * { n, cash: { confidence, score, verdict }, gpp } with the average confidence
+ * and the verdict of the average score; null when no player has one.
+ */
+export function lineupVerdictSummary(entries, thresholds) {
+  const list = entries.filter(Boolean);
+  if (!list.length) return null;
+  const avg = (f) => list.reduce((s, e) => s + f(e), 0) / list.length;
+  const mode = (m) => {
+    const score = avg((e) => e[m].score);
+    return { confidence: Math.round(avg((e) => e[m].confidence)), score: Math.round(score), verdict: verdictForScore(score, thresholds) };
+  };
+  return { n: list.length, cash: mode('cash'), gpp: mode('gpp') };
+}
+
 export const SOURCE_LABELS = { rotowire: 'RotoWire', ours: 'Ours', blend: 'Blend' };
 
 // Primary team colours (hex) for the header accent
