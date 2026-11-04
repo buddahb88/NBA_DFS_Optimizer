@@ -1,7 +1,7 @@
 {
   "version": "1",
-  "generatedAt": "2026-10-28T19:32:36.220Z",
-  "signature": "a883781d36d6",
+  "generatedAt": "2026-11-04T20:23:55.002Z",
+  "signature": "5ec160591e1a",
   "slates": [
     "2026-10-20:29794",
     "2026-10-21:29805",
@@ -10,178 +10,147 @@
     "2026-10-24:29868",
     "2026-10-25:29894",
     "2026-10-26:29910",
-    "2026-10-27:29931"
+    "2026-10-27:29931",
+    "2026-10-28:29948",
+    "2026-10-29:29970",
+    "2026-10-30:29981",
+    "2026-10-31:30006",
+    "2026-11-01:30026",
+    "2026-11-02:30040"
   ],
   "rotowire": "rotowire_adjusted",
+  "own": "own_mean_mincorr",
   "blend": {
-    "name": "blend_points_salaryTier",
+    "name": "blend_points_global",
     "kind": "points",
-    "scheme": "salaryTier",
-    "n": 878,
-    "global": 0.7,
-    "segments": {
-      "8K+": {
-        "n": 73,
-        "raw": 0.9,
-        "w": 0.7844
-      },
-      "6K-7.9K": {
-        "n": 169,
-        "raw": 0.6,
-        "w": 0.6372
-      },
-      "4K-5.9K": {
-        "n": 372,
-        "raw": 0.5,
-        "w": 0.5424
-      },
-      "<4K": {
-        "n": 264,
-        "raw": 0.9,
-        "w": 0.8451
-      }
-    },
+    "scheme": "global",
+    "n": 1713,
+    "global": 0.45,
+    "segments": {},
     "shrink": 100,
     "stability": {
       "global": {
-        "min": 0.65,
-        "max": 0.75
+        "min": 0.4,
+        "max": 0.45
       },
-      "segments": {
-        "4K-5.9K": {
-          "min": 0.493,
-          "max": 0.587
-        },
-        "<4K": {
-          "min": 0.815,
-          "max": 0.842
-        },
-        "6K-7.9K": {
-          "min": 0.62,
-          "max": 0.804
-        },
-        "8K+": {
-          "min": 0.726,
-          "max": 0.843
-        }
-      }
+      "segments": {}
     }
   },
   "looMae": [
     {
-      "projector": "blend_points_salaryTier",
-      "mae": 7.612
+      "projector": "blend_points_global",
+      "mae": 7.605
+    },
+    {
+      "projector": "own_mean_mincorr",
+      "mae": 7.67
     },
     {
       "projector": "rotowire_adjusted",
-      "mae": 7.71
-    },
-    {
-      "projector": "own_mean",
-      "mae": 8.072
+      "mae": 7.744
     }
   ],
   "disagreement": {
     "points": {
       "agree": {
-        "n": 350,
-        "hitRate": 0.566,
-        "closerRate": 0.546,
-        "meanGap": -0.02,
-        "meanEdge": -1.03
+        "n": 942,
+        "hitRate": 0.519,
+        "closerRate": 0.492,
+        "meanGap": -0.13,
+        "meanEdge": -1.17
       },
       "higher 2-4": {
-        "n": 114,
-        "hitRate": 0.421,
-        "closerRate": 0.377,
-        "meanGap": 2.94,
-        "meanEdge": -1.15
+        "n": 145,
+        "hitRate": 0.462,
+        "closerRate": 0.414,
+        "meanGap": 2.78,
+        "meanEdge": -0.14
       },
       "higher 4-6": {
-        "n": 50,
-        "hitRate": 0.46,
-        "closerRate": 0.32,
-        "meanGap": 4.86,
-        "meanEdge": 0.46
+        "n": 51,
+        "hitRate": 0.51,
+        "closerRate": 0.412,
+        "meanGap": 4.77,
+        "meanEdge": 1.92
       },
       "higher 6+": {
-        "n": 66,
-        "hitRate": 0.5,
-        "closerRate": 0.333,
-        "meanGap": 8.92,
-        "meanEdge": 1.05
+        "n": 12,
+        "hitRate": 0.583,
+        "closerRate": 0.25,
+        "meanGap": 7.02,
+        "meanEdge": -1.19
       },
       "lower 2-4": {
-        "n": 142,
-        "hitRate": 0.577,
-        "closerRate": 0.493,
-        "meanGap": -2.94,
-        "meanEdge": -0.72
+        "n": 366,
+        "hitRate": 0.623,
+        "closerRate": 0.549,
+        "meanGap": -2.93,
+        "meanEdge": -2.13
       },
       "lower 4-6": {
-        "n": 79,
-        "hitRate": 0.709,
-        "closerRate": 0.544,
-        "meanGap": -4.92,
-        "meanEdge": -4.44
+        "n": 127,
+        "hitRate": 0.756,
+        "closerRate": 0.646,
+        "meanGap": -4.87,
+        "meanEdge": -4.43
       },
       "lower 6+": {
-        "n": 77,
-        "hitRate": 0.688,
-        "closerRate": 0.494,
-        "meanGap": -9.75,
-        "meanEdge": -3.9
+        "n": 70,
+        "hitRate": 0.629,
+        "closerRate": 0.514,
+        "meanGap": -8.5,
+        "meanEdge": -4.03
       }
     },
     "minutes": {
       "agree": {
-        "n": 452,
-        "hitRate": 0.489,
-        "closerRate": 0.487,
-        "meanGap": 0.06,
-        "meanEdge": -0.75
+        "n": 1362,
+        "hitRate": 0.479,
+        "closerRate": 0.477,
+        "meanGap": -0.05,
+        "meanEdge": -0.66
       },
       "higher 2-4": {
-        "n": 94,
-        "hitRate": 0.5,
-        "closerRate": 0.436,
-        "meanGap": 2.86,
-        "meanEdge": 0.09
+        "n": 112,
+        "hitRate": 0.625,
+        "closerRate": 0.589,
+        "meanGap": 2.74,
+        "meanEdge": 2.79
       },
       "higher 4-6": {
-        "n": 45,
-        "hitRate": 0.6,
-        "closerRate": 0.467,
-        "meanGap": 4.88,
-        "meanEdge": 1.95
+        "n": 11,
+        "hitRate": 0.636,
+        "closerRate": 0.364,
+        "meanGap": 4.77,
+        "meanEdge": 2.55
       },
       "higher 6+": {
-        "n": 81,
-        "hitRate": 0.494,
-        "closerRate": 0.37,
-        "meanGap": 9.77,
-        "meanEdge": 1.93
+        "n": 4,
+        "hitRate": 0,
+        "closerRate": 0,
+        "meanGap": 7.15,
+        "meanEdge": -1.75
       },
       "lower 2-4": {
-        "n": 112,
-        "hitRate": 0.554,
-        "closerRate": 0.5,
-        "meanGap": -2.8,
-        "meanEdge": -1.37
+        "n": 181,
+        "hitRate": 0.63,
+        "closerRate": 0.586,
+        "meanGap": -2.81,
+        "meanEdge": -2.53
       },
       "lower 4-6": {
-        "n": 60,
-        "hitRate": 0.667,
-        "closerRate": 0.517,
-        "meanGap": -4.84,
-        "meanEdge": -2.66
+        "n": 31,
+        "hitRate": 0.581,
+        "closerRate": 0.516,
+        "meanGap": -4.77,
+        "meanEdge": -2.4
       },
       "lower 6+": {
-        "n": 34,
-        "hitRate": 0.588,
-        "closerRate": 0.265,
-        "meanGap": -9.24,
-        "meanEdge": -2.06
+        "n": 12,
+        "hitRate": 0.75,
+        "closerRate": 0.5,
+        "meanGap": -7.7,
+        "meanEdge": -2.78
       }
     }
   }
