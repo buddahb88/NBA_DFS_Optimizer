@@ -72,6 +72,7 @@ import optimizerService from '../../optimizerService.js';
 import { getSiteConfig } from '../../../config/sites.js';
 import { buildRequestContext, buildSolveContext } from '../context.js';
 import { filterPool } from './index.js';
+import { skipQuestionableFor, skippedSummary } from './filters.js';
 import { solveWithHighs } from '../solvers/highs.js';
 
 export const name = 'exposure';
@@ -518,13 +519,15 @@ export function generateLineupBatch(
     .filter((s) => s.lock || s.minExposure > 0)
     .map((s) => s.id);
   const overridden = applyPlayerOverrides(players, config);
+  const skipped = [];
   const pool = filterPool(
     overridden,
-    buildSolveContext({ ...requestCtx, lockedPlayers: new Set(keepIds) }, overridden)
+    buildSolveContext({ ...requestCtx, lockedPlayers: new Set(keepIds) }, overridden, { skippedQuestionable: skipped })
   );
+  const skippedQuestionable = skippedSummary(skipQuestionableFor({ ...body, mode }), skipped);
 
   if (pool.length < 20) {
-    return { lineups: [], exposureStats: null, exposureSummary: null, error: 'Insufficient players', warnings: [] };
+    return { lineups: [], exposureStats: null, exposureSummary: null, error: 'Insufficient players', warnings: [], skippedQuestionable };
   }
 
   const plan = planExposure(pool, config);
@@ -613,8 +616,10 @@ export function generateLineupBatch(
     exposureStats: lineups.length > 1 ? optimizer.getExposureStats(lineups, pool) : null,
     exposureSummary: buildExposureSummary(lineups, pool, plan),
     warnings,
+    skippedQuestionable,
     settings: {
       mode,
+      skipQuestionable: skippedQuestionable.enabled,
       site: site.key,
       numLineups: lineups.length,
       requestedLineups: N,

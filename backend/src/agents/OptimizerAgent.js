@@ -13,7 +13,8 @@ import { resolveSite } from '../utils/resolveSite.js';
 import { withUiBlocks } from '../services/chatTools/uiBlockBuilders.js';
 import { chatSlate, loadSlatePlayers, scoreLineups, withActuals, lineupActualTotal } from '../services/slateSource.js';
 import { withOpportunity, validateOpportunityWeight } from '../services/opportunity/optimizerNudge.js';
-import { chatSourceFields } from '../services/projections/sourceLayer.js';
+import { chatInjuryFields, chatSourceFields } from '../services/projections/sourceLayer.js';
+import { questionableNote } from '../services/chatTools/questionableNote.js';
 
 const SLATE_DATE_PROP = {
   type: 'string',
@@ -101,6 +102,10 @@ class OptimizerAgent extends BaseAgent {
               type: 'number',
               description: 'Randomness 0-100 for GPP variance (default 0)'
             },
+            skipQuestionable: {
+              type: 'boolean',
+              description: 'Leave out QUES / DOUBT / GTD players unless locked (default: true for cash, false for gpp). Questionable players play ~70-80% of the time; their projections are already discounted by that chance.'
+            },
             opportunityWeight: {
               type: 'number',
               description: 'Opportunity factor 0-1 (default 0 = off): nudges projections up to +-10% by the Opportunity Radar score for the mode (cash or gpp). Use when the task asks to lean into players in a good spot.'
@@ -108,7 +113,7 @@ class OptimizerAgent extends BaseAgent {
           },
           required: []
         },
-        execute: async ({ slateId, slateDate, lockedPlayerIds = [], excludedPlayerIds = [], mode = 'cash', numLineups = 1, minSalary = 49000, randomness = 0, opportunityWeight = 0 }) => {
+        execute: async ({ slateId, slateDate, lockedPlayerIds = [], excludedPlayerIds = [], mode = 'cash', numLineups = 1, minSalary = 49000, randomness = 0, opportunityWeight = 0, skipQuestionable }) => {
           console.log(`\n🏀 [OptimizerAgent] Building ${numLineups} ${mode.toUpperCase()} lineup(s)`);
           if (lockedPlayerIds.length > 0) {
             console.log(`🔒 Locked players: ${lockedPlayerIds.join(', ')}`);
@@ -132,9 +137,10 @@ class OptimizerAgent extends BaseAgent {
           // Use optimizer service (site rules follow the slate's site)
           const { site } = source.isBacktest ? { site: source.site } : await resolveSite(undefined, source.slateId);
           const { players, opportunity } = await withOpportunity(source, loaded, { weight: opportunityWeight, mode, site });
-          const { lineups: built } = optimizerService.optimize(players, {
+          const { lineups: built, skippedQuestionable } = optimizerService.optimize(players, {
             site,
             mode,
+            skipQuestionable,
             numLineups: Math.min(numLineups, 20),
             lockedPlayers: lockedPlayerIds,
             excludedPlayers: excludedPlayerIds,
@@ -160,6 +166,7 @@ class OptimizerAgent extends BaseAgent {
                 ownership: slot.player.rostership,
                 floor: slot.player.floor,
                 ceiling: slot.player.ceiling,
+                ...chatInjuryFields(slot.player),
                 ...(opportunity ? { opportunityScore: slot.player.opportunity_score ?? null, baseProjectedPoints: slot.player.base_projected_points ?? null } : {}),
                 ...actualOf(slot.player),
               } : null,
@@ -176,6 +183,7 @@ class OptimizerAgent extends BaseAgent {
             count: formattedLineups.length,
             mode,
             slateId: source.slateId,
+            ...questionableNote(skippedQuestionable),
             ...(opportunity ? { opportunityWeight: opportunity.weight, opportunityNote: 'Projections nudged by the Opportunity Radar score (projectedPoints; baseProjectedPoints is the posted one).' } : {}),
             ...dateFields,
           };

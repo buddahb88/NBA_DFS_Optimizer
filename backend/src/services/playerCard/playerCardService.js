@@ -294,6 +294,12 @@ export function assemblePlayer(p, prep, history) {
     leverage: num(p.leverage_score),
     value: active !== null && salaryK ? r2(active / salaryK) : null,
     projection_reasons: p.projection_reasons ?? null,
+    injury_tag: p.injury_tag ?? null,
+    injury_risk: p.injury_risk ?? null,
+    injury_play_prob: num(p.injury_play_prob),
+    injury_tag_play_prob: num(p.injury_tag_play_prob),
+    injury_discount: num(p.injury_discount),
+    projection_if_plays: num(p.projection_if_plays),
   };
 
   // --- Matchup ------------------------------------------------------------------------
@@ -356,6 +362,10 @@ export function assemblePlayer(p, prep, history) {
     name: p.name,
     salary,
     injuryStatus: p.injury_status,
+    injuryTag: projection.injury_tag,
+    injuryPlayProb: projection.injury_play_prob,
+    injuryDiscount: projection.injury_discount,
+    projectionIfPlays: projection.projection_if_plays,
     pPlay: projection.p_play,
     projection: active,
     sourceLabel: SOURCE_LABELS[activeSource] ?? 'Projection',

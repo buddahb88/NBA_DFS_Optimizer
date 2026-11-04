@@ -1,11 +1,28 @@
 import { valuePer1k } from '../scoring.js';
+import { normalizeTag, QUESTIONABLE_TAGS } from '../../projections/injuryRisk.js';
 
 /**
  * PLAYER POOL FILTERS
  * Drops players that miss the request's stat thresholds before any solve.
  * Locked players always stay. A filter at its default value is off.
+ *
+ * skipQuestionable: drop QUES / DOUBT / GTD players (PROB stays). Default ON
+ * for cash, OFF for GPP (skipQuestionableDefault); locked players are kept.
+ * The dropped players are recorded on ctx.skippedQuestionable (an array the
+ * caller may pass in) for the response.
  */
 export const name = 'filters';
+
+/** skipQuestionable's default for a mode: on for cash, off for GPP. */
+export const skipQuestionableDefault = (mode) => (mode || 'cash') !== 'gpp';
+
+/** The request's skipQuestionable (explicit boolean, else the mode default). */
+export const skipQuestionableFor = (settings = {}) => (typeof settings.skipQuestionable === 'boolean'
+  ? settings.skipQuestionable
+  : skipQuestionableDefault(settings.mode));
+
+/** True for a Q-type tag (QUES / DOUBT / GTD in any spelling). */
+export const isQuestionable = (player) => QUESTIONABLE_TAGS.includes(player?.injury_tag ?? normalizeTag(player?.injury_status));
 
 export function filterPlayers(players, ctx) {
   const {
@@ -37,10 +54,19 @@ export function filterPlayers(players, ctx) {
   if (maxVolatility < 1) console.log(`   - Max Volatility: ${maxVolatility}`);
   if (minLeverageScore > 0) console.log(`   - Min Leverage: ${minLeverageScore}`);
 
-  return players.filter(player => {
+  const skipQ = skipQuestionableFor({ ...ctx.settings, mode: ctx.mode ?? ctx.settings?.mode });
+  if (skipQ) console.log(`   - Skip questionable (QUES / DOUBT / GTD unless locked)`);
+  const skipped = Array.isArray(ctx.skippedQuestionable) ? ctx.skippedQuestionable : [];
+
+  const kept = players.filter(player => {
     // Always keep locked players
     if (ctx.lockedPlayers.has(player.id)) {
       return true;
+    }
+
+    if (skipQ && isQuestionable(player) && Number(player.projected_points) > 0) {
+      skipped.push(player);
+      return false;
     }
 
     // Must have a projection
@@ -109,4 +135,13 @@ export function filterPlayers(players, ctx) {
 
     return true;
   });
+  if (skipped.length) console.log(`   Skipped ${skipped.length} questionable: ${skipped.map(p => p.name).join(', ')}`);
+  return kept;
 }
+
+/** Response summary of the skip: { enabled, count, players: [{ id, name, team, salary, injury_status }] }. */
+export const skippedSummary = (enabled, skipped = []) => ({
+  enabled,
+  count: skipped.length,
+  players: skipped.map(p => ({ id: p.id, name: p.name, team: p.team, salary: p.salary, injury_status: p.injury_status }))
+});

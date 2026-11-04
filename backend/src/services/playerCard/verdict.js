@@ -31,8 +31,9 @@ const f1 = (x) => Number(x).toFixed(1);
 const signed = (x, d = 1) => `${x >= 0 ? '+' : ''}${Number(x).toFixed(d)}`;
 const pct = (x) => `${Math.round(Number(x) * 100)}%`;
 
+const TAG_WORDS = { QUES: 'Questionable', PROB: 'Probable', DOUBT: 'Doubtful', GTD: 'Game-time decision' };
 const OUT_RE = /^(out|o|inactive|ofs|suspended|injured reserve|ir)$/i;
-const RISK_RE = /^(gtd|q|questionable|doubtful|d|game time decision|day-to-day|dtd)$/i;
+const RISK_RE = /^(gtd|q|ques|questionable|doubt|doubtful|d|game time decision|day-to-day|dtd)$/i;
 export const isOut = (status) => OUT_RE.test(String(status ?? '').trim());
 export const isRisky = (status) => RISK_RE.test(String(status ?? '').trim());
 
@@ -46,6 +47,9 @@ export function verdictFor(score) {
 /**
  * Signals the engine reads (all optional; missing ones simply do not fire):
  *   name, salary, injuryStatus, pPlay
+ *   injuryTag, injuryPlayProb, injuryDiscount, projectionIfPlays - the source
+ *     layer's injury-tag risk (projections/sourceLayer.js applyInjuryRisk):
+ *     projection is then already the risk-adjusted one (P(play) x if-plays)
  *   projection (active), rotowire, ours, sourceLabel, p90 (ceiling), pBoom
  *   rostership (percent)
  *   fade: { points_diff, hit_rate, n } | null, oursDiff (ours - RotoWire)
@@ -81,7 +85,21 @@ export function buildVerdict(s = {}) {
   }
 
   // --- Minutes / role / injury (largest weights) ---------------------------
-  if (isRisky(s.injuryStatus)) {
+  const injuryP = num(s.injuryPlayProb);
+  if (injuryP !== null && injuryP < 1) {
+    // A zero sinks a cash lineup: the penalty grows with the DNP chance; GPPs mostly price it via the projection
+    const tagWord = TAG_WORDS[s.injuryTag] ?? s.injuryStatus ?? 'Tagged';
+    const discount = num(s.injuryDiscount);
+    const ifPlays = num(s.projectionIfPlays);
+    const adj = discount !== null && discount < 1 && ifPlays !== null
+      ? `; projection shown x${discount.toFixed(2)} (if he plays: ${ifPlays.toFixed(1)})` : '';
+    add('injury_risk', {
+      cash: -clamp(35 * (1 - injuryP), 2, 20),
+      gpp: -clamp(10 * (1 - injuryP), 1, 6),
+      text: `${tagWord}: plays ~${pct(injuryP)} of the time${adj}`,
+      blurb: `the ${s.injuryTag ?? s.injuryStatus} tag means he plays only ~${pct(injuryP)} of the time`
+    });
+  } else if (isRisky(s.injuryStatus)) {
     add('injury_risk', { cash: -12, gpp: -4, text: `Injury tag: ${s.injuryStatus} - minutes not guaranteed` });
   }
   const pPlay = num(s.pPlay);
@@ -277,8 +295,12 @@ export function buildBlurb(v, s = {}, value = null) {
   else if (v.notes.length) sentences.push(v.notes[0]);
   const own = num(s.rostership);
   const proj = num(s.projection);
+  const discount = num(s.injuryDiscount);
+  const ifPlays = num(s.projectionIfPlays);
+  const riskAdj = discount !== null && discount < 1 && ifPlays !== null
+    ? ` (risk-adjusted x${discount.toFixed(2)} for the ${s.injuryTag ?? 'injury'} tag; ${ifPlays.toFixed(1)} if he plays)` : '';
   const tail = [
-    proj !== null ? `${s.sourceLabel ?? 'Projection'} ${proj.toFixed(1)}` : null,
+    proj !== null ? `${s.sourceLabel ?? 'Projection'} ${proj.toFixed(1)}${riskAdj}` : null,
     own !== null ? `${f1(own)}% owned` : null,
     value !== null ? `${value.toFixed(2)}x` : null,
   ].filter(Boolean).join(', ');

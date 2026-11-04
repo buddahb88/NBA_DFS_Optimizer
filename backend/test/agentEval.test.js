@@ -118,10 +118,15 @@ const CASES = [
         const row = await db.get('SELECT * FROM players WHERE slate_id = ? AND name = ?', out.slateId, p.name);
         assert.ok(row, `${p.name} not on slate ${out.slateId}`);
         assert.equal(p.salary, row.salary, p.name);
-        // The projection after the sanity layer's default components (blowout trim)
+        // The projection after the sanity layer's default components (blowout trim),
+        // then the injury-tag discount (P(play | tag) for QUES / DOUBT / ...)
         const { adjustPlayer } = await import('../src/services/projections/sanityService.js');
         const { projectionSanityConfig } = await import('../src/config/projectionSanity.js');
-        assert.equal(p.projectedPoints, adjustPlayer(row, null, projectionSanityConfig()).projected_points, p.name);
+        const { applyInjuryRisk } = await import('../src/services/projections/sourceLayer.js');
+        const { injuryRiskEnabled, injuryRiskTable } = await import('../src/config/injuryRisk.js');
+        const sane = adjustPlayer(row, null, projectionSanityConfig());
+        const expected = injuryRiskEnabled() ? applyInjuryRisk(sane, injuryRiskTable()) : sane;
+        assert.equal(p.projectedPoints, expected.projected_points, p.name);
         const defense = await db.get(`SELECT fp_over_expectation AS fp,
             (SELECT COUNT(*) FROM team_archetype_defense o WHERE o.season = d.season AND o.site = d.site AND o.group_by = d.group_by
                AND o.group_key = d.group_key AND o.fp_over_expectation > d.fp_over_expectation) + 1 AS rank

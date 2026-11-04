@@ -27,6 +27,8 @@
  * RotoWire's, as with the sanity layer.
  */
 
+import { normalizeTag, riskLevel, tagLabel, tagPlayProbability } from './injuryRisk.js';
+
 export const FADE_THRESHOLD = 4;
 const Z90 = 1.2816;
 
@@ -113,6 +115,83 @@ export function applySource(player, own, source, { reason = null, threshold = FA
   };
 }
 
+/**
+ * INJURY-TAG RISK (after the source is chosen, every source). A tagged player
+ * (QUES / PROB / DOUBT / GTD; injuryRisk.js) gets
+ *   injury_play_prob     P(play) used: min(P(play | tag, salary band), model p_play)
+ *   projection_if_plays  the source projection / model p_play (the model's mean
+ *                        already includes its own DNP chance; RotoWire's and a
+ *                        fallback's do not: model p_play = 1 there)
+ *   projected_points     injury_play_prob x projection_if_plays
+ * Combining with our model: MIN, not product. The model's p_play already
+ * prices the base DNP rate every player has; the tag rate is the play rate of
+ * tagged players overall, so multiplying would count the base rate twice.
+ * With the min, a tag only lowers the projection when it is the stronger
+ * signal (p_play 0.97, QUES 0.68 -> x0.70; p_play 0.5 -> unchanged).
+ * The discount factor (injury_play_prob / model p_play) also scales floor,
+ * value and boom_probability (a boom needs him to play); ceiling and std_dev
+ * stay (GPP upside if he plays). injury_risk: 'none' | 'low' | 'medium' | 'high'.
+ * Untagged players get injury_risk 'none' and null fields; OUT / projected-0
+ * players are left alone.
+ */
+export const INJURY_FIELDS = Object.freeze([
+  'injury_tag', 'injury_risk', 'injury_play_prob', 'injury_tag_play_prob', 'projection_if_plays',
+  'projection_pre_injury', 'injury_discount'
+]);
+
+const MODEL_SOURCES = new Set(['ours', 'blend']);
+const MIN_MODEL_P = 0.2;
+
+export function applyInjuryRisk(player, table) {
+  const untouched = { injury_tag: null, injury_risk: 'none', injury_play_prob: null, injury_tag_play_prob: null,
+    projection_if_plays: null, projection_pre_injury: null, injury_discount: null };
+  const projection = num(player.projected_points);
+  const tagged = tagPlayProbability(table, player.injury_status, player.salary);
+  if (!tagged || !(projection > 0)) {
+    const tag = normalizeTag(player.injury_status);
+    return { ...player, ...untouched, injury_tag: tag && tag !== 'OUT' ? tag : null };
+  }
+  const modelP = MODEL_SOURCES.has(player.projection_source) && finite(num(player.p_play)) && num(player.p_play) > 0
+    ? Math.max(MIN_MODEL_P, num(player.p_play)) : 1;
+  const pPlay = Math.min(modelP, tagged.p);
+  const factor = pPlay / modelP;
+  const ifPlays = projection / modelP;
+  const point = projection * factor;
+  const stdDev = num(player.std_dev);
+  return {
+    ...player,
+    projected_points: round(point),
+    value: scaled(player.value, factor),
+    floor: scaled(player.floor, factor),
+    boom_probability: scaled(player.boom_probability, factor),
+    volatility: stdDev !== null && point > 0 && player.volatility !== null && player.volatility !== undefined
+      ? round(stdDev / point, 4) : player.volatility,
+    injury_tag: tagged.tag,
+    injury_risk: riskLevel(pPlay),
+    injury_play_prob: round(pPlay, 3),
+    injury_tag_play_prob: round(tagged.p, 3),
+    projection_if_plays: round(ifPlays),
+    projection_pre_injury: round(projection),
+    injury_discount: round(factor, 3)
+  };
+}
+
+/** The injury fields of a row ({} when the layer did not run). */
+export const pickInjuryFields = (p) => (p && 'injury_risk' in p
+  ? Object.fromEntries(INJURY_FIELDS.filter(f => f in p).map(f => [f, p[f]]))
+  : {});
+
+/** Compact injury fields for chat / agent payloads ({} for untagged players). */
+export function chatInjuryFields(p) {
+  if (!p?.injury_tag || !finite(p.injury_play_prob)) return {};
+  return {
+    injuryRisk: p.injury_risk,
+    playProbability: p.injury_play_prob,
+    projectionIfPlays: p.projection_if_plays,
+    injuryNote: `${tagLabel(p.injury_tag)}: plays ~${Math.round(p.injury_tag_play_prob * 100)}% of the time; projection is x${p.injury_discount} of ${p.projection_if_plays} if he plays`
+  };
+}
+
 export const SOURCE_FIELDS = Object.freeze([
   'projection_source', 'projection_requested', 'projection_fallback', 'projection_fallback_reason',
   'projection_rotowire', 'projection_ours', 'projection_blend', 'ours_minutes', 'p_play', 'projection_fade'
@@ -126,10 +205,11 @@ export const pickSourceFields = (p) => (p?.projection_source
 /**
  * Compact source fields for chat / agent tool payloads ({} for a RotoWire
  * read): which source the projection is, the three numbers, our minutes /
- * p_play and the fade call.
+ * p_play and the fade call; plus the injury-tag risk fields (chatInjuryFields)
+ * for a tagged player on any source.
  */
 export function chatSourceFields(p) {
-  if (!p?.projection_source) return {};
+  if (!p?.projection_source) return chatInjuryFields(p);
   const fade = p.projection_fade;
   return {
     projectionSource: p.projection_source,
@@ -139,8 +219,12 @@ export function chatSourceFields(p) {
     blendProjection: p.projection_blend,
     oursMinutes: p.ours_minutes,
     pPlay: p.p_play,
-    ...(fade ? { fade: { pointsDiff: fade.points_diff, hitRate: fade.hit_rate, calls: fade.n, note: fade.text } } : {})
+    ...(fade ? { fade: { pointsDiff: fade.points_diff, hitRate: fade.hit_rate, calls: fade.n, note: fade.text } } : {}),
+    ...chatInjuryFields(p)
   };
 }
 
-export default { FADE_THRESHOLD, SOURCE_FIELDS, fadeCall, sourceNumbers, applySource, pickSourceFields, chatSourceFields };
+export default {
+  FADE_THRESHOLD, SOURCE_FIELDS, INJURY_FIELDS, fadeCall, sourceNumbers, applySource, applyInjuryRisk,
+  pickSourceFields, pickInjuryFields, chatSourceFields, chatInjuryFields
+};

@@ -184,8 +184,8 @@ export async function projectSlateOwnModel(slateId, {
   }
 
   let t0 = Date.now();
-  const raw = await loadSlatePlayers(source, { includeZero: true, sanity: false, projectionSource: 'rotowire', now });
-  const adjusted = new Map((await loadSlatePlayers(source, { includeZero: true, sanity: true, projectionSource: 'rotowire', now })).map(p => [p.id, p]));
+  const raw = await loadSlatePlayers(source, { includeZero: true, sanity: false, projectionSource: 'rotowire', injuryRisk: false, now });
+  const adjusted = new Map((await loadSlatePlayers(source, { includeZero: true, sanity: true, projectionSource: 'rotowire', injuryRisk: false, now })).map(p => [p.id, p]));
   timings.slateMs = ms(t0);
   if (!raw.length) throw Object.assign(new Error(`No players for slate ${source.slateId}`), { status: 404 });
 

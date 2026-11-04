@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Badge, Button, IconBan, IconCheck, IconChat, IconLock, IconAlert, IconX, Tooltip, cn } from '../../components/ui';
+import InjuryRiskBadge from '../playerPool/InjuryRiskBadge';
 import {
   ConfidenceRing,
   GameLogChart,
@@ -21,7 +22,6 @@ import {
   fmtSigned,
   gameTime,
   initials,
-  injuryBadge,
   isNum,
   teamColor,
 } from './cardFormat';
@@ -86,7 +86,7 @@ export function VerdictPill({ label, verdict }) {
 function Header({ card, onClose }) {
   const p = card.player;
   const color = teamColor(p.team);
-  const injury = injuryBadge(p.injury_status);
+  const riskPlayer = { ...card.projection, injury_status: p.injury_status };
   const time = gameTime(p.game_time);
   return (
     <div className="relative overflow-hidden border-b border-line">
@@ -101,7 +101,7 @@ function Header({ card, onClose }) {
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <h2 className="truncate text-lg font-bold leading-tight text-fg sm:text-xl">{p.name}</h2>
-            {injury && <Badge tone={injury.tone}>{injury.label}</Badge>}
+            <InjuryRiskBadge player={riskPlayer} size="md" />
           </div>
           <p className="mt-0.5 truncate text-xs text-fg-muted">
             <span className="font-semibold text-fg">{String(p.position || '').split(',').filter((x) => x !== 'UTIL').join('/')}</span>

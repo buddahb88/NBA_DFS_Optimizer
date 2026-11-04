@@ -1,0 +1,110 @@
+{
+  "pseudo": {
+    "tag": 10,
+    "band": 10
+  },
+  "fallback": {
+    "QUES": 0.68,
+    "PROB": 0.92,
+    "DOUBT": 0.25,
+    "GTD": 0.68
+  },
+  "rows": 2023,
+  "untagged": {
+    "n": 1939,
+    "played": 1833,
+    "raw": 0.945
+  },
+  "tags": {
+    "QUES": {
+      "n": 69,
+      "played": 53,
+      "raw": 0.768,
+      "p_play": 0.757,
+      "source": "slates",
+      "bands": {
+        "lt5k": {
+          "n": 37,
+          "played": 26,
+          "raw": 0.703,
+          "p_play": 0.714
+        },
+        "5k+": {
+          "n": 32,
+          "played": 27,
+          "raw": 0.844,
+          "p_play": 0.823
+        }
+      }
+    },
+    "PROB": {
+      "n": 11,
+      "played": 10,
+      "raw": 0.909,
+      "p_play": 0.914,
+      "source": "slates",
+      "bands": {
+        "lt5k": {
+          "n": 5,
+          "played": 4,
+          "raw": 0.8,
+          "p_play": 0.876
+        },
+        "5k+": {
+          "n": 6,
+          "played": 6,
+          "raw": 1,
+          "p_play": 0.946
+        }
+      }
+    },
+    "DOUBT": {
+      "n": 4,
+      "played": 4,
+      "raw": 1,
+      "p_play": 0.464,
+      "source": "slates",
+      "bands": {
+        "lt5k": {
+          "n": 0,
+          "played": 0,
+          "raw": null,
+          "p_play": 0.464
+        },
+        "5k+": {
+          "n": 4,
+          "played": 4,
+          "raw": 1,
+          "p_play": 0.617
+        }
+      }
+    },
+    "GTD": {
+      "n": 69,
+      "played": 53,
+      "raw": 0.768,
+      "p_play": 0.757,
+      "source": "QUES (no GTD rows)",
+      "bands": {
+        "lt5k": {
+          "n": 37,
+          "played": 26,
+          "raw": 0.703,
+          "p_play": 0.714
+        },
+        "5k+": {
+          "n": 32,
+          "played": 27,
+          "raw": 0.844,
+          "p_play": 0.823
+        }
+      }
+    }
+  },
+  "generated_at": "2026-11-04T19:38:53.961Z",
+  "dates": {
+    "first": "2026-10-20",
+    "last": "2026-11-02",
+    "nights": 14
+  }
+}

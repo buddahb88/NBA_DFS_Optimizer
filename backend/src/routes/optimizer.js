@@ -43,9 +43,14 @@ async function requestSlate(body = {}, { projectionSource = body.projectionSourc
     : await resolveSite(body.site, source?.slateId ?? slateId);
   if (siteError) return { status: 400, error: siteError };
   let summary = null;
-  const players = await loadSlatePlayers(source, { ranges, projectionSource, onProjectionSource: (x) => { summary = x; } });
+  let injuryRisk = null;
+  const players = await loadSlatePlayers(source, {
+    ranges, projectionSource,
+    onProjectionSource: (x) => { summary = x; },
+    onInjuryRisk: (x) => { injuryRisk = x; }
+  });
   if (!players.length) return { status: 404, error: 'No players found for this slate' };
-  return { source: source.isBacktest ? { ...source, ranges } : source, site, players, projectionSource: summary };
+  return { source: source.isBacktest ? { ...source, ranges } : source, site, players, projectionSource: summary, injuryRisk };
 }
 
 /** Validation shared by generate and compare-sources: { error, details? } or null. */
@@ -88,7 +93,9 @@ export function poolAccuracy(players) {
  * opportunityWeight (0-1, default 0 = off: projections nudged by the
  * Opportunity Radar score for the mode, services/opportunity/optimizerNudge.js;
  * the response then carries `opportunity` and nudged players their
- * opportunity_score / base_projected_points)
+ * opportunity_score / base_projected_points), skipQuestionable (drop QUES /
+ * DOUBT / GTD players unless locked; default true for cash, false for GPP;
+ * the response's skippedQuestionable: { enabled, count, players })
  */
 router.post('/generate', async (req, res) => {
   try {
@@ -126,6 +133,8 @@ router.post('/generate', async (req, res) => {
       count: lineups.length,
       exposureStats: result.exposureStats,
       exposureSummary: result.exposureSummary,
+      skippedQuestionable: result.skippedQuestionable ?? null,
+      ...(slate.injuryRisk ? { injuryRisk: slate.injuryRisk } : {}),
       ...(opportunity ? { opportunity } : {}),
       ...(slate.projectionSource ? { projectionSource: slate.projectionSource } : {}),
       warnings: result.warnings,
@@ -191,6 +200,7 @@ router.post('/compare-sources', async (req, res) => {
             projected: s.player?.projected_points ?? null, actual: s.player?.actualPoints ?? null
           }))
         } : null,
+        skippedQuestionable: result.skippedQuestionable ?? null,
         warnings: result.warnings ?? [],
         error: result.error ?? null,
         ms: Date.now() - t0

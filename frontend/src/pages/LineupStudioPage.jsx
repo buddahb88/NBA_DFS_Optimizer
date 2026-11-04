@@ -27,7 +27,7 @@ import PlayerPoolTable from '../features/lineupStudio/PlayerPoolTable';
 import ManualBuilder from '../features/lineupStudio/ManualBuilder';
 import { settingsFromPreset } from '../features/lineupStudio/presets';
 import { validateDraftRules } from '../features/lineupStudio/stackRules';
-import { buildOptimizerRequest } from '../features/lineupStudio/request';
+import { buildOptimizerRequest, skippedNotice } from '../features/lineupStudio/request';
 import PortfolioBuilderModal from '../features/portfolio/PortfolioBuilderModal';
 import PortfolioPanel from '../features/portfolio/PortfolioPanel';
 import usePortfolioJob from '../features/portfolio/usePortfolioJob';
@@ -265,7 +265,10 @@ export default function LineupStudioPage() {
           details: [...warnings, 'Try relaxing pool filters, stack rules or locks.'],
         });
       } else {
-        setRun({ status: 'done', lineups, warnings, requested: settings.numLineups, maxExposure: settings.maxExposure, request });
+        setRun({
+          status: 'done', lineups, warnings, requested: settings.numLineups, maxExposure: settings.maxExposure, request,
+          skippedQuestionable: res.data.skippedQuestionable ?? null,
+        });
       }
     } catch (err) {
       if (slateRef.current !== requestSlate) return;
@@ -632,6 +635,13 @@ export default function LineupStudioPage() {
 
                 {run.warnings.length > 0 && (
                   <Notice notice={{ tone: 'caution', text: 'The optimizer reported:', details: run.warnings }} onDismiss={() => setRun({ ...run, warnings: [] })} />
+                )}
+
+                {run.skippedQuestionable?.count > 0 && (
+                  <Notice
+                    notice={skippedNotice(run.skippedQuestionable)}
+                    onDismiss={() => setRun({ ...run, skippedQuestionable: null })}
+                  />
                 )}
 
                 <div className="flex flex-wrap items-center justify-between gap-2">

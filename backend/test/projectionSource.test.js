@@ -293,9 +293,14 @@ describe('regression: RotoWire source leaves the optimizer as it was', () => {
     const expected = sanity.projectionSanityEnabled()
       ? await applyProjectionSanity(source, posted, { projected: all.filter(p => p.projected_points > 0), all, now: NOW })
       : posted;
-    const players = await slateSource.loadSlatePlayers(source, { now: NOW });
+    // The injury-tag discount is its own layer (injuryRisk.test.js): off here
+    const players = await slateSource.loadSlatePlayers(source, { now: NOW, injuryRisk: false });
     const strip = (list) => list.map(p => ({ ...p, roster_positions: undefined })).sort((a, b) => a.id - b.id);
     assert.deepEqual(strip(players), strip(expected));
+    // ... and with no tagged players it changes no number
+    const withRisk = await slateSource.loadSlatePlayers(source, { now: NOW, injuryRisk: true });
+    assert.deepEqual(withRisk.map(p => [p.id, p.projected_points, p.floor, p.ceiling]).sort((a, b) => a[0] - b[0]),
+      players.map(p => [p.id, p.projected_points, p.floor, p.ceiling]).sort((a, b) => a[0] - b[0]));
 
     const ids = (r) => r.lineups.map(l => l.players.map(s => s.player?.id).sort());
     for (const settings of [{ mode: 'cash', numLineups: 1 }, { mode: 'gpp', numLineups: 3, minUniqueness: 2 }]) {

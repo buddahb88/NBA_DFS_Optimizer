@@ -1,4 +1,4 @@
-import { Button, IconBolt, Input, Select, Slider } from '../../components/ui';
+import { Button, IconBolt, Input, Select, Slider, Toggle } from '../../components/ui';
 import { CONTEST_PRESETS, PRESET_OPTIONS } from './presets';
 import StackRuleBuilder from './StackRuleBuilder';
 import { formatSalary } from './lineupMath';
@@ -120,6 +120,15 @@ export default function SettingsPanel({
         />
         <p className="-mt-1.5 text-2xs text-fg-subtle">
           Nudges projections up to ±10% by the Opportunity Radar {settings.mode === 'gpp' ? 'GPP' : 'Cash'} score. Off leaves them unchanged.
+        </p>
+        <Toggle
+          size="sm"
+          checked={settings.skipQuestionable ?? settings.mode !== 'gpp'}
+          onChange={(v) => onChange({ skipQuestionable: v })}
+          label="Skip questionable players"
+        />
+        <p className="-mt-1.5 text-2xs text-fg-subtle">
+          Leaves Q / D / GTD players out unless locked (default on for cash, off for GPP). Their projections are already discounted by how often tagged players play.
         </p>
       </Section>
 

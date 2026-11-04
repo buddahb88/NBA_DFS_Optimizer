@@ -9,6 +9,7 @@ import {
   projectionSanityConfig, projectionSanityStatus, setProjectionSanity, setProjectionSanityComponents
 } from '../config/projectionSanity.js';
 import { SOURCES, parseSource, projectionSourceStatus, setProjectionSource } from '../config/projectionSource.js';
+import { injuryRiskStatus, parseEnabled, setInjuryRiskEnabled } from '../config/injuryRisk.js';
 import { SlateSourceError, loadSlatePlayers, resolveSlate } from '../services/slateSource.js';
 import { clearSlateVerdictCache } from '../services/playerCard/slateVerdicts.js';
 
@@ -132,6 +133,47 @@ router.put('/source', (req, res) => {
   }
   const status = setProjectionSource(source);
   // The active source changed: verdicts cached under the old default are stale
+  clearSlateVerdictCache();
+  res.json(status);
+});
+
+/**
+ * GET /api/projections/injury-risk[?slateId=&slateDate=]
+ * Injury-tag discount setting (config/injuryRisk.js): { enabled, origin,
+ * default, table: { generatedAt, rows, playProbability: { TAG: { all, lt5k,
+ * 5k+, n } } } }. With slateId / slateDate it also reads that slate and adds
+ * `slate`: { tagged, adjusted, byTag, table } (table: 'committed' or 'as of
+ * <date>' for a backtest).
+ */
+router.get('/injury-risk', async (req, res) => {
+  const status = injuryRiskStatus();
+  const { slateId, slateDate } = req.query;
+  if (!slateId && !slateDate) return res.json(status);
+  try {
+    const source = await resolveSlate({ slateId, slateDate });
+    if (!source) return res.status(404).json({ error: 'No slate' });
+    let summary = null;
+    await loadSlatePlayers(source, { includeZero: true, onInjuryRisk: (s) => { summary = s; } });
+    res.json({ ...status, slate: summary ?? { enabled: false, tagged: null, adjusted: 0, byTag: {}, table: null } });
+  } catch (error) {
+    if (error instanceof SlateSourceError) return res.status(error.status).json({ error: error.message });
+    console.error('Injury risk status error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * PUT /api/projections/injury-risk
+ * Body { enabled: true | false | null }: runtime override until the server
+ * restarts; null resets to env (INJURY_RISK_DISCOUNT) / default (on).
+ */
+router.put('/injury-risk', (req, res) => {
+  const { enabled } = req.body || {};
+  if (enabled === undefined || (enabled !== null && parseEnabled(enabled) === null)) {
+    return res.status(400).json({ error: 'enabled must be true, false or null (reset)' });
+  }
+  const status = setInjuryRiskEnabled(enabled);
+  // Verdicts cached with the old projections are stale
   clearSlateVerdictCache();
   res.json(status);
 });

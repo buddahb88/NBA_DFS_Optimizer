@@ -1,5 +1,6 @@
 import { Badge, Tooltip, cn } from '../../components/ui';
-import { bandTone, injuryCode, injuryTone } from './playerPool';
+import { bandTone, injuryCode } from './playerPool';
+import InjuryRiskBadge from './InjuryRiskBadge';
 import { ControlButton, Dash, IconBan, IconLock, MatchupCell, Num, NumberCell, OwnershipCell } from './cells';
 import ProjectionCell from '../slate/ProjectionCell';
 import PlayerCardTrigger from '../playerCard/PlayerCardTrigger';
@@ -195,12 +196,7 @@ export function buildColumns({ stats, onUpdate, cardTarget }) {
       accessorFn: (p) => injuryCode(p.injury_status) ?? undefined,
       sortUndefined: 'last',
       meta: { align: 'center', label: 'Injury' },
-      cell: ({ getValue }) =>
-        getValue() ? (
-          <Badge size="sm" tone={injuryTone(getValue())}>
-            {getValue()}
-          </Badge>
-        ) : null,
+      cell: ({ row }) => <InjuryRiskBadge player={row.original} />,
     },
     {
       id: 'minExp',

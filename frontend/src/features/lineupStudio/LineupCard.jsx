@@ -1,6 +1,7 @@
 import { Badge, Button, IconCheck, Tooltip, cn } from '../../components/ui';
 import { formatSalary, lineupTotals } from './lineupMath';
 import PlayerCardTrigger from '../playerCard/PlayerCardTrigger';
+import InjuryRiskBadge from '../playerPool/InjuryRiskBadge';
 import { formatActual, lineupActual } from '../slate/backtest';
 import VerdictPills, { LineupVerdictSummary } from '../playerCard/VerdictPills';
 import { ROW_NAME } from './rowStyles';
@@ -90,6 +91,7 @@ export default function LineupCard({
             ) : (
               <span className={cn(ROW_NAME, 'text-fg')}>-</span>
             )}
+            {player && <InjuryRiskBadge player={player} compact className="shrink-0" />}
             <span className="w-7 shrink-0 text-2xs text-fg-subtle">{player?.team}</span>
             <span className="num w-[3.25rem] shrink-0 text-right text-fg-muted">{player ? formatSalary(player.salary) : ''}</span>
             <span className="num w-9 shrink-0 text-right font-medium text-fg">{player?.projected_points?.toFixed(1)}</span>

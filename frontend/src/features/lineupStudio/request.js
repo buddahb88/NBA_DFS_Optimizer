@@ -15,6 +15,7 @@ export function buildOptimizerRequest({ slateId, site, settings, locked = [], ex
     minSalary: settings.minSalary,
     randomness: settings.randomness,
     opportunityWeight: settings.opportunityWeight ?? 0,
+    skipQuestionable: settings.skipQuestionable ?? settings.mode !== 'gpp',
     maxExposure: multi ? settings.maxExposure : 100,
     minUniqueness: multi ? settings.minUniqueness : 1,
     stackRules: toRequestRules(settings.stackRules),
@@ -24,5 +25,19 @@ export function buildOptimizerRequest({ slateId, site, settings, locked = [], ex
     minMinutes: settings.minMinutes,
     maxRostership: settings.maxOwnership,
     filterInjured: true,
+  };
+}
+
+/**
+ * Notice for the optimizer's skippedQuestionable ({ enabled, count, players })
+ * or null when nothing was skipped.
+ */
+export function skippedNotice(skipped) {
+  if (!skipped?.enabled || !skipped.count) return null;
+  return {
+    tone: 'info',
+    text: `Skipped ${skipped.count} questionable player${skipped.count === 1 ? '' : 's'} (Q / D / GTD). Lock one to use him, or turn off "Skip questionable players".`,
+    details: (skipped.players ?? []).map((p) =>
+      `${p.name}${p.team ? ` (${p.team}` : ' ('}${p.salary ? `, $${Number(p.salary).toLocaleString('en-US')}` : ''}${p.injury_status ? `, ${p.injury_status}` : ''})`),
   };
 }

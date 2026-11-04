@@ -83,6 +83,25 @@ describe('PlayerCardView', () => {
   })
 })
 
+describe('injury-tag risk badges', () => {
+  const risk = { injury_tag: 'QUES', injury_risk: 'medium', injury_play_prob: 0.68, injury_tag_play_prob: 0.68, injury_discount: 0.68, projection_if_plays: 22.5 }
+
+  it('player card header: Q-risk badge from the projection fields', () => {
+    const card = fadeCard()
+    card.player.injury_status = 'QUES'
+    Object.assign(card.projection, risk)
+    render(<MemoryRouter><PlayerCardView card={card} onClose={() => {}} /></MemoryRouter>)
+    expect(screen.getByText('Q 68%')).toHaveAttribute('aria-label', 'Questionable: plays ~68% of the time; projection shown x0.68 (if he plays: 22.5)')
+  })
+
+  it('studio player pool: badge next to the name', () => {
+    const players = [{ id: 7, player_id: 'p7', name: 'Cheap Guard', position: 'PG', team: 'BOS', opponent: 'NYK', salary: 4500, projected_points: 15.3, rostership: 5, injury_status: 'QUES', ...risk }]
+    withCard(<PlayerPoolTable players={players} locked={new Set()} excluded={new Set()} onToggleLock={() => {}} onToggleExclude={() => {}} onClear={() => {}} />)
+    const row = screen.getByRole('button', { name: 'Open Cheap Guard card' }).closest('tr')
+    expect(within(row).getByText('Q 68%')).toHaveAttribute('data-risk', 'medium')
+  })
+})
+
 describe('opening the card', () => {
   it('player pool: name opens the card; row lock / exclude still work and do not open it', async () => {
     withCard(<PlayerPoolPage />)

@@ -31,6 +31,7 @@ import { playerKey } from '../utils/playerKey.js';
 import { projectionSanityEnabled } from '../config/projectionSanity.js';
 import { applyProjectionSanity } from './projections/sanityService.js';
 import { parseSource, projectionSource as activeProjectionSource } from '../config/projectionSource.js';
+import { injuryRiskEnabled } from '../config/injuryRisk.js';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -261,10 +262,14 @@ async function loadPostedPlayers(source, { filters = {}, includeZero = false, ra
  * projected_points / floor / ceiling / boom with the own model's (as of the
  * slate's date) and keep RotoWire per player when the model has no row.
  * onProjectionSource(summary): called with the source layer's counts.
+ * injuryRisk: discount injury-tagged players by P(play | tag) after the source
+ * (projections/sourceLayer.js applyInjuryRisk; backtests calibrate as of the
+ * slate date); default from config/injuryRisk.js. Model-input reads
+ * (modelEval) pass false. onInjuryRisk(summary): its counts.
  */
 export async function loadSlatePlayers(source, {
   filters = {}, includeZero = false, ranges = 'model', sanity = null, projectionSource = null,
-  onProjectionSource = null, now = new Date()
+  onProjectionSource = null, injuryRisk = null, onInjuryRisk = null, now = new Date()
 } = {}) {
   if (!source) return [];
   let players = await loadPostedPlayers(source, { filters, includeZero, ranges });
@@ -275,12 +280,20 @@ export async function loadSlatePlayers(source, {
     players = (await applyProjectionSanity(source, players, { projected, all, now })).sort(byValue);
   }
   const chosen = parseSource(projectionSource) ?? activeProjectionSource();
-  if (chosen === 'rotowire' || players.length === 0) return players;
-  // Imported late: the own model reads slates through this module
-  const { applyProjectionSource } = await import('./projections/sourceService.js');
-  const result = await applyProjectionSource(source, players, { projectionSource: chosen, now });
-  onProjectionSource?.(result.summary);
-  return result.players.sort(byValue);
+  if (chosen !== 'rotowire' && players.length > 0) {
+    // Imported late: the own model reads slates through this module
+    const { applyProjectionSource } = await import('./projections/sourceService.js');
+    const result = await applyProjectionSource(source, players, { projectionSource: chosen, now });
+    onProjectionSource?.(result.summary);
+    players = result.players.sort(byValue);
+  }
+  if ((injuryRisk ?? injuryRiskEnabled()) && players.length > 0) {
+    const { applyInjuryRiskToSlate } = await import('./projections/injuryRiskService.js');
+    const result = await applyInjuryRiskToSlate(source, players);
+    onInjuryRisk?.(result.summary);
+    players = result.players.sort(byValue);
+  }
+  return players;
 }
 
 /** resolveSlate + loadSlatePlayers. Returns { source, players }. */

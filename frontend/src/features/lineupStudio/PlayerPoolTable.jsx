@@ -5,6 +5,7 @@ import { formatActual } from '../slate/backtest';
 import ResultBadge from '../slate/ResultBadge';
 import ProjectionCell from '../slate/ProjectionCell';
 import PlayerCardTrigger from '../playerCard/PlayerCardTrigger';
+import InjuryRiskBadge from '../playerPool/InjuryRiskBadge';
 
 /** Optimizer pool with lock / exclude toggles; showActual (backtest) adds actual DK points and the result. */
 export default function PlayerPoolTable({ players, locked, excluded, onToggleLock, onToggleExclude, onClear, showActual = false }) {
@@ -44,6 +45,7 @@ export default function PlayerPoolTable({ players, locked, excluded, onToggleLoc
         cell: ({ row }) => {
           const p = row.original;
           return (
+            <span className="inline-flex items-center gap-1.5">
             <PlayerCardTrigger
               target={{
                 playerId: p.id,
@@ -63,6 +65,8 @@ export default function PlayerPoolTable({ players, locked, excluded, onToggleLoc
             >
               {p.name}
             </PlayerCardTrigger>
+            <InjuryRiskBadge player={p} />
+            </span>
           );
         },
       },

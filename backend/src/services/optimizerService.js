@@ -1,6 +1,7 @@
 import solver from 'javascript-lp-solver';
 import { buildRequestContext, buildSolveContext } from './optimizer/context.js';
 import { filterPool, applyConstraints } from './optimizer/constraints/index.js';
+import { skipQuestionableFor, skippedSummary } from './optimizer/constraints/filters.js';
 
 /**
  * NBA DFS LINEUP OPTIMIZER
@@ -52,13 +53,15 @@ class OptimizerService {
     console.log(`🎯 Generating ${numLineups} lineup(s)`);
 
     // Step 1: Filter players (request excludes + stat filters)
-    const availablePlayers = filterPool(players, buildSolveContext(requestCtx, players));
+    const skipped = [];
+    const availablePlayers = filterPool(players, buildSolveContext(requestCtx, players, { skippedQuestionable: skipped }));
+    const skippedQuestionable = skippedSummary(skipQuestionableFor({ ...settings, mode }), skipped);
 
     console.log(`✅ ${availablePlayers.length} players in pool after filters\n`);
 
     if (availablePlayers.length < 20) {
       console.error('❌ Not enough players to build diverse lineups!');
-      return { lineups: [], exposureStats: null, error: 'Insufficient players' };
+      return { lineups: [], exposureStats: null, error: 'Insufficient players', skippedQuestionable };
     }
 
     // Step 2: Generate lineups
@@ -163,8 +166,10 @@ class OptimizerService {
     return {
       lineups,
       exposureStats,
+      skippedQuestionable,
       settings: {
         mode,
+        skipQuestionable: skippedQuestionable.enabled,
         site: site.key,
         numLineups: lineups.length,
         executionTime

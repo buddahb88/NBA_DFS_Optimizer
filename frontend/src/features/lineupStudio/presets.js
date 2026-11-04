@@ -6,12 +6,16 @@ import { createRule } from './stackRules';
 // legacy filters. minSalaryPct is a share of the site's salary cap so presets work on DK, FD and Yahoo.
 // opportunityWeight (0-1, off in every preset) nudges projections by the
 // Opportunity Radar score for the mode (backend optimizerNudge.js).
+// skipQuestionable leaves QUES / DOUBT / GTD players out unless locked: on for
+// cash (a zero sinks a cash lineup), off for GPPs (their projections are
+// already discounted by the chance they play; the upside stays).
 
 export const CONTEST_PRESETS = {
   cash: {
     label: 'Cash',
     description: '50/50s and double-ups: one max-projection lineup, no stacking.',
     mode: 'cash',
+    skipQuestionable: true,
     numLineups: 1,
     randomness: 0,
     minUniqueness: 1,
@@ -27,6 +31,7 @@ export const CONTEST_PRESETS = {
     label: 'Single-entry GPP',
     description: 'One tournament lineup with a light game stack for correlation.',
     mode: 'gpp',
+    skipQuestionable: false,
     numLineups: 1,
     randomness: 5,
     minUniqueness: 1,
@@ -42,6 +47,7 @@ export const CONTEST_PRESETS = {
     label: '20-max',
     description: 'Small multi-entry: moderate randomness and exposure caps.',
     mode: 'gpp',
+    skipQuestionable: false,
     numLineups: 20,
     randomness: 15,
     minUniqueness: 2,
@@ -57,6 +63,7 @@ export const CONTEST_PRESETS = {
     label: '150-max',
     description: 'Mass multi-entry: high randomness, tight exposure, shootout stacks.',
     mode: 'gpp',
+    skipQuestionable: false,
     numLineups: 150,
     randomness: 25,
     minUniqueness: 3,

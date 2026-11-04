@@ -20,10 +20,10 @@ export const gameKey = (p) => {
 // RotoWire injury_status is a short code, a word, or occasionally a JSON object.
 const INJURY_CODES = {
   O: 'OUT', OUT: 'OUT', INJ: 'OUT', IR: 'OUT', SUSP: 'OUT',
-  D: 'D', DOUBTFUL: 'D',
-  Q: 'Q', QUESTIONABLE: 'Q',
+  D: 'D', DOUBT: 'D', DOUBTFUL: 'D',
+  Q: 'Q', QUES: 'Q', QUESTIONABLE: 'Q',
   GTD: 'GTD', 'GAME TIME DECISION': 'GTD', 'DAY-TO-DAY': 'GTD', DTD: 'GTD',
-  P: 'P', PROBABLE: 'P',
+  P: 'P', PROB: 'P', PROBABLE: 'P',
 };
 const HEALTHY = new Set(['', 'ACTIVE', 'HEALTHY', 'NONE', 'NULL', 'FALSE', '0']);
 
@@ -54,6 +54,47 @@ export const isInjured = (p) => {
 
 export const injuryTone = (code) =>
   code === 'OUT' ? 'negative' : code === 'P' ? 'info' : code ? 'caution' : 'neutral';
+
+const TAG_WORDS = { Q: 'Questionable', D: 'Doubtful', GTD: 'Game-time decision', P: 'Probable', OUT: 'Out' };
+const RISK_TONES = { high: 'negative', medium: 'caution', low: 'info' };
+const pct = (x) => `${Math.round(Number(x) * 100)}%`;
+
+/**
+ * Injury-tag risk for a player row (the backend source layer's fields:
+ * injury_risk, injury_play_prob, injury_tag_play_prob, injury_discount,
+ * projection_if_plays). Returns null for a healthy player, else
+ * { code, label, tone, risk, playProb, tip }:
+ *   label  'Q 68%' (code + the chance he plays) or just the code
+ *   tip    "Questionable: plays ~68% of the time; projection shown x0.68 (if he plays: 24.8)"
+ */
+export function injuryRiskInfo(p) {
+  const code = injuryCode(p?.injury_status);
+  if (!code) return null;
+  const word = TAG_WORDS[code] ?? code;
+  const tagP = num(p.injury_tag_play_prob);
+  const playP = num(p.injury_play_prob);
+  const discount = num(p.injury_discount);
+  const ifPlays = num(p.projection_if_plays);
+  const risk = p.injury_risk && p.injury_risk !== 'none' ? p.injury_risk : null;
+  const parts = [];
+  if (tagP !== null) parts.push(`${word}: plays ~${pct(tagP)} of the time`);
+  else parts.push(word);
+  if (discount !== null && discount < 1 && ifPlays !== null) {
+    parts.push(`projection shown x${discount.toFixed(2)} (if he plays: ${ifPlays.toFixed(1)})`);
+  } else if (playP !== null && tagP !== null && playP < tagP) {
+    parts.push(`our model already gives him ${pct(playP)}`);
+  } else if (code !== 'OUT' && tagP === null) {
+    parts.push('no play-probability discount applied');
+  }
+  return {
+    code,
+    label: playP !== null ? `${code} ${pct(playP)}` : code,
+    tone: code === 'OUT' ? 'negative' : (RISK_TONES[risk] ?? injuryTone(code)),
+    risk,
+    playProb: playP,
+    tip: parts.join('; '),
+  };
+}
 
 // ── Projection with per-player override ─────────────────────────────────────
 

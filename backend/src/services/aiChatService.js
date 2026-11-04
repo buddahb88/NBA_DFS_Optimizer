@@ -14,6 +14,8 @@ import { resolveSite } from '../utils/resolveSite.js';
 import { getCurrentSeason } from '../utils/season.js';
 import { getCurrentSlateInfo } from './slateFreshness.js';
 import { chatSlate, loadSlatePlayers, scoreLineups } from './slateSource.js';
+import { chatInjuryFields } from './projections/sourceLayer.js';
+import { questionableNote } from './chatTools/questionableNote.js';
 import { createClaudeClient, isClaudeEndpoint, runClaudeToolLoop, toClaudeHistory, toClaudeTool } from './llm/claude.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -357,8 +359,9 @@ ${schemaDoc}
           randomness: z.number().default(0).describe('Randomness 0-100 for GPP variance (default 0)'),
           site: z.enum(SITE_KEYS).optional().describe('DFS site (default: the slate\'s site, usually draftkings)'),
           minUniqueness: z.number().optional().describe('Min players each lineup must differ from every earlier lineup (default 0)'),
+          skipQuestionable: z.boolean().optional().describe('Leave out QUES / DOUBT / GTD players unless locked (default: true for cash, false for gpp). Their projections are already discounted by their chance to play.'),
         }),
-        func: async ({ slateId, slateDate, lockedPlayerIds = [], excludedPlayerIds = [], mode = 'cash', numLineups = 1, minSalary, randomness = 0, site: requestedSite, minUniqueness = 0 }) => {
+        func: async ({ slateId, slateDate, lockedPlayerIds = [], excludedPlayerIds = [], mode = 'cash', numLineups = 1, minSalary, randomness = 0, site: requestedSite, minUniqueness = 0, skipQuestionable }) => {
           try {
             const slate = await chatSlate({ slateId, slateDate });
             if (slate.error) {
@@ -390,9 +393,10 @@ ${schemaDoc}
             console.log(`✅ Found ${players.length} players for slate`);
 
             // Use optimizer service
-            const { lineups: built } = optimizerService.optimize(players, {
+            const { lineups: built, skippedQuestionable } = optimizerService.optimize(players, {
               site,
               mode,
+              skipQuestionable,
               numLineups,
               lockedPlayers: lockedPlayerIds,
               excludedPlayers: excludedPlayerIds,
@@ -420,6 +424,7 @@ ${schemaDoc}
                   salary: slot.player.salary,
                   projectedPoints: slot.player.projected_points,
                   ownership: slot.player.rostership,
+                  ...chatInjuryFields(slot.player),
                   ...(source.isBacktest ? { actualPoints: slot.player.actualPoints ?? null } : {}),
                 } : null,
               })),
@@ -436,6 +441,7 @@ ${schemaDoc}
               site,
               mode,
               slateId: source.slateId,
+              ...questionableNote(skippedQuestionable),
               ...dateFields,
             }, null, 2);
           } catch (error) {
