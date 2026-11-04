@@ -38,6 +38,9 @@ export const playersAPI = {
   getBySlateId: (slateId, filters = {}) => api.get(`/players/${slateId}`, { params: filters }),
   syncFromRotoWire: (slateId, data = {}) => api.post(`/players/${slateId}/sync`, data),
   getById: (playerId) => api.get(`/players/player/${playerId}`),
+  // Player card: everything the card shows in one request; params { slateDate?, projectionSource? }
+  getCard: (slateId, playerId, params = {}) =>
+    api.get(`/players/${slateId}/card/${encodeURIComponent(playerId)}`, { params }),
   recalculateProjections: (slateId) => api.post(`/players/${slateId}/recalculate-projections`),
   resetProjections: (slateId) => api.post(`/players/${slateId}/reset-projections`),
 };

@@ -4,6 +4,7 @@ import AppShell from './components/layout/AppShell';
 import LegacyPage from './components/layout/LegacyPage';
 import Spinner from './components/ui/Spinner';
 import { SlateProvider } from './context/SlateContext';
+import PlayerCardProvider from './features/playerCard/PlayerCardProvider';
 import HomePage from './pages/HomePage';
 import PlayerPoolPage from './pages/PlayerPoolPage';
 import LineupsPage from './pages/LineupsPage';
@@ -19,6 +20,7 @@ function App() {
   return (
     <SlateProvider>
       <Router>
+        <PlayerCardProvider>
         <AppShell>
           <Routes>
             <Route path="/" element={<HomePage />} />
@@ -40,6 +42,7 @@ function App() {
             />
           </Routes>
         </AppShell>
+        </PlayerCardProvider>
       </Router>
     </SlateProvider>
   );
