@@ -60,6 +60,37 @@ describe('ArchetypeHeatmap', () => {
     expect(onCellClick).toHaveBeenCalledWith({ team: 'BOS', group: 'scoring_guard', label: 'Scoring Guard / Wing' })
   })
 
+  it('filters rows to the selected teams without shifting colors', () => {
+    renderMap({ teams: ['BOS'] })
+    const table = screen.getByRole('table')
+    expect(within(table).getAllByRole('rowheader').map((h) => h.textContent)).toEqual(['BOS'])
+    // Same color as unfiltered: NYK's +3.0 still sets the scale
+    const tough = screen.getByRole('button', { name: /BOS vs Scoring Guard \/ Wing: -1\.5 FP/ })
+    expect(tough.style.backgroundColor).toBe('rgb(var(--negative) / 0.44)')
+    expect(screen.getByText('±3.0 FP')).toBeInTheDocument()
+    expect(screen.getByText('1 of 2 teams · colors scaled to all teams')).toBeInTheDocument()
+    // All columns stay
+    expect(within(table).getAllByRole('columnheader')).toHaveLength(3)
+  })
+
+  it('hints tonight’s opponent next to a filtered team', () => {
+    const opponents = new Map([['BOS', 'MIA'], ['MIA', 'BOS']])
+    const { unmount } = renderMap({ teams: ['BOS', 'NYK'], opponents })
+    expect(screen.getByRole('rowheader', { name: 'BOS vs MIA' })).toBeInTheDocument()
+    expect(screen.getByRole('rowheader', { name: 'NYK' })).toBeInTheDocument()
+    unmount()
+    // Unfiltered: no hints
+    renderMap({ opponents })
+    expect(screen.getByRole('rowheader', { name: 'BOS' })).toBeInTheDocument()
+  })
+
+  it('shows the filtered empty state when the filter hides every row', () => {
+    renderMap({ teams: ['LAL'], emptyState: <p>No data</p>, filteredEmptyState: <p>No teams match</p> })
+    expect(screen.queryByRole('table')).toBeNull()
+    expect(screen.getByText('No teams match')).toBeInTheDocument()
+    expect(screen.queryByText('No data')).toBeNull()
+  })
+
   it('shows the empty state when there are no rows', () => {
     renderMap({ rows: [], emptyState: <p>Nothing to show</p> })
     expect(screen.queryByRole('table')).toBeNull()

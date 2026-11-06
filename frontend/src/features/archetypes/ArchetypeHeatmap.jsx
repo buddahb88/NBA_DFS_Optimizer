@@ -24,12 +24,17 @@ function ScaleLegend({ maxAbs, unit }) {
  * Teams (rows) x archetypes or G/F/C (columns), each cell the stat allowed
  * over expectation per player-game, on a diverging scale. Clicking a cell
  * calls onCellClick({ team, group, label }).
+ * `teams` (list or null) narrows the rows; the color scale stays league-wide.
+ * `opponents` (team -> tonight's opponent) adds a "vs X" hint while filtered.
+ * `emptyState` shows without data, `filteredEmptyState` when the filter hides every row.
  */
-export default function ArchetypeHeatmap({ rows, definitions, grouping, stat, onCellClick, emptyState }) {
-  const map = useMemo(() => buildHeatmap(rows, { definitions, grouping, stat }), [rows, definitions, grouping, stat]);
+export default function ArchetypeHeatmap({ rows, definitions, grouping, stat, teams = null, opponents = null, onCellClick, emptyState, filteredEmptyState }) {
+  const map = useMemo(() => buildHeatmap(rows, { definitions, grouping, stat, teams }), [rows, definitions, grouping, stat, teams]);
   const { unit } = statFor(stat);
 
-  if (map.teams.length === 0) return emptyState ?? null;
+  if (map.allTeams.length === 0) return emptyState ?? null;
+  if (map.teams.length === 0) return filteredEmptyState ?? null;
+  const hint = teams ? opponents : null;
 
   return (
     <div className="flex flex-col gap-2">
@@ -57,8 +62,14 @@ export default function ArchetypeHeatmap({ rows, definitions, grouping, stat, on
           <tbody>
             {map.teams.map((team) => (
               <tr key={team}>
-                <th scope="row" className="sticky left-0 z-10 border-b border-line/60 bg-surface px-2 text-left font-semibold text-fg">
+                <th scope="row" className="sticky left-0 z-10 whitespace-nowrap border-b border-line/60 bg-surface px-2 text-left font-semibold text-fg">
                   {team}
+                  {hint?.get(team) && ' '}
+                  {hint?.get(team) && (
+                    <span className="ml-1 text-2xs font-normal text-fg-subtle" title={`Plays ${hint.get(team)} on the selected slate`}>
+                      vs {hint.get(team)}
+                    </span>
+                  )}
                 </th>
                 {map.groups.map((g) => {
                   const c = map.cell(team, g.key);
@@ -102,7 +113,14 @@ export default function ArchetypeHeatmap({ rows, definitions, grouping, stat, on
           </tbody>
         </table>
       </div>
-      <ScaleLegend maxAbs={map.maxAbs} unit={unit} />
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <ScaleLegend maxAbs={map.maxAbs} unit={unit} />
+        {teams && (
+          <span className="num text-2xs text-fg-subtle">
+            {map.teams.length} of {map.allTeams.length} teams · colors scaled to all teams
+          </span>
+        )}
+      </div>
     </div>
   );
 }

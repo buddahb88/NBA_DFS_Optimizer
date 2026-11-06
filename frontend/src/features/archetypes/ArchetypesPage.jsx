@@ -10,7 +10,7 @@ import CellDrilldown from './CellDrilldown';
 import TonightTable from './TonightTable';
 import useArchetypes from './useArchetypes';
 import SlateModeSelect from '../slate/SlateModeSelect';
-import { parseDeepLink, statFor, tonightCardTarget } from './archetypes';
+import { TONIGHT_TEAMS, parseDeepLink, resolveTeams, slateOpponents, slateTeams, statFor, teamsParam, tonightCardTarget } from './archetypes';
 
 const TABS = [
   { value: 'heatmap', label: 'Defense heatmap' },
@@ -30,6 +30,22 @@ function SectionError({ error, onRetry }) {
       title="Something went wrong"
       description={error}
       action={<Button size="sm" variant="secondary" onClick={onRetry}>Retry</Button>}
+    />
+  );
+}
+
+function NoTeamsShown({ tonight, onClear }) {
+  return (
+    <EmptyState
+      compact
+      icon={<IconGrid size={18} />}
+      title="No defenses match the team filter"
+      description={
+        tonight
+          ? 'None of the teams on the selected slate have defense data for this season and window.'
+          : 'None of the selected teams have defense data for this season and window.'
+      }
+      action={<Button size="sm" variant="secondary" onClick={onClear}>Show all teams</Button>}
     />
   );
 }
@@ -62,7 +78,7 @@ export default function ArchetypesPage() {
   const { slate, slateId: liveSlateId, site, siteConfig, loadingSlates, backtest = null, workSlateId } = useSlate();
   // Tonight follows the slate selector: a backtest ranks that saved night (no lookahead)
   const slateId = workSlateId ?? liveSlateId;
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [deepLink] = useState(() => parseDeepLink(searchParams));
   const [filters, setFilters] = useState(deepLink.filters);
   const [tab, setTab] = useState('heatmap');
@@ -85,6 +101,21 @@ export default function ArchetypesPage() {
     openCell({ ...target, label: defs.find((d) => d.key === target.group)?.label });
   }, [defense.status, definitions, filters.grouping, openCell]);
 
+  // Team filter lives in the URL (?teams=BOS,NYK or ?teams=tonight) so the view can be shared
+  const teamsValue = teamsParam(filters.teams);
+  useEffect(() => {
+    if ((searchParams.get('teams') ?? '') === teamsValue) return;
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (teamsValue) next.set('teams', teamsValue);
+        else next.delete('teams');
+        return next;
+      },
+      { replace: true },
+    );
+  }, [teamsValue, searchParams, setSearchParams]);
+
   // Drill-down names link to the card when the player is on the slate Tonight loaded
   const tonightData = tonight.data;
   const rosterByKey = useMemo(
@@ -98,6 +129,15 @@ export default function ArchetypesPage() {
     },
     [rosterByKey, tonightData],
   );
+
+  // Team filter: options from the loaded grid, the slate shortcut from Tonight's roster.
+  // Filtering is client-side; the color scale stays computed over every team.
+  const defenseRows = defense.data?.rows;
+  const gridTeams = useMemo(() => [...new Set((defenseRows ?? []).map((r) => r.team))].sort(), [defenseRows]);
+  const tonightTeams = useMemo(() => slateTeams(tonightData), [tonightData]);
+  const opponents = useMemo(() => slateOpponents(tonightData), [tonightData]);
+  const shownTeams = useMemo(() => resolveTeams(filters.teams, tonightTeams), [filters.teams, tonightTeams]);
+  const clearTeams = useCallback(() => setFilters((f) => ({ ...f, teams: [] })), []);
 
   const season = defense.data?.season || filters.season || seasons.data?.current;
   const { label: statLabel } = statFor(filters.stat);
@@ -114,8 +154,11 @@ export default function ArchetypesPage() {
         definitions={definitions.data}
         grouping={filters.grouping}
         stat={filters.stat}
+        teams={shownTeams}
+        opponents={opponents}
         onCellClick={openCell}
         emptyState={<NoDefenseData season={season} />}
+        filteredEmptyState={<NoTeamsShown tonight={filters.teams === TONIGHT_TEAMS} onClear={clearTeams} />}
       />
     );
 
@@ -158,7 +201,14 @@ export default function ArchetypesPage() {
         </div>
       </div>
 
-      <ArchetypeFilters value={filters} onChange={setFilters} seasons={seasons.data} siteName={siteConfig?.name} />
+      <ArchetypeFilters
+        value={filters}
+        onChange={setFilters}
+        seasons={seasons.data}
+        siteName={siteConfig?.name}
+        teams={gridTeams}
+        tonightTeams={tonightTeams}
+      />
 
       <Tabs tabs={TABS} value={tab} onChange={setTab} />
 
@@ -179,6 +229,9 @@ export default function ArchetypesPage() {
         <div className="flex flex-col gap-2">
           <div className="flex flex-wrap items-center gap-2">
             <SlateModeSelect />
+            {shownTeams && (
+              <span className="text-xs text-fg-subtle">The team filter applies to the heatmap only.</span>
+            )}
             {tonight.data?.isBacktest && (
               <span className="text-xs text-fg-muted">
                 Defense through {tonight.data.endDate}, minutes as of {tonight.data.slateDate}; Actual = DK points scored that night.

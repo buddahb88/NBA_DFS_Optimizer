@@ -1,11 +1,13 @@
 import { Badge, Select, Tabs } from '../../components/ui';
 import { GROUPINGS, LAST_N_OPTIONS, STATS } from './archetypes';
+import TeamFilter from './TeamFilter';
 
 /**
- * Grouping toggle (archetype vs G/F/C), season, last-N-games and stat. Site
- * comes from the top bar and is shown as a badge.
+ * Grouping toggle (archetype vs G/F/C), season, last-N-games, stat and the
+ * heatmap's team filter (`teams` = options, `tonightTeams` = the slate's).
+ * Site comes from the top bar and is shown as a badge.
  */
-export default function ArchetypeFilters({ value, onChange, seasons, siteName }) {
+export default function ArchetypeFilters({ value, onChange, seasons, siteName, teams = [], tonightTeams = [] }) {
   const set = (patch) => onChange({ ...value, ...patch });
   // '' = Auto: the current season, except Tonight falls back to last season
   // while the current one is thin. Picking a season explicitly pins it.
@@ -40,6 +42,7 @@ export default function ArchetypeFilters({ value, onChange, seasons, siteName })
         <span className="text-xs font-medium text-fg-muted">Stat</span>
         <Tabs variant="pill" size="sm" tabs={STATS} value={value.stat} onChange={(stat) => set({ stat })} />
       </div>
+      <TeamFilter value={value.teams} onChange={(t) => set({ teams: t })} teams={teams} tonightTeams={tonightTeams} />
       {siteName && (
         <Badge tone="info" className="ml-auto self-center" title="Fantasy points are scored with this site's rules">
           {siteName} scoring

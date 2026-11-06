@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, useLocation } from 'react-router-dom'
 import ArchetypesPage from './ArchetypesPage'
 import { archetypesAPI, historicalAPI } from '../../services/api'
 import { useSlate } from '../../context/SlateContext'
@@ -241,6 +241,126 @@ describe('ArchetypesPage', () => {
     expect(screen.getByTestId('backtest-badge')).toHaveTextContent('Backtest 2026-10-21')
     expect(screen.getByText(/Defense through 2026-10-20/)).toBeInTheDocument()
     expect(archetypesAPI.getTonight).toHaveBeenLastCalledWith(expect.objectContaining({ slateId: '29805', slateDate: '2026-10-21' }))
+  })
+})
+
+describe('ArchetypesPage team filter', () => {
+  const TWO_TEAMS = {
+    ...DEFENSE,
+    rows: [
+      ...DEFENSE.rows,
+      { team: 'BOS', group_key: 'scoring_guard', fp_over_expectation: -1.2, games: 8, player_games: 10 },
+      { team: 'LAL', group_key: 'scoring_guard', fp_over_expectation: 0.6, games: 8, player_games: 10 },
+    ],
+  }
+  // Slate: MIA @ NYK, BOS @ PHX (LAL not playing)
+  const ROSTER = [{ player_id: '1', player_key: 'guard one', name: 'Guard One', team: 'MIA' }, { player_id: '2', player_key: 'wing two', name: 'Wing Two', team: 'BOS' }]
+
+  let location
+  function LocationProbe() {
+    location = useLocation()
+    return null
+  }
+  const renderAt = (url) =>
+    render(<MemoryRouter initialEntries={[url]}><ArchetypesPage /><LocationProbe /></MemoryRouter>)
+  const rowTeams = () => within(screen.getByRole('table')).getAllByRole('rowheader').map((h) => h.textContent)
+  const teamsParam = () => new URLSearchParams(location.search).get('teams')
+
+  beforeEach(() => {
+    archetypesAPI.getDefense.mockResolvedValue({ data: TWO_TEAMS })
+    archetypesAPI.getTonight.mockResolvedValue({ data: { ...TONIGHT, slateId: 's1', roster: ROSTER } })
+  })
+
+  it('shows every team by default', async () => {
+    renderAt('/archetypes')
+    await screen.findByRole('button', { name: /NYK vs Scoring Guard/ })
+    expect(rowTeams()).toEqual(['BOS', 'LAL', 'NYK'])
+    expect(screen.getByRole('button', { name: 'Teams: All teams' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Clear team filter' })).toBeNull()
+    expect(teamsParam()).toBeNull()
+  })
+
+  it('restores ?teams= from the link, keeps colors league-wide, and hints opponents', async () => {
+    renderAt('/archetypes?teams=nyk,LAL')
+    const nyk = await screen.findByRole('button', { name: /NYK vs Scoring Guard \/ Wing: \+2\.4 FP/ })
+    await waitFor(() => expect(screen.getByRole('rowheader', { name: 'NYK vs MIA' })).toBeInTheDocument())
+    expect(rowTeams()).toEqual(['LAL', 'NYK vs MIA'])
+    // BOS (hidden) does not change the scale: NYK's +2.4 is still the max
+    expect(nyk.style.backgroundColor).toBe('rgb(var(--info) / 0.8)')
+    expect(screen.getByText('±2.4 FP')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Teams: 2 teams' })).toBeInTheDocument()
+    // Normalized back into the URL
+    expect(teamsParam()).toBe('LAL,NYK')
+    // The filter never refetches the grid
+    expect(archetypesAPI.getDefense).toHaveBeenCalledTimes(1)
+  })
+
+  it('picking teams filters the rows and writes the link; clear resets both', async () => {
+    renderAt('/archetypes?season=2025-26')
+    await screen.findByRole('button', { name: /NYK vs Scoring Guard/ })
+    fireEvent.click(screen.getByRole('button', { name: 'Teams: All teams' }))
+    const menu = screen.getByRole('group', { name: 'Pick teams' })
+    expect(within(menu).getAllByRole('checkbox').map((c) => c.parentElement.textContent)).toEqual(['BOS', 'LAL', 'NYK'])
+    fireEvent.click(within(menu).getByRole('checkbox', { name: 'BOS' }))
+    fireEvent.click(within(menu).getByRole('checkbox', { name: 'NYK' }))
+    expect(rowTeams()).toEqual(['BOS vs PHX', 'NYK vs MIA'])
+    expect(teamsParam()).toBe('BOS,NYK')
+    // Other params survive
+    expect(new URLSearchParams(location.search).get('season')).toBe('2025-26')
+    expect(screen.getByRole('button', { name: 'Teams: 2 teams' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear team filter' }))
+    expect(rowTeams()).toEqual(['BOS', 'LAL', 'NYK'])
+    expect(teamsParam()).toBeNull()
+  })
+
+  it('Tonight’s slate shortcut selects the slate’s teams and round-trips as ?teams=tonight', async () => {
+    renderAt('/archetypes')
+    await screen.findByRole('button', { name: /NYK vs Scoring Guard/ })
+    fireEvent.click(screen.getByRole('button', { name: 'Teams: All teams' }))
+    const shortcut = screen.getByRole('button', { name: 'Tonight’s slate' })
+    await waitFor(() => expect(shortcut).toBeEnabled())
+    fireEvent.click(shortcut)
+    // MIA/NYK/BOS/PHX play; LAL doesn't; MIA and PHX have no defense rows here
+    expect(rowTeams()).toEqual(['BOS vs PHX', 'NYK vs MIA'])
+    expect(teamsParam()).toBe('tonight')
+    expect(screen.getByRole('button', { name: 'Teams: Tonight · 4 teams' })).toBeInTheDocument()
+    const menu = screen.getByRole('group', { name: 'Pick teams' })
+    expect(within(menu).getByRole('checkbox', { name: 'MIA' })).toBeChecked()
+    expect(within(menu).getByRole('checkbox', { name: 'LAL' })).not.toBeChecked()
+    // Unticking a team turns the shortcut into an explicit list
+    fireEvent.click(within(menu).getByRole('checkbox', { name: 'NYK' }))
+    expect(teamsParam()).toBe('BOS,MIA,PHX')
+    expect(rowTeams()).toEqual(['BOS vs PHX'])
+  })
+
+  it('opens straight onto tonight’s teams from a link; the shortcut is off without a slate', async () => {
+    const { unmount } = renderAt('/archetypes?teams=tonight')
+    await waitFor(() => expect(rowTeams()).toEqual(['BOS vs PHX', 'NYK vs MIA']))
+    unmount()
+
+    useSlate.mockReturnValue(slateContext(null))
+    renderAt('/archetypes')
+    await screen.findByRole('button', { name: /NYK vs Scoring Guard/ })
+    fireEvent.click(screen.getByRole('button', { name: 'Teams: All teams' }))
+    expect(screen.getByRole('button', { name: 'Tonight’s slate' })).toBeDisabled()
+  })
+
+  it('empty state when the filter removes every row, with a way back', async () => {
+    renderAt('/archetypes?teams=DEN')
+    expect(await screen.findByText('No defenses match the team filter')).toBeInTheDocument()
+    expect(screen.queryByRole('table')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Show all teams' }))
+    expect(rowTeams()).toEqual(['BOS', 'LAL', 'NYK'])
+    expect(teamsParam()).toBeNull()
+  })
+
+  it('Tonight tab ignores the team filter and says so', async () => {
+    renderAt('/archetypes?teams=LAL')
+    fireEvent.click(screen.getByRole('tab', { name: 'Tonight' }))
+    expect(await screen.findByText('Guard One')).toBeInTheDocument()
+    expect(screen.getByText('Wing Two')).toBeInTheDocument()
+    expect(screen.getByText('The team filter applies to the heatmap only.')).toBeInTheDocument()
   })
 })
 

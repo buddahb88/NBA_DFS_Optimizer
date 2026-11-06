@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import { buildHeatmap, cellColor, defenseParams, edgeBadges, edgeExplanation, formatDelta, STATS, TONIGHT_SORTS, tonightSorting } from './archetypes'
+import {
+  buildHeatmap, cellColor, defenseParams, edgeBadges, edgeExplanation, formatDelta, parseDeepLink, parseTeams, resolveTeams,
+  slateOpponents, slateTeams, STATS, teamsParam, TONIGHT_SORTS, tonightSorting,
+} from './archetypes'
 
 const DEFINITIONS = {
   archetypes: [
@@ -37,10 +40,64 @@ describe('buildHeatmap', () => {
     expect(map.maxAbs).toBe(0.8)
   })
 
+  it('narrows rows to the selected teams but keeps the color scale and columns league-wide', () => {
+    const all = buildHeatmap(ROWS, { definitions: DEFINITIONS, grouping: 'archetype', stat: 'fp' })
+    const map = buildHeatmap(ROWS, { definitions: DEFINITIONS, grouping: 'archetype', stat: 'fp', teams: ['BOS'] })
+    expect(map.teams).toEqual(['BOS'])
+    expect(map.allTeams).toEqual(['BOS', 'NYK'])
+    // NYK's +3 still sets the scale, so BOS's -2 keeps its color
+    expect(map.maxAbs).toBe(3)
+    expect(cellColor(map.cell('BOS', 'scoring_guard').value, map.maxAbs)).toBe(cellColor(all.cell('BOS', 'scoring_guard').value, all.maxAbs))
+    expect(map.groups).toEqual(all.groups)
+    // Unknown teams just match nothing
+    expect(buildHeatmap(ROWS, { definitions: DEFINITIONS, grouping: 'archetype', stat: 'fp', teams: ['LAL'] }).teams).toEqual([])
+    expect(buildHeatmap(ROWS, { definitions: DEFINITIONS, grouping: 'archetype', stat: 'fp', teams: null }).teams).toEqual(['BOS', 'NYK'])
+  })
+
   it('handles no rows', () => {
     const map = buildHeatmap([], { definitions: DEFINITIONS, grouping: 'archetype', stat: 'fp' })
     expect(map.teams).toEqual([])
     expect(map.groups).toEqual([])
+  })
+})
+
+describe('team filter helpers', () => {
+  it('parses ?teams= into all / tonight / a sorted list and back', () => {
+    expect(parseTeams(null)).toEqual([])
+    expect(parseTeams('')).toEqual([])
+    expect(parseTeams('Tonight')).toBe('tonight')
+    expect(parseTeams('nyk, bos,NYK,,b@d,TOOLONG')).toEqual(['BOS', 'NYK'])
+    expect(teamsParam([])).toBe('')
+    expect(teamsParam('tonight')).toBe('tonight')
+    expect(teamsParam(['BOS', 'NYK'])).toBe('BOS,NYK')
+    for (const v of ['BOS,NYK', 'tonight', '']) expect(teamsParam(parseTeams(v))).toBe(v)
+  })
+
+  it('deep link carries the team filter alongside the cell', () => {
+    const { filters, cell } = parseDeepLink(new URLSearchParams('season=2025-26&teams=NYK,BOS&team=nyk&group=scoring_guard'))
+    expect(filters).toMatchObject({ season: '2025-26', teams: ['BOS', 'NYK'] })
+    expect(cell).toEqual({ team: 'NYK', group: 'scoring_guard' })
+    expect(parseDeepLink(new URLSearchParams('teams=tonight')).filters.teams).toBe('tonight')
+    expect(parseDeepLink(new URLSearchParams('')).filters.teams).toEqual([])
+  })
+
+  const TONIGHT = {
+    roster: [{ team: 'MIA' }, { team: 'NYK' }, { team: 'MIA' }, { team: null }],
+    players: [{ team: 'MIA', opponent: 'NYK' }, { team: 'BOS', opponent: 'PHX' }],
+  }
+
+  it('slate teams come from the roster and matchup rows; opponents both ways', () => {
+    expect(slateTeams(TONIGHT)).toEqual(['BOS', 'MIA', 'NYK', 'PHX'])
+    expect(slateTeams(null)).toEqual([])
+    expect(Object.fromEntries(slateOpponents(TONIGHT))).toEqual({ MIA: 'NYK', NYK: 'MIA', BOS: 'PHX', PHX: 'BOS' })
+  })
+
+  it('resolves the selection: null means no filter', () => {
+    expect(resolveTeams([], ['BOS'])).toBeNull()
+    expect(resolveTeams(['NYK'], ['BOS'])).toEqual(['NYK'])
+    expect(resolveTeams('tonight', ['BOS', 'MIA'])).toEqual(['BOS', 'MIA'])
+    // Shortcut before the slate's teams are known: show everything
+    expect(resolveTeams('tonight', [])).toBeNull()
   })
 })
 

@@ -23,12 +23,63 @@ export const LAST_N_OPTIONS = [
   { value: '20', label: 'Last 20 games' },
 ]
 
-export const DEFAULT_FILTERS = { season: '', grouping: 'archetype', lastNGames: '', stat: 'fp' }
+// teams: [] = all defenses, 'tonight' = the teams on the selected slate, or a list of abbreviations
+export const DEFAULT_FILTERS = { season: '', grouping: 'archetype', lastNGames: '', stat: 'fp', teams: [] }
+
+export const TONIGHT_TEAMS = 'tonight'
+
+/** ?teams= value -> [] (all) | 'tonight' | sorted unique abbreviations. Junk is dropped. */
+export function parseTeams(value) {
+  if (!value) return []
+  if (value.trim().toLowerCase() === TONIGHT_TEAMS) return TONIGHT_TEAMS
+  const teams = value.split(',').map((t) => t.trim().toUpperCase()).filter((t) => /^[A-Z]{2,4}$/.test(t))
+  return [...new Set(teams)].sort()
+}
+
+/** Teams selection -> ?teams= value; '' for all. */
+export function teamsParam(teams) {
+  if (teams === TONIGHT_TEAMS) return TONIGHT_TEAMS
+  return Array.isArray(teams) ? teams.join(',') : ''
+}
+
+/** Teams playing on the slate a /archetypes/tonight body covers (roster, plus matchup rows), A-Z. */
+export function slateTeams(tonight) {
+  const teams = new Set()
+  for (const p of tonight?.roster ?? []) if (p.team) teams.add(p.team)
+  for (const p of tonight?.players ?? []) {
+    if (p.team) teams.add(p.team)
+    if (p.opponent) teams.add(p.opponent)
+  }
+  return [...teams].sort()
+}
 
 /**
- * Deep link (?season=&grouping=&team=&group=, e.g. from a Player Pool matchup)
- * -> { filters, cell }: the grid filters to load, and the cell to open once it
- * has, or null.
+ * team -> tonight's opponent, from the Tonight rows' team/opponent pairs (both
+ * ways). Only games with a listed matchup are known; others are left out.
+ */
+export function slateOpponents(tonight) {
+  const opponents = new Map()
+  for (const p of tonight?.players ?? []) {
+    if (!p.team || !p.opponent) continue
+    opponents.set(p.team, p.opponent)
+    opponents.set(p.opponent, p.team)
+  }
+  return opponents
+}
+
+/**
+ * Selection -> the teams to show, or null for no filter (all, or the slate
+ * shortcut before any slate teams are known).
+ */
+export function resolveTeams(teams, tonightTeams) {
+  if (teams === TONIGHT_TEAMS) return tonightTeams?.length ? tonightTeams : null
+  return Array.isArray(teams) && teams.length ? teams : null
+}
+
+/**
+ * Deep link (?season=&grouping=&teams=&team=&group=, e.g. from a Player Pool
+ * matchup) -> { filters, cell }: the grid filters to load, and the cell to open
+ * once it has, or null. teams = BOS,NYK or 'tonight' (the slate's teams).
  */
 export function parseDeepLink(params) {
   const filters = { ...DEFAULT_FILTERS }
@@ -36,6 +87,7 @@ export function parseDeepLink(params) {
   if (season && /^\d{4}-\d{2}$/.test(season)) filters.season = season
   const grouping = params.get('grouping')
   if (GROUPINGS.some((g) => g.value === grouping)) filters.grouping = grouping
+  filters.teams = parseTeams(params.get('teams'))
   const team = params.get('team')
   const group = params.get('group')
   return { filters, cell: team && group ? { team: team.toUpperCase(), group } : null }
@@ -59,8 +111,11 @@ export function defenseParams({ season, grouping, lastNGames }, site) {
  * /defense rows -> heatmap model. Teams A-Z; columns in definition order,
  * only those with data (Unclassified is never a column). `cell(team, key)`
  * returns { value, row } or null; maxAbs sets the color scale.
+ * `teams` (optional list) narrows the rows only: columns and maxAbs stay
+ * computed over every team, so a cell keeps its color when filtering.
+ * allTeams = every team with data.
  */
-export function buildHeatmap(rows, { definitions, grouping, stat }) {
+export function buildHeatmap(rows, { definitions, grouping, stat, teams: only = null }) {
   const { column } = statFor(stat)
   const cells = new Map()
   const teams = new Set()
@@ -81,8 +136,11 @@ export function buildHeatmap(rows, { definitions, grouping, stat }) {
     // Keys the definitions don't know yet still get a column
     ...[...present].filter((k) => !known.has(k)).sort().map((key) => ({ key, label: key })),
   ]
+  const allTeams = [...teams].sort()
+  const keep = only ? new Set(only) : null
   return {
-    teams: [...teams].sort(),
+    teams: keep ? allTeams.filter((t) => keep.has(t)) : allTeams,
+    allTeams,
     groups,
     maxAbs,
     cell: (team, key) => cells.get(`${team}|${key}`) ?? null,
