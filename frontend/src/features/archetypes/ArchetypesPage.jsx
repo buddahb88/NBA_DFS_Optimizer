@@ -10,7 +10,18 @@ import CellDrilldown from './CellDrilldown';
 import TonightTable from './TonightTable';
 import useArchetypes from './useArchetypes';
 import SlateModeSelect from '../slate/SlateModeSelect';
-import { TONIGHT_TEAMS, parseDeepLink, resolveTeams, slateOpponents, slateTeams, statFor, teamsParam, tonightCardTarget } from './archetypes';
+import useSlateVerdicts from '../playerCard/useSlateVerdicts';
+import {
+  TONIGHT_TEAMS,
+  parseDeepLink,
+  resolveTeams,
+  slateCellPlayers,
+  slateOpponents,
+  slateTeams,
+  statFor,
+  teamsParam,
+  tonightCardTarget,
+} from './archetypes';
 
 const TABS = [
   { value: 'heatmap', label: 'Defense heatmap' },
@@ -139,6 +150,36 @@ export default function ArchetypesPage() {
   const shownTeams = useMemo(() => resolveTeams(filters.teams, tonightTeams), [filters.teams, tonightTeams]);
   const clearTeams = useCallback(() => setFilters((f) => ({ ...f, teams: [] })), []);
 
+  // Hover popover: tonight's roster placed in heatmap cells (opponent x archetype / G/F/C)
+  const gridGrouping = defense.data?.grouping ?? filters.grouping;
+  const byCell = useMemo(() => slateCellPlayers(tonightData, gridGrouping), [tonightData, gridGrouping]);
+  const hasSlate = Boolean(slateId) && !loadingSlates;
+  // Card verdict pills in the popover: one cached request per slate (nice-to-have; absent on error)
+  const verdicts = useSlateVerdicts({
+    slateId: tonightData?.slateId ?? null,
+    slateDate: tonightData?.isBacktest ? tonightData.slateDate ?? null : null,
+    enabled: tab === 'heatmap' && byCell.size > 0,
+  });
+  const verdictLookup = verdicts.lookup;
+  const verdictsReady = verdicts.status === 'done';
+  const heatmapSlate = useMemo(() => {
+    const status = !hasSlate
+      ? 'none'
+      : tonight.status === 'error'
+        ? 'error'
+        : tonight.status === 'ready' && tonightData && tonightData.grouping === gridGrouping
+          ? 'ready'
+          : 'loading';
+    return {
+      status,
+      byCell: status === 'ready' ? byCell : null,
+      teams: new Set(tonightTeams),
+      isBacktest: Boolean(tonightData?.isBacktest),
+      cardTarget: (p) => tonightCardTarget(p, tonightData),
+      verdictFor: verdictsReady ? (p) => verdictLookup({ player_id: p.player_id }) : null,
+    };
+  }, [hasSlate, tonight.status, tonightData, gridGrouping, byCell, tonightTeams, verdictsReady, verdictLookup]);
+
   const season = defense.data?.season || filters.season || seasons.data?.current;
   const { label: statLabel } = statFor(filters.stat);
   const columnsLabel = filters.grouping === 'position' ? 'G/F/C' : 'archetype';
@@ -156,6 +197,7 @@ export default function ArchetypesPage() {
         stat={filters.stat}
         teams={shownTeams}
         opponents={opponents}
+        slate={heatmapSlate}
         onCellClick={openCell}
         emptyState={<NoDefenseData season={season} />}
         filteredEmptyState={<NoTeamsShown tonight={filters.teams === TONIGHT_TEAMS} onClear={clearTeams} />}
@@ -218,7 +260,7 @@ export default function ArchetypesPage() {
           <Card>
             <CardHeader
               title={`Team defense vs ${columnsLabel}`}
-              subtitle={`${season ?? ''}${defense.data?.lastNGames ? ` · each defense's last ${defense.data.lastNGames} games` : ' · full season'} · click a cell for its games`}
+              subtitle={`${season ?? ''}${defense.data?.lastNGames ? ` · each defense's last ${defense.data.lastNGames} games` : ' · full season'} · hover a cell for tonight’s players, click for its games`}
             />
             <CardBody>{heatmapBody}</CardBody>
           </Card>

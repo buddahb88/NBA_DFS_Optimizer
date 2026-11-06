@@ -2,13 +2,15 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, useLocation } from 'react-router-dom'
 import ArchetypesPage from './ArchetypesPage'
-import { archetypesAPI, historicalAPI } from '../../services/api'
+import { archetypesAPI, historicalAPI, playersAPI } from '../../services/api'
 import { useSlate } from '../../context/SlateContext'
 import { PlayerCardContext } from '../playerCard/playerCardContext'
+import { clearSlateVerdicts } from '../playerCard/useSlateVerdicts'
 
 vi.mock('../../services/api', () => ({
   historicalAPI: { getSeasons: vi.fn() },
   archetypesAPI: { getDefinitions: vi.fn(), getDefense: vi.fn(), getCellGames: vi.fn(), getTonight: vi.fn() },
+  playersAPI: { getVerdicts: vi.fn() },
 }))
 vi.mock('../../context/SlateContext', () => ({ useSlate: vi.fn() }))
 
@@ -436,5 +438,85 @@ describe('ArchetypesPage player card links', () => {
     expect(open).toHaveBeenCalledWith({ playerId: '1', slateId: 's1', slateDate: null, name: 'Guard One', headshot: 'g1.png', team: 'MIA' })
     // The drill-down stays open under the card
     expect(screen.getByRole('dialog')).toBeInTheDocument()
+  })
+})
+
+describe('ArchetypesPage heatmap slate popover', () => {
+  // NYK is the only defense: tier of 1, +2.4 -> target
+  const ROSTER = [
+    { player_id: '1', player_key: 'guard one', name: 'Guard One', team: 'MIA', opponent: 'NYK', group_key: 'scoring_guard', archetype: 'scoring_guard', salary: 8000, projected_points: 40, rostership: 31.2, headshot: null },
+    { player_id: '5', player_key: 'cheap guard', name: 'Cheap Guard', team: 'MIA', opponent: 'NYK', group_key: 'scoring_guard', archetype: 'scoring_guard', salary: 3500, projected_points: 18, rostership: 2, headshot: null },
+    { player_id: '9', player_key: 'knick', name: 'Knick', team: 'NYK', opponent: 'MIA', group_key: 'scoring_guard', archetype: 'scoring_guard', salary: 5000, projected_points: 25, rostership: 5, headshot: null },
+  ]
+  const VERDICT = { player_id: '1', cash: { verdict: 'Play', confidence: 72 }, gpp: { verdict: 'Lean', confidence: 55 } }
+  const renderWithCard = () => {
+    const open = vi.fn()
+    render(
+      <PlayerCardContext.Provider value={{ open, close: vi.fn(), target: null }}>
+        <MemoryRouter initialEntries={['/archetypes']}><ArchetypesPage /></MemoryRouter>
+      </PlayerCardContext.Provider>,
+    )
+    return open
+  }
+  const nykCell = () => screen.findByRole('button', { name: /^NYK vs Scoring Guard \/ Wing: \+2\.4 FP over expectation, 8 games, 2 slate players$/ })
+
+  beforeEach(() => {
+    clearSlateVerdicts()
+    playersAPI.getVerdicts.mockResolvedValue({ data: { players: { 101: VERDICT } } })
+  })
+
+  it('live slate: badge, hover lists who faces the defense, names open the card', async () => {
+    archetypesAPI.getTonight.mockResolvedValue({ data: { ...TONIGHT, slateId: 's1', isBacktest: false, roster: ROSTER } })
+    const open = renderWithCard()
+    const cell = await nykCell()
+    expect(within(cell).getByTestId('slate-badge')).toHaveTextContent('2')
+    fireEvent.pointerEnter(cell)
+    const pop = await screen.findByTestId('cell-popover')
+    expect(within(pop).getByTestId('cell-popover-header')).toHaveTextContent('NYK vs Scoring Guard / Wing · +2.4 FP/player-game · target')
+    expect(within(pop).getAllByTestId('cell-popover-player').map((r) => within(r).getAllByRole('cell')[0].textContent)).toEqual(['Guard OneMIA', 'Cheap GuardMIA'])
+    expect(within(pop).getByText('31.2%')).toBeInTheDocument()
+    // Verdict pills: one cached request for the slate
+    expect(await within(pop).findByRole('img', { name: 'Cash Play 72, GPP Lean 55' })).toBeInTheDocument()
+    expect(playersAPI.getVerdicts).toHaveBeenCalledWith('s1', {})
+    fireEvent.click(within(pop).getByRole('button', { name: 'Open Guard One card' }))
+    expect(open).toHaveBeenCalledWith({ playerId: '1', slateId: 's1', slateDate: null, name: 'Guard One', headshot: null, team: 'MIA' })
+    expect(screen.queryByTestId('cell-popover')).toBeNull()
+    expect(archetypesAPI.getTonight).toHaveBeenCalledTimes(1)
+  })
+
+  it('backtest slate: the saved night, actual points, cards and verdicts for that date', async () => {
+    const BACKTEST = { slateDate: '2026-10-21', slateId: '29805', site: 'fanduel', players: 242 }
+    useSlate.mockReturnValue({
+      ...slateContext({ slate_id: 's1', name: 'Main' }),
+      backtests: [BACKTEST], backtest: BACKTEST, isBacktest: true, setBacktestDate: vi.fn(),
+      rangeMode: 'model', setRangeMode: vi.fn(), workSlateId: '29805',
+    })
+    archetypesAPI.getTonight.mockResolvedValue({
+      data: {
+        ...TONIGHT, slateId: '29805', isBacktest: true, slateDate: '2026-10-21', endDate: '2026-10-20',
+        roster: ROSTER.map((p, i) => ({ ...p, actualPoints: [44.5, 9, 30][i] })),
+      },
+    })
+    const open = renderWithCard()
+    fireEvent.pointerEnter(await nykCell())
+    const pop = await screen.findByTestId('cell-popover')
+    expect(within(pop).getByRole('columnheader', { name: 'Act' })).toBeInTheDocument()
+    expect(within(pop).getByText('44.5')).toBeInTheDocument()
+    expect(within(pop).getByText('Backtest slate')).toBeInTheDocument()
+    expect(archetypesAPI.getTonight).toHaveBeenCalledWith(expect.objectContaining({ slateId: '29805', slateDate: '2026-10-21' }))
+    await waitFor(() => expect(playersAPI.getVerdicts).toHaveBeenCalledWith('29805', { slateDate: '2026-10-21' }))
+    fireEvent.click(within(pop).getByRole('button', { name: 'Open Cheap Guard card' }))
+    expect(open).toHaveBeenCalledWith(expect.objectContaining({ playerId: '5', slateId: '29805', slateDate: '2026-10-21' }))
+  })
+
+  it('no slate: no badges, the popover says to pick one', async () => {
+    useSlate.mockReturnValue(slateContext(null))
+    renderWithCard()
+    const cell = await screen.findByRole('button', { name: /^NYK vs Scoring Guard \/ Wing: \+2\.4 FP over expectation, 8 games$/ })
+    expect(screen.queryByTestId('slate-badge')).toBeNull()
+    fireEvent.pointerEnter(cell)
+    expect(await screen.findByTestId('cell-popover-empty')).toHaveTextContent(/No slate selected/)
+    expect(archetypesAPI.getTonight).not.toHaveBeenCalled()
+    expect(playersAPI.getVerdicts).not.toHaveBeenCalled()
   })
 })

@@ -126,8 +126,35 @@ describe('GET /tonight', () => {
     assert.equal(wing.matchup_delta, 2);
     // Roster: every slate player keyed for history rows (suffix-free player_key)
     assert.equal(body.roster.length, 4);
-    assert.deepEqual(body.roster.find(p => p.player_id === '3'),
-      { player_id: '3', player_key: 'wing three', name: 'Wing Three Jr.', team: 'BOS', headshot: null });
+    // ...and placed in a heatmap cell: opponent (canonical) x archetype
+    assert.deepEqual(body.roster.find(p => p.player_id === '3'), {
+      player_id: '3', player_key: 'wing three', name: 'Wing Three Jr.', team: 'BOS', headshot: null,
+      opponent: 'PHX', position: 'SF', archetype: 'scoring_guard', group_key: 'scoring_guard',
+      salary: 6000, projected_points: 30, rostership: null, injury_status: null,
+    });
+    // Strong-defense matchups are on the roster too (NYK is strong vs bigs): prior-season archetype
+    const big = body.roster.find(p => p.player_id === '2');
+    assert.equal(big.opponent, 'NYK');
+    assert.equal(big.group_key, 'rim_running_big');
+    // No archetype -> no cell
+    const nobody = body.roster.find(p => p.player_id === '4');
+    assert.equal(nobody.archetype, null);
+    assert.equal(nobody.group_key, null);
+    assert.equal(nobody.actualPoints, undefined);
+  });
+
+  test('roster carries projected ownership and the G/F/C group under the position grouping', async () => {
+    await db.run(`UPDATE players SET rostership = 22.5 WHERE slate_id = 's1' AND player_id = '1'`);
+    try {
+      const body = await (await fetch(`${baseUrl}/tonight?slateId=s1&season=${SEASON}&grouping=position`)).json();
+      assert.deepEqual(body.roster.map(p => [p.player_id, p.opponent, p.group_key, p.archetype]), [
+        ['1', 'NYK', 'G', 'scoring_guard'], ['2', 'NYK', 'C', 'rim_running_big'],
+        ['3', 'PHX', 'F', 'scoring_guard'], ['4', 'PHX', 'G', null],
+      ]);
+      assert.equal(body.roster.find(p => p.player_id === '1').rostership, 22.5);
+    } finally {
+      await db.run(`UPDATE players SET rostership = NULL WHERE slate_id = 's1' AND player_id = '1'`);
+    }
   });
 
   test('position grouping and per-stat ranking', async () => {

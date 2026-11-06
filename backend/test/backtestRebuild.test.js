@@ -193,6 +193,16 @@ describe('Player Pool and Tonight on a snapshot slate', () => {
     const p2 = body.players.find(r => r.name === 'Player 2');
     assert.equal(p2.resultStatus, 'PLAYED');
     assert.equal(p2.actualMinutes, 30);
+    // The roster is the saved night's slate (not tonight's), every player in a G/F/C cell, with actuals
+    assert.equal(body.roster.length, pastPlayers.length);
+    assert.ok(body.roster.every(r => !r.name.endsWith('Tonight')));
+    for (const r of body.roster) {
+      const p = pastPlayers.find(x => String(x.player_id) === String(r.player_id));
+      assert.ok(['G', 'F', 'C'].includes(r.group_key), r.name);
+      assert.equal(r.salary, p.salary, r.name);
+      assert.equal(r.rostership, p.rostership, r.name);
+      assert.equal(r.actualPoints, expectedActual(p), r.name);
+    }
   });
 });
 

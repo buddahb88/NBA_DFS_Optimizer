@@ -513,7 +513,7 @@ export function weakTiers(rows, stat = 'fp') {
 const SLATE_SQL = 'SELECT slate_id FROM slates WHERE slate_id = ?';
 // player_key: backtest actuals are looked up by it (loadActuals)
 const SLATE_PLAYER_FIELDS = ['player_id', 'player_key', 'name', 'team', 'opponent', 'position', 'salary', 'projected_points',
-  'projected_minutes', 'injury_status', 'headshot'];
+  'projected_minutes', 'injury_status', 'headshot', 'rostership'];
 
 const dayBefore = (date) => new Date(Date.parse(`${date}T00:00:00Z`) - 86400000).toISOString().slice(0, 10);
 
@@ -625,12 +625,16 @@ export async function getTonight(query = {}) {
     loadEdgeContext({ season: archetypeSeason, lastSeason: previousSeason(archetypeSeason), asOfDate }),
   ]);
 
+  const archetypeOf = ctx.archetypeFor(lookup);
   let { matchedPlayers, players: out } = buildTonight(players, {
-    tiers: weakTiers(defense.rows, stat), column: STAT_COLUMNS[stat], grouping, archetypeOf: ctx.archetypeFor(lookup), edgeContext,
+    tiers: weakTiers(defense.rows, stat), column: STAT_COLUMNS[stat], grouping, archetypeOf, edgeContext,
   });
+  let roster = buildRoster(players, { grouping, archetypeOf });
   if (ctx.source.isBacktest) {
     const actuals = await actualsByPlayerId(ctx.source, players);
-    out = out.map(r => ({ ...r, ...(actuals.get(String(r.player_id)) ?? NO_ACTUAL) }));
+    const withActual = r => ({ ...r, ...(actuals.get(String(r.player_id)) ?? NO_ACTUAL) });
+    out = out.map(withActual);
+    roster = roster.map(withActual);
   }
 
   return {
@@ -640,11 +644,30 @@ export async function getTonight(query = {}) {
     lastNGames: defense.lastNGames, source: defense.source, edgeConfig: MATCHUP_EDGE_CONFIG,
     slatePlayers: players.length, matchedPlayers, defenseRows: defense.rows.length,
     players: out,
-    // Every slate player, so the page can link history rows (player_key) to the card
-    roster: players.map(p => ({
-      player_id: p.player_id, player_key: playerKey(p.name), name: p.name, team: canonicalTeam(p.team), headshot: p.headshot,
-    })),
+    roster,
   };
+}
+
+/**
+ * Every slate player for the page: player_key links history rows to the card,
+ * and opponent + group_key place him in a heatmap cell (the defending team's
+ * row, his archetype or G/F/C column; null when unclassified / unknown), with
+ * the archetype the Tonight rows use. Pure.
+ */
+export function buildRoster(players, { grouping, archetypeOf }) {
+  return players.map(p => {
+    const key = playerKey(p.name);
+    const archetype = archetypeOf(key) ?? null;
+    const group = grouping === 'position' ? dvpPosition(p.position) : archetype;
+    return {
+      player_id: p.player_id, player_key: key, name: p.name, team: canonicalTeam(p.team), headshot: p.headshot ?? null,
+      opponent: canonicalTeam(p.opponent) || null, position: p.position ?? null,
+      archetype: archetype && archetype !== 'unclassified' ? archetype : null,
+      group_key: group && group !== 'unclassified' ? group : null,
+      salary: p.salary ?? null, projected_points: p.projected_points ?? null, rostership: p.rostership ?? null,
+      injury_status: p.injury_status ?? null,
+    };
+  });
 }
 
 /**

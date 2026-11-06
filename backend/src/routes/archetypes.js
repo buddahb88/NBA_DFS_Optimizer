@@ -100,7 +100,10 @@ router.get('/defense/:team/:archetype/games', async (req, res) => {
  * GET /api/archetypes/tonight
  * Slate players whose opponent is in the weak tier (top third of defenses,
  * positive delta) vs their archetype or G/F/C, with salary, projection and
- * matchup_delta, best first.
+ * matchup_delta, best first. `roster` lists every slate player with his
+ * opponent, archetype and group_key (archetype or G/F/C, per grouping; null
+ * when unclassified), salary, projection and rostership, so the heatmap can
+ * place him in a cell; a backtest adds actualPoints / actualMinutes / resultStatus.
  *
  * Query params:
  *   slateId   required

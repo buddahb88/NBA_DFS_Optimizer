@@ -42,10 +42,13 @@ export function teamsParam(teams) {
   return Array.isArray(teams) ? teams.join(',') : ''
 }
 
-/** Teams playing on the slate a /archetypes/tonight body covers (roster, plus matchup rows), A-Z. */
+/** Teams playing on the slate a /archetypes/tonight body covers (roster and its opponents, plus matchup rows), A-Z. */
 export function slateTeams(tonight) {
   const teams = new Set()
-  for (const p of tonight?.roster ?? []) if (p.team) teams.add(p.team)
+  for (const p of tonight?.roster ?? []) {
+    if (p.team) teams.add(p.team)
+    if (p.opponent) teams.add(p.opponent)
+  }
   for (const p of tonight?.players ?? []) {
     if (p.team) teams.add(p.team)
     if (p.opponent) teams.add(p.opponent)
@@ -54,12 +57,12 @@ export function slateTeams(tonight) {
 }
 
 /**
- * team -> tonight's opponent, from the Tonight rows' team/opponent pairs (both
- * ways). Only games with a listed matchup are known; others are left out.
+ * team -> tonight's opponent, from the roster's and Tonight rows' team/opponent
+ * pairs (both ways). Games without a listed opponent are left out.
  */
 export function slateOpponents(tonight) {
   const opponents = new Map()
-  for (const p of tonight?.players ?? []) {
+  for (const p of [...(tonight?.roster ?? []), ...(tonight?.players ?? [])]) {
     if (!p.team || !p.opponent) continue
     opponents.set(p.team, p.opponent)
     opponents.set(p.opponent, p.team)
@@ -138,14 +141,102 @@ export function buildHeatmap(rows, { definitions, grouping, stat, teams: only = 
   ]
   const allTeams = [...teams].sort()
   const keep = only ? new Set(only) : null
+  const tiers = defenseTiers(rows, stat)
   return {
     teams: keep ? allTeams.filter((t) => keep.has(t)) : allTeams,
     allTeams,
     groups,
     maxAbs,
     cell: (team, key) => cells.get(`${team}|${key}`) ?? null,
+    tier: (team, key) => tiers.get(`${team}|${key}`) ?? 'neutral',
   }
 }
+
+// Same cut as the backend's weak tier (archetypeDefenseService.weakTiers)
+const TIER_FRACTION = 1 / 3
+
+/**
+ * Map('team|group' -> 'target' | 'avoid' | 'neutral') for the stat, league-wide
+ * per column: the top third of defenses (rounded up) that allow MORE than
+ * expected are 'target' (the /tonight weak tier), the bottom third that allow
+ * LESS are 'avoid'. Cells without a value are left out.
+ */
+export function defenseTiers(rows, stat) {
+  const { column } = statFor(stat)
+  const byGroup = new Map()
+  for (const row of rows ?? []) {
+    const value = row[column]
+    if (value == null || Number.isNaN(Number(value))) continue
+    if (!byGroup.has(row.group_key)) byGroup.set(row.group_key, [])
+    byGroup.get(row.group_key).push({ team: row.team, value: Number(value) })
+  }
+  const tiers = new Map()
+  for (const [group, list] of byGroup) {
+    list.sort((a, b) => b.value - a.value || (a.team < b.team ? -1 : 1))
+    const size = Math.ceil(list.length * TIER_FRACTION)
+    list.forEach(({ team, value }, i) => {
+      const tier = i < size && value > 0 ? 'target' : i >= list.length - size && value < 0 ? 'avoid' : 'neutral'
+      tiers.set(`${team}|${group}`, tier)
+    })
+  }
+  return tiers
+}
+
+const byProjection = (a, b) =>
+  (Number(b.projected_points) || 0) - (Number(a.projected_points) || 0) ||
+  (Number(b.salary) || 0) - (Number(a.salary) || 0) ||
+  String(a.name).localeCompare(String(b.name))
+
+/**
+ * Slate players per heatmap cell: Map('defending team|group' -> roster entries,
+ * best projection first). A player lands in his OPPONENT's row under his
+ * archetype (or G/F/C) column, as /tonight's roster assigns them. Empty when
+ * the body was built for another grouping (a refetch still in flight).
+ */
+export function slateCellPlayers(tonight, grouping) {
+  const cells = new Map()
+  if (!tonight?.roster || (grouping && tonight.grouping && tonight.grouping !== grouping)) return cells
+  for (const p of tonight.roster) {
+    if (!p.opponent || !p.group_key) continue
+    const key = `${p.opponent}|${p.group_key}`
+    if (!cells.has(key)) cells.set(key, [])
+    cells.get(key).push(p)
+  }
+  for (const list of cells.values()) list.sort(byProjection)
+  return cells
+}
+
+export const TIER_LABELS = { target: 'target', avoid: 'avoid', neutral: 'neutral' }
+
+// "Guards" stay as is; "Primary Creator" -> "Primary Creators"
+const plural = (label) => (/s$/i.test(label) ? label : `${label}s`)
+
+/**
+ * Hover popover model for one cell: { title, delta, header, tier, empty }.
+ * header = "NYK vs Scoring Guard / Wing · +2.4 FP/player-game · target";
+ * empty = why no player is listed (null when some are), from
+ * slate.status ('none' | 'loading' | 'error' | 'ready') and slate.teams.
+ */
+export function cellPopoverModel({ team, label, value, unit, tier = 'neutral', players = [], slate = {} }) {
+  const title = `${team} vs ${label}`
+  const delta = `${formatDelta(value)} ${unit}/player-game`
+  tier = TIER_LABELS[tier] ? tier : 'neutral'
+  const header = `${title} · ${delta} · ${tier}`
+  let empty = null
+  if (slate.status === 'none') empty = 'No slate selected. Pick a slate in the top bar to see who faces this defense.'
+  else if (slate.status === 'loading') empty = 'Loading slate players…'
+  else if (slate.status === 'error') empty = 'Couldn’t load the slate players.'
+  else if (!players.length) {
+    empty = slate.teams && !slate.teams.has(team) ? `${team} is not on this slate` : `No ${plural(label)} face ${team} on this slate`
+  }
+  return { title, delta, header, tier, empty }
+}
+
+/** 4,500 -> "$4.5K"; missing -> em dash. */
+export const formatSalary = (s) => (s == null || s === '' ? '—' : `$${(Number(s) / 1000).toFixed(1)}K`)
+
+/** Projected ownership (percent) -> "12.3%"; missing -> em dash. */
+export const formatOwnership = (o) => (o == null || o === '' || Number.isNaN(Number(o)) ? '—' : `${Number(o).toFixed(1)}%`)
 
 const MAX_ALPHA = 0.8
 const MIN_ALPHA = 0.08
