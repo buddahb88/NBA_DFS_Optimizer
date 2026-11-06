@@ -11,13 +11,22 @@
  * Players listed OUT (forced Fade) and players without a projection are not
  * in the buckets: they would only flatter the Fade bucket. They are counted.
  *
+ * By slate size (runSlateSizeBacktest): every saved classic slate, main and
+ * non-main, split into small (1-3 games) / medium (4-7) / large (8+); each
+ * player is scored with the old slate-agnostic rules (buildVerdict without
+ * context) and the new slate-aware ones on the same signals, so the two
+ * tables differ only by the rules.
+ *
  * Read-only. Reporting only - the rules are not tuned here.
  */
 
-import { VERDICTS, STUD_SALARY, isOut } from './verdict.js';
+import db from '../../config/database.js';
+import { getSiteConfig } from '../../config/sites.js';
+import { easternDate } from '../slateSnapshotService.js';
+import { VERDICTS, STUD_SALARY, isOut, buildVerdict } from './verdict.js';
 import { resolveSlate, loadActuals } from '../slateSource.js';
 import { listMainSlates } from '../modelEval/modelEvalService.js';
-import { getSlateVerdicts } from './slateVerdicts.js';
+import { getSlateVerdicts, computeSlateVerdicts } from './slateVerdicts.js';
 
 export const MODES = ['cash', 'gpp'];
 export const SALARY_TIERS = [
@@ -146,4 +155,118 @@ export async function runVerdictBacktest({ site = 'draftkings', dates = null, pr
   return { report: buildReport(allRows, { slates: done, projectionSource }), rows: allRows };
 }
 
-export default { runVerdictBacktest, buildReport, modeReport, bucketStats, joinRows, correlation };
+// --- By slate size: old (slate-agnostic) vs new (slate-aware) rules --------------------------
+
+export const SIZE_BUCKETS = ['small', 'medium', 'large'];
+export const SIZE_LABELS = { small: '1-3 games', medium: '4-7 games', large: '8+ games' };
+
+/**
+ * Every saved slate of the site (main and non-main) with snapshot rows, before
+ * today: [{ date, slateId, name, games, isMain }].
+ */
+export async function listBacktestSlates({ site = 'draftkings', dates = null, mainOnly = false, now = new Date() } = {}) {
+  const rows = await db.all(`
+    SELECT DISTINCT c.game_date, c.slate_id, c.name, c.games, c.is_main FROM slate_catalog c
+    WHERE c.site = ? AND c.game_date < ? AND COALESCE(c.contest_type, 'classic') = 'classic'
+      ${mainOnly ? 'AND c.is_main = 1' : ''}
+      AND EXISTS (SELECT 1 FROM slate_player_snapshots s WHERE s.site = c.site AND s.slate_id = c.slate_id AND s.game_date = c.game_date)
+    ORDER BY c.game_date, c.slate_id`, getSiteConfig(site).key, easternDate(now));
+  return rows.map(r => ({
+    date: String(r.game_date).slice(0, 10), slateId: String(r.slate_id), name: r.name ?? null,
+    games: r.games ?? null, isMain: Boolean(r.is_main),
+  })).filter(s => !dates || dates.includes(s.date));
+}
+
+/**
+ * One row per player of a computed slate (computeSlateVerdicts rows) with both
+ * rule sets: cash / gpp = slate-aware (as served), legacy = buildVerdict on the
+ * same signals without slate context. Exclusions as joinRows.
+ */
+export function joinSizedRows({ date, slateId, isMain, slate, rows, actuals }) {
+  return rows.map(({ p, a }) => {
+    const salary = Number(a.salary) || null;
+    const blend = a.projection?.blend ?? a.projection?.active ?? null;
+    const act = actuals.get(p.id) ?? actuals.get(String(p.id));
+    const legacy = buildVerdict(a.signals);
+    const row = {
+      date, slateId, isMain, sizeBucket: slate?.sizeBucket ?? null, games: slate?.gameCount ?? null,
+      id: p.id, name: p.name, salary, injury_status: p.injury_status ?? null,
+      projection: blend,
+      actual: act?.actualPoints ?? 0,
+      status: act?.resultStatus ?? 'NO_BOX_SCORE',
+      cash: pickVerdict(a.verdict.cash),
+      gpp: pickVerdict(a.verdict.gpp),
+      legacy: { cash: pickVerdict(legacy.cash), gpp: pickVerdict(legacy.gpp) },
+    };
+    if (!salary) row.excluded = 'no_salary';
+    else if (isOut(p.injury_status)) row.excluded = 'out';
+    else if (!(Number(a.projection?.active) > 0) || blend === null) row.excluded = 'no_projection';
+    return row;
+  });
+}
+
+const pickVerdict = ({ verdict, score, confidence }) => ({ verdict, score, confidence });
+
+/** Old-vs-new report per slate-size bucket (and all buckets together). */
+export function buildSizeReport(allRows, { slates = [], projectionSource = null } = {}) {
+  const rows = allRows.filter(r => !r.excluded);
+  const legacyView = (rs) => rs.map(r => ({ ...r, cash: r.legacy.cash, gpp: r.legacy.gpp }));
+  const section = (rs) => ({
+    slates: new Set(rs.map(r => `${r.date}|${r.slateId}`)).size,
+    players: rs.length,
+    old: Object.fromEntries(MODES.map(m => [m, modeReport(legacyView(rs), m)])),
+    new: Object.fromEntries(MODES.map(m => [m, modeReport(rs, m)])),
+    changed: Object.fromEntries(MODES.map(m => [m, rs.filter(r => r[m].verdict !== r.legacy[m].verdict).length])),
+    transitions: Object.fromEntries(MODES.map(m => {
+      const t = {};
+      for (const r of rs) {
+        if (r[m].verdict === r.legacy[m].verdict) continue;
+        const k = `${r.legacy[m].verdict} -> ${r[m].verdict}`;
+        t[k] = (t[k] ?? []).concat(r);
+      }
+      return [m, Object.fromEntries(Object.entries(t).map(([k, v]) => [k, bucketStats(v)]))];
+    })),
+  });
+  return {
+    generatedAt: new Date().toISOString(),
+    projectionSource,
+    slates,
+    players: rows.length,
+    excluded: allRows.filter(r => r.excluded).length,
+    buckets: Object.fromEntries(SIZE_BUCKETS.map(b => [b, { label: SIZE_LABELS[b], ...section(rows.filter(r => r.sizeBucket === b)) }])),
+    all: section(rows),
+  };
+}
+
+/**
+ * Run both rule sets on every saved slate (main and non-main unless mainOnly)
+ * as of its date and build the by-size report. Read-only.
+ */
+export async function runSlateSizeBacktest({
+  site = 'draftkings', dates = null, mainOnly = false, projectionSource = null, now = new Date(), onSlate = null,
+} = {}) {
+  const slates = await listBacktestSlates({ site, dates, mainOnly, now });
+  const allRows = [];
+  const done = [];
+  for (const s of slates) {
+    const t0 = performance.now();
+    const source = await resolveSlate({ slateId: s.slateId, slateDate: s.date, site, now });
+    if (!source) continue;
+    const { prep, rows } = await computeSlateVerdicts(source, { projectionSource, now });
+    const actuals = await loadActuals(source, rows.map(({ p, a }) => ({ id: p.id, player_key: a.key, name: p.name })));
+    const joined = joinSizedRows({ date: s.date, slateId: s.slateId, isMain: s.isMain, slate: prep.slate, rows, actuals });
+    allRows.push(...joined);
+    const info = {
+      ...s, gameCount: prep.slate?.gameCount ?? null, sizeBucket: prep.slate?.sizeBucket ?? null,
+      avgOwnership: prep.slate?.ownership?.avg ?? null, players: joined.length, warnings: prep.warnings,
+      ms: Math.round(performance.now() - t0),
+    };
+    done.push(info);
+    onSlate?.(info);
+  }
+  return { report: buildSizeReport(allRows, { slates: done, projectionSource }), rows: allRows };
+}
+
+export default {
+  runVerdictBacktest, runSlateSizeBacktest, buildReport, buildSizeReport, modeReport, bucketStats, joinRows, joinSizedRows, correlation,
+};

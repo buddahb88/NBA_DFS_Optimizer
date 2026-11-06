@@ -47,6 +47,7 @@ import { canonicalTeam, playerKey } from '../../utils/playerKey.js';
 import { seasonForDate, previousSeason } from '../../utils/season.js';
 import { gameEntry, summarizeForm, trackRecord, snapshotsByDate, rankTeams } from './cardMath.js';
 import { buildVerdict } from './verdict.js';
+import { buildSlateContext } from './slateContext.js';
 
 const CONTEXT_TTL_MS = 10 * 60 * 1000;
 const CARD_TTL_MS = 60 * 1000;
@@ -223,7 +224,8 @@ const byId = (rows) => new Map((rows ?? []).map(r => [String(r.id), r]));
 /**
  * Everything slate-wide the card and the slate verdicts share, loaded once:
  * { source, chosen, asOf, season, lastSeason, players, ctx, own: Map(id -> own
- * model row), radar: Map(id -> radar row), warnings }. own / radar are empty
+ * model row), radar: Map(id -> radar row), slate (slateContext.js: game
+ * count, size bucket, ownership distribution), warnings }. own / radar are empty
  * maps when their service fails (named in warnings).
  */
 export async function prepareSlate({ slateId, slateDate = null, projectionSource = null, now = new Date() } = {}) {
@@ -245,7 +247,9 @@ export async function prepareSource(source, { projectionSource = null, now = new
       slateId: source.slateId, slateDate: source.isBacktest ? source.slateDate : null, site: source.site, now,
     })).players), new Map()),
   ]);
-  return { source, chosen, asOf, season: ctx.season, lastSeason: previousSeason(ctx.season), players, ctx, own, radar, warnings };
+  // Slate size / ownership distribution for the verdicts, once per slate
+  const slate = buildSlateContext(players);
+  return { source, chosen, asOf, season: ctx.season, lastSeason: previousSeason(ctx.season), players, ctx, own, radar, slate, warnings };
 }
 
 export const findSlatePlayer = (players, id) => findPlayer(players, id);
@@ -380,7 +384,8 @@ export function assemblePlayer(p, prep, history) {
 
   // --- Verdict --------------------------------------------------------------------------------
   const minutesBase = form.trend.baseline === 'season' ? form.season : form.lastSeason;
-  const verdict = buildVerdict({
+  const signals = {
+    id: p.id,
     name: p.name,
     salary,
     injuryStatus: p.injury_status,
@@ -418,11 +423,13 @@ export function assemblePlayer(p, prep, history) {
     radarGpp: radarSummary?.gpp_score ?? null,
     trackBias: track.bias,
     trackN: track.n,
-  });
+  };
+  // prep.slate: slate size + ownership distribution (null = the slate-agnostic legacy rules)
+  const verdict = buildVerdict(signals, prep.slate ?? null);
 
   return {
     key, team, opponent, info, own, radar, entries, form, track, projection, matchup, environment,
-    split, radarSummary, starterChange: change, salary, salaryK, active, rotowire, verdict,
+    split, radarSummary, starterChange: change, salary, salaryK, active, rotowire, signals, verdict,
   };
 }
 

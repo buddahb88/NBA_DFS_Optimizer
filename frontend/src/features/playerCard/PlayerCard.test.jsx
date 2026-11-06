@@ -72,6 +72,30 @@ describe('PlayerCardView', () => {
     expect(screen.getByText('Backtest 2026-10-28')).toBeInTheDocument()
   })
 
+  it('says when the slate size changed the call, and stays quiet when it did not', () => {
+    const c = fadeCard()
+    const changed = {
+      ...c,
+      verdict: {
+        ...c.verdict,
+        slate: {
+          gameCount: 2, sizeBucket: 'small', label: '2-game slate', changed: true,
+          legacy: { cash: 'Fade', gpp: 'Pivot' }, note: 'No viable pivot within $500 on a 2-game slate - a Pivot, not a Fade',
+        },
+      },
+    }
+    const { unmount } = render(<MemoryRouter><PlayerCardView card={changed} onClose={() => {}} /></MemoryRouter>)
+    const note = screen.getByTestId('verdict-slate-note')
+    expect(note).toHaveTextContent('Slate size changed the call.')
+    expect(note).toHaveTextContent('No viable pivot within $500 on a 2-game slate')
+    expect(note).toHaveTextContent('any slate size: cash Fade, GPP Pivot')
+    unmount()
+
+    const same = { ...c, verdict: { ...c.verdict, slate: { ...changed.verdict.slate, changed: false, note: null } } }
+    render(<MemoryRouter><PlayerCardView card={same} onClose={() => {}} /></MemoryRouter>)
+    expect(screen.queryByTestId('verdict-slate-note')).toBeNull()
+  })
+
   it('shows the minutes upside section: score, reasons, band and the correction', () => {
     render(<MemoryRouter><PlayerCardView card={fadeCard()} onClose={() => {}} /></MemoryRouter>)
     const section = screen.getByRole('heading', { name: 'Minutes upside' }).closest('section')

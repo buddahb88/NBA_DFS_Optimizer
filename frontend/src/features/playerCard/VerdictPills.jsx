@@ -39,6 +39,7 @@ function verdictTooltip(entry) {
         <span className="font-semibold">GPP:</span> {entry.gpp.verdict} ({entry.gpp.confidence})
       </div>
       {entry.headline && <div className="text-fg-muted">{entry.headline}</div>}
+      {entry.slate_note && entry.slate_note !== entry.headline && <div className="text-fg-muted">{entry.slate_note}</div>}
     </div>
   );
 }

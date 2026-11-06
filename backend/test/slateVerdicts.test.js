@@ -137,6 +137,11 @@ describe('GET /api/players/:slateId/verdicts (backtest)', () => {
     assert.equal(b.isBacktest, true);
     assert.ok(b.generatedAt);
     assert.deepEqual(b.thresholds, { core: 66, playable: 54, pivot: 42 });
+    // Slate context: the fixture is a 2-game slate (AAA-BBB, CCC-DDD); no pivot pool in the response
+    assert.equal(b.slate.gameCount, 2);
+    assert.equal(b.slate.sizeBucket, 'small');
+    assert.ok(b.slate.ownership.avg > 0);
+    assert.equal(b.slate.pool, undefined);
     const entries = Object.entries(b.players);
     assert.equal(entries.length, pool.length);
     for (const [id, e] of entries) {
@@ -160,6 +165,7 @@ describe('GET /api/players/:slateId/verdicts (backtest)', () => {
       const card = await get(`/api/players/past/card/${id}?slateDate=${PAST}`);
       assert.equal(card.status, 200);
       assert.deepEqual({ cash: e.cash, gpp: e.gpp }, { cash: pick(card.body.verdict.cash), gpp: pick(card.body.verdict.gpp) }, e.name);
+      assert.equal(card.body.verdict.slate?.label, '2-game slate', 'the card uses the same slate context');
     }
   });
 

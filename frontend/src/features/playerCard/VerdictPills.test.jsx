@@ -84,6 +84,15 @@ describe('VerdictPills', () => {
     expect(tip).toHaveTextContent('Our model is 6.5 below RotoWire.')
   })
 
+  it('tooltip adds the slate-size note when the slate changed the call', async () => {
+    const entry = { ...VERDICTS.players[2], slate_note: 'Chalky for an 11-game slate: 16.0% projected owned (4.2x the 3.8% average)' }
+    render(<VerdictPills entry={entry} />)
+    act(() => screen.getByRole('img').focus())
+    const tip = await screen.findByRole('tooltip')
+    expect(tip).toHaveTextContent('Our model is 6.5 below RotoWire.')
+    expect(tip).toHaveTextContent('Chalky for an 11-game slate')
+  })
+
   it('no entry renders an aligned placeholder, not pills', () => {
     const { container } = render(<VerdictPills entry={null} />)
     expect(screen.queryByTestId('verdict-cash')).toBeNull()

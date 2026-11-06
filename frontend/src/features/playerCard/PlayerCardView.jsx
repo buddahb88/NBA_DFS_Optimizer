@@ -172,6 +172,12 @@ function VerdictSection({ card, onAskAi }) {
       )}
     >
       <p className="text-sm leading-relaxed text-fg">{v.blurb}</p>
+      {v.slate?.changed && v.slate.note && (
+        <p data-testid="verdict-slate-note" className="mt-2 rounded border border-line bg-surface-sunken px-2 py-1 text-2xs text-fg-muted">
+          <span className="font-semibold text-fg">Slate size changed the call.</span> {v.slate.note}
+          {v.slate.legacy && <> (any slate size: cash {v.slate.legacy.cash}, GPP {v.slate.legacy.gpp})</>}
+        </p>
+      )}
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
         <div>
           <h4 className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-positive">Reasons for</h4>
