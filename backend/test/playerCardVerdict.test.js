@@ -111,7 +111,7 @@ describe('buildVerdict: slate size', () => {
     const big = buildVerdict(stud, large);
     assert.equal(big.cash.verdict, 'Fade');
     assert.equal(big.gpp.verdict, 'Fade');
-    assert.ok(big.reasonsAgainst.some(r => /Chalky for an 11-game slate: 42\.0% projected owned/.test(r)), big.reasonsAgainst.join(' | '));
+    assert.ok(big.reasonsAgainst.some(r => /Chalky at 42\.0% projected owned/.test(r)), big.reasonsAgainst.join(' | '));
 
     const two = buildVerdict(stud, small);
     assert.equal(two.cash.verdict, 'Pivot');
@@ -138,11 +138,13 @@ describe('buildVerdict: slate size', () => {
     assert.match(big.blurb, /in GPPs\.$/);
     assert.doesNotMatch(big.blurb, /in GPPs on an/);
 
-    // Chalk that only exists on a large slate drops a GPP verdict: the note quotes it
+    // Large slates score ownership with the absolute cut-offs: 25% on an
+    // 11-game slate is not chalk, so the call stays the legacy one
     const p = { ...base, salary: 9000, projection: 52, rostership: 25, p90: 70 };
     const v = buildVerdict(p, large);
-    assert.notEqual(v.gpp.verdict, buildVerdict(p).gpp.verdict);
-    assert.match(v.slate.note, /^Chalky for an 11-game slate: 25\.0% projected owned/);
+    assert.equal(v.gpp.verdict, buildVerdict(p).gpp.verdict);
+    assert.equal(v.slate.changed, false);
+    assert.equal(v.slate.label, '11-game slate');
   });
 
   test('small slate: a viable pivot at a similar salary keeps the Fade', () => {
@@ -155,11 +157,11 @@ describe('buildVerdict: slate size', () => {
     assert.equal(weak.gpp.verdict, 'Pivot');
   });
 
-  test('small slate: studs are top-2-per-game salaries, bigger bump; blowout weighs more; lower value baseline', () => {
+  test('small slate: studs are top-1-per-game salaries, normal bump; blowout weighs more; lower value baseline', () => {
     const p = { ...base, salary: 8800, projection: 44, rostership: 20 };
     const two = buildVerdict(p, small);
     const plain = buildVerdict(p);
-    assert.deepEqual(two.rules.find(r => r.key === 'stud') && [two.rules.find(r => r.key === 'stud').cash, two.rules.find(r => r.key === 'stud').gpp], [6, 5]);
+    assert.deepEqual(two.rules.find(r => r.key === 'stud') && [two.rules.find(r => r.key === 'stud').cash, two.rules.find(r => r.key === 'stud').gpp], [3, 2]);
     assert.ok(!plain.rules.some(r => r.key === 'stud'), '$8.8K is not a stud without slate context');
     assert.ok(two.rules.find(r => r.key === 'stud').text.includes('2-game slate'));
 
@@ -187,18 +189,21 @@ describe('buildVerdict: slate size', () => {
     assert.ok(!buildVerdict(p, small).rules.some(r => r.key === 'ownership'));
   });
 
-  test('large slate: chalk at 16% (never under the legacy 30% line); leverage needs a lower relative ownership', () => {
-    const chalk = buildVerdict({ ...base, rostership: 16 }, large).rules.find(r => r.key === 'ownership');
+  test('large slate: ownership uses the absolute legacy cut-offs (under 8% leverage, 30%+ chalk)', () => {
+    assert.ok(!buildVerdict({ ...base, rostership: 16 }, large).rules.some(r => r.key === 'ownership'), '16% is not chalk');
+    const chalk = buildVerdict({ ...base, rostership: 35 }, large).rules.find(r => r.key === 'ownership');
     assert.ok(chalk && chalk.gpp < 0);
-    assert.match(chalk.text, /Chalky for an 11-game slate/);
-    assert.ok(!buildVerdict({ ...base, rostership: 16 }).rules.some(r => r.key === 'ownership'));
+    assert.equal(chalk.text, 'Chalky at 35.0% projected owned');
 
     const cheap = { ...base, salary: 5000, projection: 26 };
-    assert.ok(buildVerdict({ ...cheap, rostership: 3 }).rules.some(r => r.key === 'ownership' && r.gpp > 0), 'legacy: 3% is leverage');
-    assert.ok(!buildVerdict({ ...cheap, rostership: 3 }, large).rules.some(r => r.key === 'ownership'), '3% is ordinary on an 11-game slate');
-    const lev = buildVerdict({ ...cheap, rostership: 1.2 }, large).rules.find(r => r.key === 'ownership');
-    assert.ok(lev && lev.gpp > 0);
-    assert.match(lev.text, /Only 1\.2% projected owned on an 11-game slate \(0\.3x the 4\.0% average\) - leverage/);
+    const lev = buildVerdict({ ...cheap, rostership: 3 }, large).rules.find(r => r.key === 'ownership');
+    assert.ok(lev && lev.gpp > 0, '3% is leverage');
+    assert.equal(lev.text, 'Only 3.0% projected owned - leverage');
+    for (const own of [1.2, 3, 7.9, 8, 16, 29.9, 30, 45]) {
+      const p = { ...cheap, rostership: own };
+      assert.deepEqual(buildVerdict(p, large).rules.find(r => r.key === 'ownership') ?? null,
+        buildVerdict(p).rules.find(r => r.key === 'ownership') ?? null, `own ${own}`);
+    }
   });
 
   test('medium slate at an 8% average scores ownership like the legacy rules', () => {
@@ -242,7 +247,7 @@ describe('buildSlateContext', () => {
     assert.equal(c.ownership.n, 6);
     assert.equal(c.ownership.avg, 21.67);
     assert.equal(c.ownership.chalkCount, 2);
-    assert.equal(c.studSalary, 8000); // 4th-highest salary = top 2 per game
+    assert.equal(c.studSalary, 9000); // 2nd-highest salary = top 1 per game
     assert.deepEqual(c.pool.map(p => p.id), [1, 2, 3, 4, 5]); // GTD is not a pivot
   });
 

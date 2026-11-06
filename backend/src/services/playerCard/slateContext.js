@@ -6,7 +6,7 @@
  *   poolSize      active players: salary > 0, projection > 0, not OUT
  *   ownership     { n, avg, median, p90, chalkCount (30%+) } over active players with rostership > 0,
  *                 null when the slate has no ownership
- *   studSalary    the salary at rank studsPerGame x games (small slates: its "studs"), else null
+ *   studSalary    the salary at rank studsPerGame x games (small slates: its "studs", top 1 per game), else null
  *   pool          [{ id, name, salary, projection }] active players without an injury tag (pivot candidates)
  */
 

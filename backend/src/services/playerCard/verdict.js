@@ -18,7 +18,8 @@
  * Slate size (optional second argument, slateContext.js buildSlateContext):
  * the same player is not the same play on a 2-game and an 11-game slate.
  * With a slate context, ownership is scored relative to the slate's average
- * projected ownership and the value / stud / blowout / pivot rules come from
+ * projected ownership (small / medium; large slates keep the absolute
+ * cut-offs for now) and the value / stud / blowout / pivot rules come from
  * SLATE_RULES[sizeBucket]. Without one the engine behaves exactly as before
  * (LEGACY_RULES: absolute 8% / 30% ownership cut-offs).
  */
@@ -33,11 +34,11 @@ export const LEAGUE_IMPLIED = 114;
 
 /**
  * Per slate-size rules (the refit target). Ownership cut-offs are multiples
- * of the slate's average projected ownership: leverageRatio 0.6 on an 11-game
- * slate averaging 4% = under 2.4% owned; chalkRatio 2.5 on a 2-game slate
+ * of the slate's average projected ownership: chalkRatio 2.5 on a 2-game slate
  * averaging 17% = 42%+. Medium equals the legacy absolute rules at an 8%
- * average. Round starting values, not fitted: see the by-slate-size section
- * of verdictBacktest.js.
+ * average. leverageRatio / chalkRatio null (large) = the absolute LEGACY_RULES
+ * cut-offs. Round values, not fitted: see the by-slate-size section of
+ * verdictBacktest.js (scripts/verdictBacktest.js --by-size).
  */
 export const SLATE_RULES = Object.freeze({
   small: Object.freeze({
@@ -47,8 +48,11 @@ export const SLATE_RULES = Object.freeze({
     leverageRatio: 0.8,
     chalkRatio: 2.5,
     studsExemptFromChalk: true,  // a stud at 40%+ is normal here, not chalk
-    studsPerGame: 2,             // stud = $9.5K+ or a top-2-per-game salary
-    stud: Object.freeze({ cash: 6, gpp: 5 }),
+    // stud = $9.5K+ or a top-(1 x games) salary. The bump is the normal
+    // one: a bigger bump (cash 6 / gpp 5) on the top-2 per game promoted
+    // Playable -> Core play calls that hit 5x no more often than Playable.
+    studsPerGame: 1,
+    stud: Object.freeze({ cash: 3, gpp: 2 }),
     blowout: Object.freeze({ cash: -8, gpp: -4 }), // whole lineup tied to 1-3 games
     fadeNeedsPivot: true,        // no similar-salary alternative: Fade -> Pivot
     pivotBand: 500,              // similar salary = within $500
@@ -70,8 +74,13 @@ export const SLATE_RULES = Object.freeze({
     maxGames: Infinity,
     valueBaseline: 5,
     ceilingBaseline: 7,
-    leverageRatio: 0.6,          // low ownership is the norm: leverage has to be truly low
-    chalkRatio: 3.75,
+    // null = the absolute LEGACY_RULES cut-offs (under 8% leverage, 30%+ chalk).
+    // The relative ones (leverageRatio 0.6, chalkRatio 3.75) made GPP calls
+    // slightly worse on the first 5 large slates: their Core play -> Playable
+    // moves hit 5x 49%, the Core plays that stayed 41%. Revisit with well over
+    // 5 large slates.
+    leverageRatio: null,
+    chalkRatio: null,
     studsExemptFromChalk: false,
     studsPerGame: null,
     stud: Object.freeze({ cash: 3, gpp: 2 }),
@@ -248,11 +257,12 @@ export function buildVerdict(s = {}, slate = null) {
     const pts = clamp((ceilX - R.ceilingBaseline) * 4, -8, 10);
     if (Math.abs(pts) >= 2) add('ceiling', { gpp: pts, text: `90th-percentile outcome ${p90.toFixed(1)} (${ceilX.toFixed(1)}x)` });
   }
-  // A stud: $9.5K+, or on a small slate one of its top-2-per-game salaries (slate.studSalary)
+  // A stud: $9.5K+, or on a small slate one of its top-1-per-game salaries (slate.studSalary)
   const studLine = R.studsPerGame && num(slate?.studSalary) !== null ? Math.min(STUD_SALARY, num(slate.studSalary)) : STUD_SALARY;
   const isStud = salary !== null && salary >= studLine;
   const own = num(s.rostership);
-  const avgOwn = sized ? num(slate.ownership?.avg) : null;
+  // Relative cut-offs only where the bucket defines them (large slates use the absolute ones)
+  const avgOwn = sized && R.leverageRatio ? num(slate.ownership?.avg) : null;
   let studChalkExempt = false;
   if (own !== null && projection !== null && avgOwn > 0) {
     // Relative to the slate: own / the slate's average projected ownership
