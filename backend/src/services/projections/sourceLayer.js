@@ -104,6 +104,8 @@ export function applySource(player, own, source, { reason = null, threshold = FA
     projection_blend: own?.blend_point ?? null,
     ours_minutes: own?.ours_minutes ?? null,
     p_play: own?.p_play ?? null,
+    tag_applied: Boolean(own?.tag_applied),
+    p_play_model: own ? own.p_play_model ?? own.p_play ?? null : null,
     projection_fade: own ? fadeCall(own, { threshold }) : null,
     ...minutesUpsideFields(own)
   };
@@ -140,6 +142,9 @@ export function applySource(player, own, source, { reason = null, threshold = FA
  *                        already includes its own DNP chance; RotoWire's and a
  *                        fallback's do not: model p_play = 1 there)
  *   projected_points     injury_play_prob x projection_if_plays
+ * The own model now prices the tag itself (ownModel tagPlay: its p_play is
+ * already min(minutes_v2, tag) with the same table), so for ours / blend the
+ * factor here is 1 and only projection_if_plays / the risk fields are added.
  * Combining with our model: MIN, not product. The model's p_play already
  * prices the base DNP rate every player has; the tag rate is the play rate of
  * tagged players overall, so multiplying would count the base rate twice.
@@ -168,8 +173,9 @@ export function applyInjuryRisk(player, table) {
     const tag = normalizeTag(player.injury_status);
     return { ...player, ...untouched, injury_tag: tag && tag !== 'OUT' ? tag : null };
   }
-  const modelP = MODEL_SOURCES.has(player.projection_source) && finite(num(player.p_play)) && num(player.p_play) > 0
-    ? Math.max(MIN_MODEL_P, num(player.p_play)) : 1;
+  const fromModel = MODEL_SOURCES.has(player.projection_source) && finite(num(player.p_play)) && num(player.p_play) > 0;
+  // The own model already priced the tag (p_play = the tag's rate): no floor, so no second discount
+  const modelP = fromModel ? (player.tag_applied ? num(player.p_play) : Math.max(MIN_MODEL_P, num(player.p_play))) : 1;
   const pPlay = Math.min(modelP, tagged.p);
   const factor = pPlay / modelP;
   const ifPlays = projection / modelP;
@@ -211,7 +217,7 @@ export function chatInjuryFields(p) {
 
 export const SOURCE_FIELDS = Object.freeze([
   'projection_source', 'projection_requested', 'projection_fallback', 'projection_fallback_reason',
-  'projection_rotowire', 'projection_ours', 'projection_blend', 'ours_minutes', 'p_play', 'projection_fade',
+  'projection_rotowire', 'projection_ours', 'projection_blend', 'ours_minutes', 'p_play', 'p_play_model', 'tag_applied', 'projection_fade',
   'ours_minutes_p10', 'ours_minutes_p90', 'rw_minutes_gap', 'minutes_upside', 'minutes_upside_reasons', 'minutes_correction'
 ]);
 

@@ -136,7 +136,7 @@ export function verdictFor(score) {
 
 /**
  * Signals the engine reads (all optional; missing ones simply do not fire):
- *   name, salary, injuryStatus, pPlay
+ *   name, salary, injuryStatus, pPlay (our model's p_play before the injury tag: p_play_model)
  *   injuryTag, injuryPlayProb, injuryDiscount, projectionIfPlays - the source
  *     layer's injury-tag risk (projections/sourceLayer.js applyInjuryRisk):
  *     projection is then already the risk-adjusted one (P(play) x if-plays)

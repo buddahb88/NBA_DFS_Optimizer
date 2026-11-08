@@ -17,6 +17,14 @@
  *   minutes upside (Q2): minutes_p10 / minutes_p90 (ours), rw_minutes_gap
  *     (RotoWire's posted minutes - our conditional minutes, before any
  *     correction), minutes_upside 0-100 + reasons (minutesUpside.js)
+ *   injury tag: minutes_v2's p_play is history only, so a tagged (QUES / GTD /
+ *     PROB / DOUBT) player is priced at P(play | tag, salary band)
+ *     (projections/injuryRisk*.js; live: the committed table, backtests: as of
+ *     the slate's date) when that is lower - p_play, ours_mean, ranges and the
+ *     blend follow (blendWithTag); p_play_model / ours_mean_model /
+ *     blend_point_model keep the untagged numbers, ours_mean_if_plays /
+ *     blend_point_if_plays the projection if he plays. options.injuryTag:
+ *     false skips it (backtest comparison).
  *   minutes correction (Q2): when minutesCorrectionParams.json is `live` (the
  *     corrected model beat own_mean leave-one-slate-out), our conditional
  *     minutes move toward RotoWire's first (minutesCorrection.js) and every
@@ -41,12 +49,16 @@ import { createFeatureStore } from './featureStore.js';
 import { dataSignature, DEFAULT_CACHE_DIR, DEFAULTS, FEATURE_VERSION, loadFeatureData, slateFields } from './modelEvalService.js';
 import { slateDay } from './evaluate.js';
 import { createOwnModelProjector, ownPrediction, prepareOwnMaps } from './ownModel.js';
-import { blendPrediction, leanBucket } from './blend.js';
+import { blendPrediction, leanBucket, recenter } from './blend.js';
+import { tagPlayProbability } from '../projections/injuryRisk.js';
+import { tableFor as injuryRiskTableFor } from '../projections/injuryRiskService.js';
 import { WEIGHTS_FILE } from './ownModelBacktest.js';
 import { PARAMS_FILE as CORRECTION_FILE, readCorrectionParams } from './minutesCorrection.js';
 import { projectionSanityConfig } from '../../config/projectionSanity.js';
 
 export const MODEL_VERSION = '1';
+/** Bump when the per-player output changes (result cache key). */
+const OUTPUT_VERSION = 'tag-1';
 const TEAMMATE_OUT_MINUTES = 20;
 const RESULT_CACHE = 8;
 
@@ -114,14 +126,37 @@ async function slateSignature(source) {
   return `${r?.c}:${r?.m}:${r?.s ?? ''}`;
 }
 
+/**
+ * The blend of an own prediction. With an injury tag applied (ownModel
+ * tagPlay), the blend the weights were fit on (ours at minutes_v2's p_play,
+ * own.untagged) is scaled by p_play / p_play_model - RotoWire's projection does
+ * not price the tag either - and its range re-centered on our tagged mixture.
+ * Returns the blend plus if_plays (blend / model p_play, the source layer's
+ * convention) or null.
+ */
+export function blendWithTag(x, weights) {
+  const own = x.own;
+  if (!own?.tag_applied || !own.untagged) {
+    const b = blendPrediction(x, weights);
+    return b ? { ...b, if_plays: own?.p_play > 0 ? b.dk_points / own.p_play : null } : null;
+  }
+  const b = blendPrediction({ ...x, own: own.untagged }, weights);
+  if (!b) return null;
+  const factor = own.p_play_model > 0 ? own.p_play / own.p_play_model : 1;
+  const point = b.dk_points * factor;
+  return { ...b, dk_points: point, ...recenter(own, point), if_plays: own.p_play_model > 0 ? b.dk_points / own.p_play_model : null, untagged: b.dk_points };
+}
+
 /** One player's output from ours, RotoWire (adjusted) and the blend weights. */
 export function playerOutput(entry, ownPred, weights) {
   const s = entry.slate;
   const rw = Number.isFinite(s.adjusted) ? { dk_points: s.adjusted, minutes: s.adjustedMinutes } : null;
   const x = { own: ownPred, rw, salary: s.salary, teammateOut: entry.teammateOut };
-  const b = ownPred && weights?.blend ? blendPrediction(x, weights.blend) : null;
-  const pointsDiff = ownPred && rw ? ownPred.dk_points - rw.dk_points : null;
-  const minutesDiff = ownPred && rw && Number.isFinite(rw.minutes) ? ownPred.minutes - rw.minutes : null;
+  const b = ownPred && weights?.blend ? blendWithTag(x, weights.blend) : null;
+  // Disagreement compares ours as its saved-slate history scored it (before the tag)
+  const ownModel = ownPred?.tag_applied ? ownPred.untagged : ownPred;
+  const pointsDiff = ownModel && rw ? ownModel.dk_points - rw.dk_points : null;
+  const minutesDiff = ownModel && rw && Number.isFinite(rw.minutes) ? ownModel.minutes - rw.minutes : null;
   const lean = leanBucket(pointsDiff);
   const minutesLean = leanBucket(minutesDiff);
   const history = (table, bucket) => {
@@ -142,7 +177,13 @@ export function playerOutput(entry, ownPred, weights) {
     rotowire_minutes: round(s.adjustedMinutes, 1),
     ours_minutes: round(ownPred?.minutes, 1),
     p_play: round(ownPred?.p_play, 3),
+    // Injury tag (ownModel tagPlay): minutes_v2's p_play, P(play | tag, salary band), applied when lower
+    p_play_model: round(ownPred ? ownPred.p_play_model ?? ownPred.p_play : null, 3),
+    p_play_tag: round(ownPred?.p_play_tag, 3),
+    tag_applied: Boolean(ownPred?.tag_applied),
     ours_mean: round(ownPred?.dk_points),
+    ours_mean_model: round(ownModel?.dk_points),
+    ours_mean_if_plays: round(ownPred?.p_play > 0 ? ownPred.dk_points / ownPred.p_play : null),
     ours_median: round(ownPred?.ours_median),
     p10: round(ownPred?.p10),
     p90: round(ownPred?.p90),
@@ -160,6 +201,8 @@ export function playerOutput(entry, ownPred, weights) {
     minutes_upside: ownPred ? ownPred.minutes_upside ?? null : null,
     minutes_upside_reasons: ownPred?.minutes_upside_reasons ?? [],
     blend_point: round(b?.dk_points),
+    blend_point_model: round(b ? b.untagged ?? b.dk_points : null),
+    blend_point_if_plays: round(b?.if_plays),
     blend_p10: round(b?.p10),
     blend_p90: round(b?.p90),
     blend_p_boom: round(b?.p_boom, 3),
@@ -192,7 +235,7 @@ export function liveCorrection(file = CORRECTION_FILE) {
  */
 export async function projectSlateOwnModel(slateId, {
   site = null, slateDate = null, source: resolved = null, refresh = false, weightsFile = WEIGHTS_FILE,
-  correctionFile = CORRECTION_FILE, cacheDir = DEFAULT_CACHE_DIR, now = new Date()
+  correctionFile = CORRECTION_FILE, cacheDir = DEFAULT_CACHE_DIR, now = new Date(), injuryTag = true
 } = {}) {
   const tStart = Date.now();
   const timings = {};
@@ -204,7 +247,10 @@ export async function projectSlateOwnModel(slateId, {
   const signature = await dataSignature();
   // RotoWire "adjusted" (the blend's and the fade's comparison) follows the sanity components
   const sanityKey = JSON.stringify(projectionSanityConfig());
-  const cacheKey = [source.slateId, source.slateDate, siteKey, signature, await slateSignature(source), weights?.generatedAt ?? 'none', correction?.generatedAt ?? 'no-correction', sanityKey].join('|');
+  // P(play | tag, salary band): live slates the committed table, backtests as of the slate's date (no lookahead)
+  const tagTable = injuryTag ? await injuryRiskTableFor(source) : null;
+  const tagKey = tagTable ? `tag:${tagTable.before ?? tagTable.generated_at ?? (tagTable.missing ? 'fallback' : 'committed')}:${tagTable.rows ?? 0}` : 'no-tag';
+  const cacheKey = [OUTPUT_VERSION, tagKey, source.slateId, source.slateDate, siteKey, signature, await slateSignature(source), weights?.generatedAt ?? 'none', correction?.generatedAt ?? 'no-correction', sanityKey].join('|');
   if (!refresh && results.has(cacheKey)) {
     return { ...results.get(cacheKey), cached: true, timings: { totalMs: ms(tStart) } };
   }
@@ -245,7 +291,8 @@ export async function projectSlateOwnModel(slateId, {
   const maps = prepareOwnMaps(dateCtx, models);
   const out = players.map((p, i) => {
     const ctx = { ...dateCtx, player: contexts[i], slate: p.slate };
-    const own = ownPrediction(ctx, maps, models, { minutesGrid: weights?.blend?.kind === 'minutes' ? undefined : [], correction });
+    const tagPlay = tagTable ? tagPlayProbability(tagTable, p.slate.injuryStatus, p.slate.salary)?.p ?? null : null;
+    const own = ownPrediction(ctx, maps, models, { minutesGrid: weights?.blend?.kind === 'minutes' ? undefined : [], correction, tagPlay });
     const teammateOut = contexts[i].teamOut.some(o => o.expectedMinutes >= TEAMMATE_OUT_MINUTES) ? 'teammate out' : 'none out';
     return playerOutput({ ...p, teammateOut }, own, weights);
   }).sort((a, b) => (b.blend_point ?? b.ours_mean ?? 0) - (a.blend_point ?? a.ours_mean ?? 0));
@@ -262,6 +309,7 @@ export async function projectSlateOwnModel(slateId, {
     cached: false,
     signature,
     weights: weights?.blend ? { name: weights.blend.name, kind: weights.blend.kind, scheme: weights.blend.scheme, generatedAt: weights.generatedAt, slates: weights.slates } : null,
+    injuryTag: tagTable ? { table: tagTable.before ? `as of ${tagTable.before}` : (tagTable.missing ? 'fallback' : 'committed'), adjusted: out.filter(p => p.tag_applied).length } : null,
     minutesCorrection: correction ? { generatedAt: correction.generatedAt, slates: correction.slates, looMae: correction.looMae ?? null } : null,
     timings,
     players: out
@@ -278,4 +326,4 @@ export function clearOwnModelCache() {
   results.clear();
 }
 
-export default { projectSlateOwnModel, playerOutput, readWeights, liveCorrection, clearOwnModelCache };
+export default { projectSlateOwnModel, playerOutput, blendWithTag, readWeights, liveCorrection, clearOwnModelCache };

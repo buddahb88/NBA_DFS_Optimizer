@@ -310,6 +310,8 @@ export function assemblePlayer(p, prep, history) {
     ours_minutes: num(own?.ours_minutes) ?? num(p.ours_minutes),
     rotowire_minutes: num(p.projected_minutes),
     p_play: num(own?.p_play) ?? num(p.p_play),
+    // minutes_v2's p_play before the injury tag (the verdict's p_play rule; the tag has its own rule)
+    p_play_model: num(own?.p_play_model) ?? num(p.p_play_model) ?? num(own?.p_play) ?? num(p.p_play),
     minutes_upside: minutesUpsideBlock(own, p),
     fade,
     ours_diff: num(own?.disagreement?.points_diff),
@@ -393,7 +395,7 @@ export function assemblePlayer(p, prep, history) {
     injuryPlayProb: projection.injury_play_prob,
     injuryDiscount: projection.injury_discount,
     projectionIfPlays: projection.projection_if_plays,
-    pPlay: projection.p_play,
+    pPlay: projection.p_play_model ?? projection.p_play,
     projection: active,
     sourceLabel: SOURCE_LABELS[activeSource] ?? 'Projection',
     rotowire,

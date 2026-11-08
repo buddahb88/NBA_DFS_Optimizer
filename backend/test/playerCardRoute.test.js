@@ -27,6 +27,8 @@ vi.mock('../src/services/modelEval/ownModelService.js', () => ({
         return {
           id: p.id, name: p.name, rotowire_points: rw, ours_mean: ours, ours_median: ours - 0.5, p10: ours * 0.6, p90: ours * 1.4,
           p_boom: 0.1, boom_at: (p.salary / 1000) * 6, p_dd: 0.2, ours_minutes: 31, p_play: 0.97,
+          // Player 4: the own model priced an injury tag (p_play = the tag's rate, minutes_v2 said 0.97)
+          ...(p.name === 'Player 4' ? { p_play: 0.5, p_play_model: 0.97, p_play_tag: 0.5, tag_applied: true } : {}),
           blend_point: rw + diff / 2, blend_p10: (rw + diff / 2) * 0.6, blend_p90: (rw + diff / 2) * 1.4, blend_p_boom: 0.12,
           disagreement: {
             points_diff: diff, lean: diff <= -6 ? 'lower 6+' : 'agree', history: diff <= -6 ? { n: 77, hitRate: 0.688 } : null,
@@ -151,6 +153,14 @@ describe('GET /api/players/:slateId/card/:playerId (backtest)', () => {
     assert.ok(c.verdict.reasonsAgainst.some(t => /below RotoWire/.test(t)));
     assert.ok(['Pivot', 'Fade', 'Playable'].includes(c.verdict.cash.verdict));
     assert.match(c.verdict.blurb, /trust the fade/);
+  });
+
+  test('tagged own-model row: card shows both play probabilities; the verdict p_play rule uses the untagged one', async () => {
+    const { body: c } = await get(`/api/players/past/card/rw4?slateDate=${PAST}`);
+    assert.equal(c.projection.p_play, 0.5);
+    assert.equal(c.projection.p_play_model, 0.97);
+    // The tag is priced by the injury_risk rule (and the projection); p_play < 0.85 must not fire on it again
+    assert.ok(!c.verdict.reasonsAgainst.some(t => /chance to play/.test(t)));
   });
 
   test('the card is found by player_id and by player_key too', async () => {
