@@ -9,6 +9,7 @@
  */
 
 import db from '../../config/database.js';
+import { inPool } from '../../config/snapshotMigrations.js';
 import { DEFAULT_SITE } from '../../config/sites.js';
 import { playerKey } from '../../utils/playerKey.js';
 import { CALIBRATION, CEILING_PCTL, FLOOR_PCTL, GAME_WINDOW } from './outcomeDistribution.js';
@@ -29,7 +30,7 @@ const toDateStr = (v) => (v instanceof Date ? v.toISOString().slice(0, 10) : Str
  */
 export async function recomputeSnapshotRanges(gameDate, { site = null, slateId = null, now = new Date() } = {}) {
   let sql = `SELECT id, site, player_name, position, salary, projected_points, projected_minutes, blowout_risk, rostership
-    FROM slate_player_snapshots WHERE game_date = ?`;
+    FROM slate_player_snapshots WHERE game_date = ? AND ${inPool()}`;
   const params = [gameDate];
   if (site) { sql += ' AND site = ?'; params.push(site); }
   if (slateId) { sql += ' AND slate_id = ?'; params.push(String(slateId)); }

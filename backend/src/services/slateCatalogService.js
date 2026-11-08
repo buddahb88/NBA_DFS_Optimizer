@@ -15,6 +15,7 @@
  */
 
 import db, { DATABASE_TYPE } from '../config/database.js';
+import { inPool } from '../config/snapshotMigrations.js';
 import { DEFAULT_SITE } from '../config/sites.js';
 import { snapshotRowFor } from './slateSnapshotService.js';
 
@@ -128,7 +129,7 @@ export async function upsertCatalogSlate(values, { now = new Date() } = {}) {
 async function slateRows(site, slateId, now) {
   const rows = await db.all(`
     SELECT game_date, team, opponent, game_start_time, roster_positions
-    FROM slate_player_snapshots WHERE site = ? AND slate_id = ?`, site, slateId);
+    FROM slate_player_snapshots WHERE site = ? AND slate_id = ? AND ${inPool()}`, site, slateId);
   if (rows.length) return rows;
   const slate = await db.get(`SELECT slate_id, site, start_time FROM slates WHERE slate_id = ?`, slateId);
   if (!slate || (slate.site || DEFAULT_SITE) !== site) return [];

@@ -48,7 +48,7 @@ Database Tables Available:
 - players: Current slate player data (name, salary, projected_points, position, team, opponent, vegas data, advanced metrics)
 - slates: Available contest slates
 - historical_games: ESPN game logs for every game since the 2024-25 season, keyed by player_key
-- slate_player_snapshots: Saved past slates (salary, projection, projected ownership) per player_key and game_date
+- slate_player_snapshots: Saved past slates (salary, projection, projected ownership) per player_key and game_date; pool_excluded = 1 rows are OUT / injured players (context only, filter COALESCE(pool_excluded, 0) = 0 for the pool)
 - player_season_profiles: Season role profile per (season, player_key) - usg_pct, ast_pct, reb_pct (fractions), minutes_pg, per-36, dk_fppm
 - player_archetypes: Archetype per (season, player_key), e.g. primary_creator, stretch_big, rim_running_big
 - team_archetype_defense: How each defense does vs each archetype / G-F-C position relative to expectation (the matchup table)

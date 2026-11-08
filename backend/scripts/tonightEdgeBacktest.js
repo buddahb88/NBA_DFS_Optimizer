@@ -41,7 +41,8 @@ const dateString = (v) => (v instanceof Date ? v.toISOString().slice(0, 10) : v)
 
 const SLATES_SQL = `SELECT DISTINCT game_date, slate_id FROM slate_player_snapshots WHERE site = ? ORDER BY game_date`;
 const SNAPSHOT_SQL = `SELECT player_key, player_name, team, opponent, position, salary, projected_points,
-  projected_minutes, injury_status FROM slate_player_snapshots WHERE game_date = ? AND site = ? AND slate_id = ?`;
+  projected_minutes, injury_status FROM slate_player_snapshots WHERE game_date = ? AND site = ? AND slate_id = ?
+  AND COALESCE(pool_excluded, 0) = 0`;
 const ACTUALS_SQL = `SELECT player_key, SUM(dk_fantasy_points) AS dk, SUM(minutes) AS minutes
   FROM historical_games WHERE game_date = ? GROUP BY player_key`;
 const AVERAGES_SQL = `SELECT player_key, AVG(dk_fantasy_points) AS dk FROM historical_games

@@ -194,11 +194,23 @@ class RotowireService {
   }
 
   async fetchPlayers(slateId) {
+    return (await this.fetchPlayersWithExcluded(slateId)).players;
+  }
+
+  /**
+   * { players, excluded }: the pool (as fetchPlayers) plus the payload's
+   * players the transform dropped that carry an injury tag (OUT, DOUBT, ...),
+   * as players-table rows for slate_player_snapshots context only
+   * (outPlayerService; never inserted into players).
+   */
+  async fetchPlayersWithExcluded(slateId) {
     try {
       const data = await this.fetchRawPlayers(slateId);
       const lookups = await this.loadDefenseLookups();
-      const players = this.transformPlayerData(data, lookups);
-      return await applyRangesToPlayers(players, { site: 'draftkings' });
+      const transformed = this.transformPlayerData(data, lookups);
+      const { excludedPlayersFromRotowire } = await import('./outPlayerService.js');
+      const excluded = excludedPlayersFromRotowire(data, { keptIds: new Set(transformed.map(p => p.playerId)) });
+      return { players: await applyRangesToPlayers(transformed, { site: 'draftkings' }), excluded };
     } catch (error) {
       console.error('Error fetching RotoWire data:', error);
       throw error;

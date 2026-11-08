@@ -23,6 +23,7 @@
  */
 
 import db from '../config/database.js';
+import { inPool } from '../config/snapshotMigrations.js';
 import { DEFAULT_SITE, getSiteConfig } from '../config/sites.js';
 import { SITE_POINTS_COLUMNS } from './scoring.js';
 import { canonicalTeam } from '../utils/playerKey.js';
@@ -169,7 +170,7 @@ function groupBy(rows, keyFn, order = null) {
 
 async function loadJoinedRows({ from, to, site, slateId }) {
   const params = [site];
-  let where = 's.site = ?';
+  let where = `s.site = ? AND ${inPool('s')}`;
   if (from) { where += ' AND s.game_date >= ?'; params.push(from); }
   if (to) { where += ' AND s.game_date <= ?'; params.push(to); }
   if (slateId) { where += ' AND s.slate_id = ?'; params.push(String(slateId)); }

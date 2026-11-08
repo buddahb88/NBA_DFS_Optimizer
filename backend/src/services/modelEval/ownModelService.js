@@ -39,6 +39,7 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import db from '../../config/database.js';
+import { inPool } from '../../config/snapshotMigrations.js';
 import { getSiteConfig } from '../../config/sites.js';
 import { isOutStatus } from '../minutesModel.js';
 import { easternDate, isHomeFlag } from '../slateSnapshotService.js';
@@ -121,7 +122,7 @@ async function fittedModels(store, site, { cacheDir = DEFAULT_CACHE_DIR } = {}, 
 
 async function slateSignature(source) {
   const r = source.isBacktest
-    ? await db.get('SELECT COUNT(*) AS c, MAX(captured_at) AS m FROM slate_player_snapshots WHERE slate_id = ? AND game_date = ?', source.slateId, source.slateDate)
+    ? await db.get(`SELECT COUNT(*) AS c, MAX(captured_at) AS m FROM slate_player_snapshots WHERE slate_id = ? AND game_date = ? AND ${inPool()}`, source.slateId, source.slateDate)
     : await db.get('SELECT COUNT(*) AS c, MAX(updated_at) AS m, SUM(projected_points) AS s FROM players WHERE slate_id = ?', source.slateId);
   return `${r?.c}:${r?.m}:${r?.s ?? ''}`;
 }

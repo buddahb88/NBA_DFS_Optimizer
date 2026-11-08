@@ -22,6 +22,7 @@
  */
 
 import db from '../../config/database.js';
+import { inPool } from '../../config/snapshotMigrations.js';
 
 export const SALARY_SLATES = 3;
 export const SALARY_WINDOW_DAYS = 30;
@@ -53,7 +54,7 @@ export async function loadSalaryHistory(keys, { site, beforeDate }) {
     rows.push(...await db.all(`
       SELECT player_key, game_date, MAX(salary) AS salary FROM slate_player_snapshots
       WHERE player_key IN (${chunk.map(() => '?').join(', ')})
-        AND site = ? AND game_date < ? AND game_date >= ? AND salary > 0
+        AND site = ? AND game_date < ? AND game_date >= ? AND salary > 0 AND ${inPool()}
       GROUP BY player_key, game_date`, ...chunk, site, beforeDate, addDays(beforeDate, -SALARY_WINDOW_DAYS)));
   }
   const map = new Map();

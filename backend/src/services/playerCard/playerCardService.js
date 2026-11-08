@@ -31,6 +31,7 @@
  */
 
 import db from '../../config/database.js';
+import { inPool } from '../../config/snapshotMigrations.js';
 import { ALL_ARCHETYPES } from '../../config/archetypes.js';
 import { parseSource, projectionSource as activeProjectionSource } from '../../config/projectionSource.js';
 import { fantasyPointsColumn } from '../scoring.js';
@@ -193,7 +194,7 @@ export async function loadHistory(keys, { asOf, season, site }) {
       db.all(`
         SELECT player_key, game_date, slate_id, salary, projected_points, captured_at
         FROM slate_player_snapshots
-        WHERE player_key IN (${marks}) AND site = ? AND game_date < ?`, ...chunk, site, asOf),
+        WHERE player_key IN (${marks}) AND site = ? AND game_date < ? AND ${inPool()}`, ...chunk, site, asOf),
     ]);
     for (const r of gameRows) games.get(r.player_key)?.push(r);
     for (const r of snapRows) snapshots.get(r.player_key)?.push(r);

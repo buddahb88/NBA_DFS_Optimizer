@@ -25,6 +25,7 @@
  */
 
 import db from '../config/database.js';
+import { inPool } from '../config/snapshotMigrations.js';
 import { DEFAULT_SITE, getSiteConfig } from '../config/sites.js';
 import projectionService from './projectionService.js';
 import { fantasyPointsColumn } from './scoring.js';
@@ -488,7 +489,7 @@ export async function runProjectionBacktest(options = {}) {
   const site = getSiteConfig(options.site || DEFAULT_SITE).key;
 
   const params = [site];
-  let where = 's.site = ? AND s.projected_points IS NOT NULL';
+  let where = `s.site = ? AND s.projected_points IS NOT NULL AND ${inPool('s')}`;
   if (from) { where += ' AND s.game_date >= ?'; params.push(from); }
   if (to) { where += ' AND s.game_date <= ?'; params.push(to); }
   if (slateId) { where += ' AND s.slate_id = ?'; params.push(String(slateId)); }

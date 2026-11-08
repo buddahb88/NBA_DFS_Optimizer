@@ -76,6 +76,28 @@ export const CAPTURE_SOURCE_COLUMNS = [
 ];
 
 /**
+ * Players kept on a saved slate only for context, never as part of the
+ * playable pool: RotoWire leaves OUT / injured players (0 projection, with an
+ * injury tag) out of the pool, but which teammates were out is a real
+ * pre-game signal. pool_excluded = 1 marks such a row (NULL / 0 = pool row);
+ * out_evidence says how the OUT tag is known:
+ *   'live_sync'                 RotoWire tag at a sync before the game started
+ *   'payload_prelock'           a RotoWire payload fetched before the game started
+ *   'payload_postlock_confirmed' a payload fetched after lock (its tag is the
+ *                               status on the fetch date) confirmed by an absence
+ *                               spell that started before the game
+ *                               (services/outPlayerService.js)
+ * Every pool / backtest / ownership reader filters them with inPool().
+ */
+export const OUT_PLAYER_COLUMNS = [
+  { name: 'pool_excluded', sqlite: 'INTEGER', azure: 'INT' },
+  { name: 'out_evidence', sqlite: 'TEXT', azure: 'NVARCHAR(40)' },
+];
+
+/** SQL condition: a snapshot row that belongs to the playable pool (alias: 's' -> s.pool_excluded). */
+export const inPool = (alias = '') => `COALESCE(${alias ? `${alias}.` : ''}pool_excluded, 0) = 0`;
+
+/**
  * slate_player_snapshots migration (idempotent, runs on every startup)
  *
  * A slate sync wipes players and slates, so every sync / salary import first
@@ -118,7 +140,7 @@ export async function migrateSlatePlayerSnapshots(db) {
       IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_snapshots_player_key_date')
         CREATE INDEX idx_snapshots_player_key_date ON slate_player_snapshots(player_key, game_date);
     `);
-    for (const { name, azure } of [...SNAPSHOT_DETAIL_COLUMNS, ...RANGE_MODEL_COLUMNS, ...CAPTURE_SOURCE_COLUMNS]) {
+    for (const { name, azure } of [...SNAPSHOT_DETAIL_COLUMNS, ...RANGE_MODEL_COLUMNS, ...CAPTURE_SOURCE_COLUMNS, ...OUT_PLAYER_COLUMNS]) {
       await db.exec(`
         IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('slate_player_snapshots') AND name = '${name}')
           ALTER TABLE slate_player_snapshots ADD [${name}] ${azure};
@@ -158,7 +180,7 @@ export async function migrateSlatePlayerSnapshots(db) {
       CREATE INDEX IF NOT EXISTS idx_snapshots_player_key_date ON slate_player_snapshots(player_key, game_date);
     `);
     const existing = new Set((await db.all(`PRAGMA table_info(slate_player_snapshots)`)).map(c => c.name));
-    for (const { name, sqlite } of [...SNAPSHOT_DETAIL_COLUMNS, ...RANGE_MODEL_COLUMNS, ...CAPTURE_SOURCE_COLUMNS]) {
+    for (const { name, sqlite } of [...SNAPSHOT_DETAIL_COLUMNS, ...RANGE_MODEL_COLUMNS, ...CAPTURE_SOURCE_COLUMNS, ...OUT_PLAYER_COLUMNS]) {
       if (!existing.has(name)) await db.exec(`ALTER TABLE slate_player_snapshots ADD COLUMN ${name} ${sqlite}`);
     }
     await db.exec(`CREATE INDEX IF NOT EXISTS idx_snapshots_slate ON slate_player_snapshots(slate_id, game_date)`);

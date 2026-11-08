@@ -17,6 +17,7 @@
  */
 
 import db from '../../config/database.js';
+import { inPool } from '../../config/snapshotMigrations.js';
 import { injuryRiskTable } from '../../config/injuryRisk.js';
 import { calibrateInjuryRisk } from './injuryRisk.js';
 import { applyInjuryRisk } from './sourceLayer.js';
@@ -30,7 +31,7 @@ export async function calibrationRows({ before = null } = {}) {
               WHERE h.player_key = s.player_key AND h.game_date = s.game_date AND h.minutes > 0) AS played,
       EXISTS (SELECT 1 FROM historical_games t WHERE t.game_date = s.game_date AND t.team = s.team) AS team_played
     FROM slate_player_snapshots s
-    WHERE s.projected_points > 0 AND s.player_key IS NOT NULL
+    WHERE s.projected_points > 0 AND s.player_key IS NOT NULL AND ${inPool('s')}
       ${before ? 'AND s.game_date < ?' : ''}`, ...(before ? [before] : []));
   // One row per player-night: the latest sync's tag, the highest salary
   const nights = new Map();

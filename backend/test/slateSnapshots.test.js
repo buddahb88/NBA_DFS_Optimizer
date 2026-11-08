@@ -10,7 +10,10 @@ import Database from 'better-sqlite3';
 // The sync route scrapes Hashtag Basketball / RotoWire; stub the network
 const rotowirePlayers = vi.hoisted(() => ({ list: [] }));
 vi.mock('../src/services/rotowireService.js', () => ({
-  default: { fetchPlayers: async () => rotowirePlayers.list }
+  default: {
+    fetchPlayers: async () => rotowirePlayers.list,
+    fetchPlayersWithExcluded: async () => ({ players: rotowirePlayers.list, excluded: rotowirePlayers.excluded ?? [] })
+  }
 }));
 vi.mock('../src/services/hashtagBasketballService.js', () => ({
   default: { fetchAndStorePositionDefense: async () => {} }
@@ -236,6 +239,26 @@ describe('POST /api/players/:slateId/sync', () => {
       ['new', 'nikola jokic', 11800],
       ['old', 'luka doncic', 11000]
     ]);
+  });
+
+  test('keeps OUT players RotoWire dropped as snapshot context rows, never as players', async () => {
+    rotowirePlayers.list = [rwPlayer('rw9', 'Nikola Jokić', { team: 'DEN', opponent: 'UTA', position: 'C', salary: 11800 })];
+    rotowirePlayers.excluded = [{
+      player_id: 'rw10', name: 'Aaron Gordon', team: 'DEN', opponent: 'UTA', position: 'PF', salary: 6000,
+      projected_points: 0, projected_minutes: 0, rostership: 0, injury_status: 'OUT', pool_excluded: 1,
+      raw_data: JSON.stringify({ game: { dateTime: '2099-01-02 21:00:00' } })
+    }];
+    try {
+      assert.equal((await sync('main')).status, 200);
+    } finally {
+      rotowirePlayers.excluded = [];
+    }
+    assert.deepEqual((await db.all(`SELECT name FROM players`)).map(r => r.name), ['Nikola Jokić']);
+    const gordon = await db.get(`SELECT * FROM slate_player_snapshots WHERE player_key = 'aaron gordon'`);
+    assert.equal(gordon.pool_excluded, 1);
+    assert.equal(gordon.out_evidence, 'live_sync');
+    assert.equal(gordon.injury_status, 'OUT');
+    assert.equal(gordon.game_date, '2099-01-02');
   });
 
   test('computes team ratings from box scores instead of scraping ESPN', async () => {

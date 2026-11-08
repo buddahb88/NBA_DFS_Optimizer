@@ -9,6 +9,7 @@
  */
 
 import db from '../config/database.js';
+import { inPool } from '../config/snapshotMigrations.js';
 import syncRunService from './syncRunService.js';
 import { getCurrentSeason, listSeasons } from '../utils/season.js';
 
@@ -98,7 +99,7 @@ async function readSnapshots() {
       MIN(game_date) AS earliestGameDate,
       MAX(game_date) AS latestGameDate,
       MAX(captured_at) AS lastCapturedAt
-    FROM slate_player_snapshots
+    FROM slate_player_snapshots WHERE ${inPool()}
   `);
   const sites = await db.all(`
     SELECT site,
@@ -106,7 +107,7 @@ async function readSnapshots() {
       COUNT(DISTINCT slate_id) AS slates,
       COUNT(DISTINCT game_date) AS gameDates,
       MAX(game_date) AS latestGameDate
-    FROM slate_player_snapshots
+    FROM slate_player_snapshots WHERE ${inPool()}
     GROUP BY site
     ORDER BY site
   `);

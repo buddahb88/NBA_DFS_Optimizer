@@ -13,8 +13,13 @@
  * disk (--cache-dir, default <tmp>/nba-dfs-rotowire-slates) and requests are
  * throttled (--delay ms, default 1500).
  *
+ * --out-only writes just the OUT / injured context rows (pool_excluded, see
+ * services/outPlayerService.js) and leaves pool rows, catalog and Vegas
+ * alone: the way to add OUT players to slates already saved. The cached
+ * payload's file time is when it was fetched (its tags are that moment's).
+ *
  * Usage: node scripts/backfill-rotowire-slates.js --from 2026-10-20 --to 2026-10-26
- *          [--dry-run] [--force] [--ids 29780-29960] [--cache-dir DIR] [--delay 1500]
+ *          [--dry-run] [--force] [--out-only] [--ids 29780-29960] [--cache-dir DIR] [--delay 1500]
  */
 
 import os from 'os';
@@ -44,6 +49,7 @@ if (!DATE_RE.test(from || '') || !DATE_RE.test(to || '')) {
 }
 const dryRun = args.includes('--dry-run');
 const force = args.includes('--force');
+const outOnly = args.includes('--out-only');
 const cacheDir = arg('cache-dir') ?? path.join(os.tmpdir(), 'nba-dfs-rotowire-slates');
 const delayMs = Number(arg('delay') ?? 1500);
 
@@ -72,7 +78,7 @@ const before = await counts();
 const fetchSlate = cachedSlateFetcher({ cacheDir, delayMs });
 const report = await backfillRotowireSlates({
   from, to, slateIds: Array.from({ length: hi - lo + 1 }, (_, i) => String(lo + i)),
-  fetchSlate, fetchOdds: (date) => espn.fetchOdds(date), dryRun, force, log: (m) => console.log(`  ${m}`)
+  fetchSlate, fetchOdds: (date) => espn.fetchOdds(date), dryRun, force, outOnly, log: (m) => console.log(`  ${m}`)
 });
 const after = await counts();
 
@@ -80,8 +86,9 @@ for (const [date, entry] of Object.entries(report.dates).sort()) {
   console.log(`\n${date}: main slate ${entry.mainSlateId ?? '-'} | ESPN Vegas for ${entry.odds?.teams ?? 0} team(s)`);
   console.table(entry.slates.map(s => ({
     slate: s.slateId, name: s.name, main: s.isMain ? 'YES' : '', games: s.games, rotowire: s.rotowirePlayers,
-    projected: s.projectedPlayers, mode: s.mode, rows_before: before.get(`${date} ${s.slateId}`) ?? 0,
-    rows_after: after.get(`${date} ${s.slateId}`) ?? 0
+    projected: s.projectedPlayers, mode: s.mode ?? 'out-only', rows_before: before.get(`${date} ${s.slateId}`) ?? 0,
+    rows_after: after.get(`${date} ${s.slateId}`) ?? 0,
+    out_prelock: s.out?.prelock ?? 0, out_postlock: s.out?.postlock ?? 0, out_opener: s.out?.opener ?? 0
   })));
   if (entry.skipped.length) {
     const byType = entry.skipped.reduce((m, s) => ({ ...m, [s.contestType]: (m[s.contestType] ?? 0) + 1 }), {});

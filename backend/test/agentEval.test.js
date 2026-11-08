@@ -265,7 +265,7 @@ const CASES = [
           SELECT x.*, ROW_NUMBER() OVER (PARTITION BY x.player_key ORDER BY COALESCE(c.is_main, 0) DESC,
             CASE WHEN x.capture_source IS NULL THEN 1 ELSE 0 END DESC, x.captured_at DESC) AS pick
           FROM slate_player_snapshots x LEFT JOIN slate_catalog c ON c.site = x.site AND c.slate_id = x.slate_id
-          WHERE x.game_date = '2026-10-21' AND x.site = 'draftkings'
+          WHERE x.game_date = '2026-10-21' AND x.site = 'draftkings' AND COALESCE(x.pool_excluded, 0) = 0
         ) s LEFT JOIN historical_games h ON h.player_key = s.player_key AND h.game_date = s.game_date
         WHERE s.pick = 1`);
       assert.equal(out.overall.players, sql.players);

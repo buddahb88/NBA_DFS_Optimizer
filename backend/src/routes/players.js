@@ -6,6 +6,7 @@ import { refreshTeamRatings } from '../services/teamRatingsService.js';
 import hashtagBasketballService from '../services/hashtagBasketballService.js';
 import projectionService from '../services/projectionService.js';
 import { snapshotAllSlates, snapshotSlate } from '../services/slateSnapshotService.js';
+import { snapshotExcludedPlayers } from '../services/outPlayerService.js';
 import { recomputeSlateRanges } from '../services/variance/outcomeRangeService.js';
 import { primeOpportunityMetrics } from '../services/opportunity/metricsService.js';
 import { getSlateMatchups } from '../services/archetypeDefenseService.js';
@@ -142,7 +143,7 @@ router.post('/:slateId/sync', async (req, res) => {
 
     // STEP 2: Fetch players from RotoWire (will use fresh defense rankings in projections)
     console.log(`🔄 Step 3/4: Fetching players for slate ${slateId} from RotoWire...`);
-    const players = await rotowireService.fetchPlayers(slateId);
+    const { players, excluded } = await rotowireService.fetchPlayersWithExcluded(slateId);
 
     console.log(`📊 Received ${players.length} active players (filtered out 0 projection players)`);
 
@@ -173,6 +174,13 @@ router.post('/:slateId/sync', async (req, res) => {
     // Bulk insert players (with defense-adjusted projections)
     await playerModel.bulkCreateOrUpdate(slateId, players);
     await snapshotSlate(slateId);
+    // OUT / injured players RotoWire drops from the pool: snapshot context rows only
+    try {
+      const outRows = await snapshotExcludedPlayers(slateId, excluded);
+      if (outRows) console.log(`  📋 Snapshotted ${outRows} OUT / injured player(s) (context only, not in the pool)`);
+    } catch (error) {
+      console.warn('⚠️  OUT player snapshot failed:', error.message);
+    }
     // New slate rows: cached cards / verdicts are stale
     clearPlayerCardCache();
     clearSlateVerdictCache();

@@ -1,6 +1,6 @@
 import db, { DATABASE_TYPE } from '../config/database.js';
 import { DEFAULT_SITE, getEligibleSlots, isValidSite } from '../config/sites.js';
-import { SNAPSHOT_DETAIL_COLUMNS } from '../config/snapshotMigrations.js';
+import { SNAPSHOT_DETAIL_COLUMNS, OUT_PLAYER_COLUMNS } from '../config/snapshotMigrations.js';
 import { playerKey } from '../utils/playerKey.js';
 import { seasonForDate } from '../utils/season.js';
 
@@ -137,12 +137,13 @@ const BASE_COLUMNS = [
   'salary', 'projected_points', 'projected_minutes', 'floor', 'ceiling', 'rostership',
   'vegas_implied_total', 'vegas_spread', 'over_under', 'injury_status', 'is_confirmed', 'captured_at'
 ];
-export const SNAPSHOT_COLUMNS = [...BASE_COLUMNS, ...SNAPSHOT_DETAIL_COLUMNS.map(c => c.name)];
+// OUT context rows (outPlayerService): a pool row writes NULL, so a player back in the pool is a pool row again
+export const SNAPSHOT_COLUMNS = [...BASE_COLUMNS, ...SNAPSHOT_DETAIL_COLUMNS.map(c => c.name), ...OUT_PLAYER_COLUMNS.map(c => c.name)];
 /** Pre-lock range columns: a locked capture never writes these. */
 export const RANGE_COLUMNS = ['floor', 'ceiling', 'std_dev', 'volatility', 'boom_probability', 'bust_probability', 'leverage_score'];
 // A locked row only gains detail columns that are still NULL (NULL is a real
 // value for the base columns, e.g. injury_status of a healthy player)
-const LOCKED_FILL_COLUMNS = SNAPSHOT_DETAIL_COLUMNS.map(c => c.name).filter(c => !RANGE_COLUMNS.includes(c));
+const LOCKED_FILL_COLUMNS = [...SNAPSHOT_DETAIL_COLUMNS, ...OUT_PLAYER_COLUMNS].map(c => c.name).filter(c => !RANGE_COLUMNS.includes(c));
 
 function upsertSql(locked) {
   const insertCols = locked ? SNAPSHOT_COLUMNS.filter(c => !RANGE_COLUMNS.includes(c)) : SNAPSHOT_COLUMNS;
@@ -236,7 +237,9 @@ export function snapshotRowFor(p, { slate, site, now, archetype = null, matchup 
     matchup_delta: matchup?.delta ?? null,
     matchup_rank: matchup?.rank ?? null,
     matchup_teams: matchup?.teams ?? null,
-    matchup_adjusted_edge: matchup?.adjusted_edge ?? null
+    matchup_adjusted_edge: matchup?.adjusted_edge ?? null,
+    pool_excluded: p.pool_excluded ? 1 : null,
+    out_evidence: p.pool_excluded ? orNull(p.out_evidence) : null
   };
 }
 

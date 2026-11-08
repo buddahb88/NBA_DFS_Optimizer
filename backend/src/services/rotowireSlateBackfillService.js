@@ -18,6 +18,13 @@
  * lookahead. value / value_gpp, DVP and recent form stay NULL too (they read
  * the stats blocks or today's defense tables).
  *
+ * OUT / injured players the payload lists but the pool drops are written as
+ * context rows (pool_excluded = 1, outPlayerService) only when the tag is
+ * pre-game knowledge: the payload was fetched before tip-off, or (post-lock
+ * fetch, whose tag is the status on the fetch date) an absence spell that
+ * started before the game confirms it. A pool row is never replaced by one.
+ * outOnly writes just those rows (no pool rows, catalog or Vegas).
+ *
  * Rows are tagged capture_source = 'rotowire_backfill'. A slate with any row
  * captured live (capture_source NULL) is never overwritten unless forced:
  * its existing rows only gain detail columns and Vegas that are still NULL.
@@ -35,6 +42,8 @@ import rotowireService from './rotowireService.js';
 import { upsertCatalogSlate, slateName, mainOrder } from './slateCatalogService.js';
 import { snapshotRowFor, upsertSnapshotRow, playerGameStart, rotowireGameDate } from './slateSnapshotService.js';
 import { loadArchetypeLookup } from './archetypeDefenseService.js';
+import { excludedPlayersFromRotowire, classifyExcluded, loadAbsenceContext } from './outPlayerService.js';
+import { easternDate } from './slateSnapshotService.js';
 import { playerKey, canonicalTeam } from '../utils/playerKey.js';
 import { seasonForDate, previousSeason } from '../utils/season.js';
 
@@ -154,11 +163,13 @@ export function snapshotPlayersFromRotowire(rawPlayers, { odds = new Map() } = {
 /**
  * fetchSlate(id) that reads <cacheDir>/<id>.json when present, else calls
  * fetchRaw (default RotoWire) at most once per delayMs and caches the result.
+ * fetchSlate.fetchedAt(id): when the cached payload was fetched (file mtime),
+ * else null - a payload's injury tags are the status at that moment.
  */
 export function cachedSlateFetcher({ cacheDir, delayMs = 1000, fetchRaw = (id) => rotowireService.fetchRawPlayers(id) } = {}) {
   fs.mkdirSync(cacheDir, { recursive: true });
   let last = 0;
-  return async (slateId) => {
+  const fetchSlate = async (slateId) => {
     const file = path.join(cacheDir, `${slateId}.json`);
     if (fs.existsSync(file)) return JSON.parse(fs.readFileSync(file, 'utf8'));
     const wait = last + delayMs - Date.now();
@@ -168,6 +179,11 @@ export function cachedSlateFetcher({ cacheDir, delayMs = 1000, fetchRaw = (id) =
     fs.writeFileSync(file, JSON.stringify(data));
     return data;
   };
+  fetchSlate.fetchedAt = (slateId) => {
+    const file = path.join(cacheDir, `${slateId}.json`);
+    return fs.existsSync(file) ? fs.statSync(file).mtime : null;
+  };
+  return fetchSlate;
 }
 
 const catalogValues = (slate) => ({
@@ -196,10 +212,36 @@ async function fillMissingVegas(slateId, gameDate, odds) {
   }
 }
 
+/**
+ * OUT context rows for one slate (see the header). Skips players that already
+ * have a pool row or a live-captured row on the slate (only this backfill's
+ * own OUT rows are rewritten). Returns { prelock, postlock, opener }.
+ */
+async function writeExcluded(slate, toWrite, { now, archetypeOf }) {
+  const catalogSlate = { slate_id: slate.slateId, start_time: null };
+  const pool = new Set((await db.all(
+    `SELECT player_key FROM slate_player_snapshots WHERE site = ? AND slate_id = ? AND game_date = ?
+       AND (COALESCE(pool_excluded, 0) = 0 OR capture_source IS NULL)`,
+    SITE, slate.slateId, slate.gameDate)).map(r => r.player_key));
+  const counts = { prelock: 0, postlock: 0, opener: 0 };
+  for (const { player, evidence, opener } of toWrite) {
+    const key = playerKey(player.name);
+    if (!key || pool.has(key)) continue;
+    const archetype = await archetypeOf(key, slate.gameDate);
+    await upsertSnapshotRow(snapshotRowFor(player, { slate: catalogSlate, site: SITE, now, archetype }));
+    await db.run(`UPDATE slate_player_snapshots SET capture_source = ? WHERE site = ? AND slate_id = ? AND game_date = ? AND player_key = ?`,
+      CAPTURE_SOURCE, SITE, slate.slateId, slate.gameDate, key);
+    if (evidence === 'payload_prelock') counts.prelock++; else counts.postlock++;
+    if (opener) counts.opener++;
+  }
+  return counts;
+}
+
 async function writeSlate(slate, players, { mode, now, archetypeOf, odds }) {
   const catalogSlate = { slate_id: slate.slateId, start_time: null };
   const liveKeys = mode === 'fill'
-    ? new Set((await db.all(`SELECT player_key FROM slate_player_snapshots WHERE site = ? AND slate_id = ? AND game_date = ?`,
+    ? new Set((await db.all(`SELECT player_key FROM slate_player_snapshots WHERE site = ? AND slate_id = ? AND game_date = ?
+      AND COALESCE(pool_excluded, 0) = 0`,
       SITE, slate.slateId, slate.gameDate)).map(r => r.player_key))
     : null;
   let written = 0;
@@ -227,7 +269,8 @@ async function writeSlate(slate, players, { mode, now, archetypeOf, odds }) {
  * Returns { dates: { [date]: { mainSlateId, odds, slates: [...], skipped: [...] } } }.
  */
 export async function backfillRotowireSlates({
-  from, to, slateIds, fetchSlate, fetchOdds, dryRun = false, force = false, now = new Date(), log = () => {}
+  from, to, slateIds, fetchSlate, fetchOdds, dryRun = false, force = false, outOnly = false, now = new Date(), log = () => {},
+  fetchedAtOf = fetchSlate?.fetchedAt ?? (() => null)
 }) {
   const dates = {};
   const dateEntry = (d) => (dates[d] ??= { mainSlateId: null, odds: null, slates: [], skipped: [] });
@@ -250,10 +293,21 @@ export async function backfillRotowireSlates({
   }
 
   const archetypeOf = await priorArchetypeLookup();
+  const absence = found.length ? await loadAbsenceContext(from, easternDate(now)) : null;
   const oddsByDate = new Map();
   for (const slate of markMainSlates(found).sort((a, b) => a.gameDate.localeCompare(b.gameDate) || mainOrder(a, b))) {
     const entry = dateEntry(slate.gameDate);
     if (slate.isMain) entry.mainSlateId = slate.slateId;
+    // OUT context rows: tags known before tip-off only (classifyExcluded)
+    const fetchedAt = fetchedAtOf(slate.slateId) ?? now;
+    const outRows = classifyExcluded(excludedPlayersFromRotowire(slate.raw, { stripStats: true }),
+      { gameDate: slate.gameDate, fetchedAt, ctx: absence });
+    if (outOnly) {
+      const out = dryRun ? { prelock: 0, postlock: 0, opener: 0 } : await writeExcluded(slate, outRows, { now, archetypeOf });
+      entry.slates.push({ slateId: slate.slateId, name: slateName(slate), isMain: slate.isMain, fetchedAt: new Date(fetchedAt).toISOString(), outCandidates: outRows.length, out });
+      log(`${slate.gameDate} slate ${slate.slateId} (${slateName(slate)}): ${outRows.length} OUT rows (fetched ${new Date(fetchedAt).toISOString()})${dryRun ? ' dry run' : `, written ${JSON.stringify(out)}`}`);
+      continue;
+    }
     if (!oddsByDate.has(slate.gameDate)) {
       let odds = new Map();
       try {
@@ -271,10 +325,11 @@ export async function backfillRotowireSlates({
        FROM slate_player_snapshots WHERE site = ? AND slate_id = ? AND game_date = ?`, SITE, slate.slateId, slate.gameDate);
     const mode = Number(existing?.live) > 0 && !force ? 'fill' : 'upsert';
     const written = dryRun ? 0 : await writeSlate(slate, players, { mode, now, archetypeOf, odds });
+    const out = dryRun ? { prelock: 0, postlock: 0, opener: 0 } : await writeExcluded(slate, outRows, { now, archetypeOf });
     if (!dryRun) await upsertCatalogSlate(catalogValues(slate), { now });
     entry.slates.push({
       slateId: slate.slateId, name: slateName(slate), isMain: slate.isMain, games: slate.games, firstGameTime: slate.firstGameTime,
-      rotowirePlayers: slate.players, projectedPlayers: players.length, before: Number(existing?.n) || 0, mode, written
+      rotowirePlayers: slate.players, projectedPlayers: players.length, before: Number(existing?.n) || 0, mode, written, out
     });
     log(`${slate.gameDate} slate ${slate.slateId} (${slateName(slate)}): ${players.length} projected, mode ${mode}, ${dryRun ? 'dry run' : `${written} written`}`);
   }

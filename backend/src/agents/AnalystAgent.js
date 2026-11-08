@@ -37,7 +37,7 @@ ROLE AND MATCHUP TABLES (join on player_key and season):
 - player_season_profiles: per (season, player_key) - games, minutes_pg, usg_pct, ast_pct, reb_pct, three_pa_rate (fractions), pts/reb/ast/fg3m_per36, dk_fppm
 - player_archetypes: per (season, player_key) - archetype, secondary_archetype (primary_creator, point_forward, scoring_guard, bench_scorer, stretch_big, rim_running_big, three_and_d_wing, spot_up_shooter, role_player, unclassified)
 - team_archetype_defense: per (season, site, group_by 'archetype'/'position', team = defense, group_key) - fp_over_expectation = fantasy points per player-game allowed above (+) / below (-) what those players normally score, shrunk toward 0 when games are few; pts/reb/ast/fg3m/stocks_delta likewise. Always filter season, site and group_by
-- slate_player_snapshots: past slates per (game_date, site, slate_id, player_key) - salary, projected_points, rostership (projected ownership)
+- slate_player_snapshots: past slates per (game_date, site, slate_id, player_key) - salary, projected_points, rostership (projected ownership). Rows with pool_excluded = 1 are OUT / injured players kept only as context (who was out that night); filter COALESCE(pool_excluded, 0) = 0 for the playable pool
 
 TOOLS FIRST (query_historical_data only for what they do not cover):
 - Who's in a good spot / value / cash core / usage risers tonight: get_opportunity_radar first (mode cash or gpp); one player's opportunity in full: get_player_opportunity

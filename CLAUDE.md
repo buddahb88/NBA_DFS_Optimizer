@@ -65,8 +65,9 @@ Early in a season use the prior season until 20+ defenses have 10+ games (the `a
 | game_date, site, slate_id, player_key, player_name | One row per player per synced slate |
 | salary, projected_points, projected_minutes, floor, ceiling, rostership | Pre-game values (rostership = projected ownership) |
 | vegas_implied_total, vegas_spread, over_under, injury_status | Context at last sync |
+| pool_excluded, out_evidence | 1 = OUT / injured player kept only as context (projected 0, never in the pool); out_evidence: live_sync, payload_prelock, payload_postlock_confirmed |
 
-Join to `historical_games` on player_key + game_date for actual results.
+Join to `historical_games` on player_key + game_date for actual results. Filter `COALESCE(pool_excluded, 0) = 0` for the playable pool; the OUT rows tell you which teammates were out that night.
 
 #### `slates` - Available Slates
 | Column | Description |

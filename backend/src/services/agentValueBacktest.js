@@ -29,6 +29,7 @@
  */
 
 import db from '../config/database.js';
+import { inPool } from '../config/snapshotMigrations.js';
 import { getPlayerResults } from './resultsService.js';
 import { createResearchTools } from './chatTools/researchTools.js';
 import { STAT_COLUMNS, buildTonight, getDefense, loadArchetypeLookup, previousSeason, weakTiers } from './archetypeDefenseService.js';
@@ -150,7 +151,7 @@ export function agentValuePicks(pool, matchupRows = [], count = PICKS) {
 }
 
 const SNAPSHOT_SQL = `SELECT player_key, player_name, team, opponent, position, salary, projected_points,
-  projected_minutes, injury_status FROM slate_player_snapshots WHERE game_date = ? AND site = ? AND slate_id = ?`;
+  projected_minutes, injury_status FROM slate_player_snapshots WHERE game_date = ? AND site = ? AND slate_id = ? AND ${inPool()}`;
 
 /**
  * get_archetype_matchups rows for a past slate. While the slate is still
@@ -217,7 +218,7 @@ export async function liveAgentPicker({ date, slateId, site, pool }) {
 
 const DATES_SQL = `SELECT s.game_date, s.slate_id, COUNT(*) AS players
   FROM slate_player_snapshots s LEFT JOIN slate_catalog c ON c.site = s.site AND c.slate_id = s.slate_id
-  WHERE s.site = ? GROUP BY s.game_date, s.slate_id
+  WHERE s.site = ? AND ${inPool('s')} GROUP BY s.game_date, s.slate_id
   ORDER BY s.game_date, MAX(CAST(COALESCE(c.is_main, 0) AS INT)) DESC, COUNT(*) DESC`;
 
 /** Past dates with snapshots and their main slate (slate_catalog), else their largest. */

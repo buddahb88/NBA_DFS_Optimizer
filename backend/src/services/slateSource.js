@@ -21,6 +21,7 @@
  */
 
 import db from '../config/database.js';
+import { inPool } from '../config/snapshotMigrations.js';
 import { DEFAULT_SITE, isValidSite } from '../config/sites.js';
 import slateModel from '../models/slateModel.js';
 import playerModel from '../models/playerModel.js';
@@ -79,7 +80,7 @@ const IS_MAIN = 'MAX(CAST(COALESCE(c.is_main, 0) AS INT))';
 /** Saved slates on a date: [{ slate_id, site, game_date, players, is_main }], the main slate first, then biggest. */
 async function snapshotSlatesOn(slateDate, { slateId, site } = {}) {
   let sql = `SELECT s.slate_id, s.site, s.game_date, COUNT(*) AS players, ${IS_MAIN} AS is_main
-    FROM slate_player_snapshots s ${CATALOG_JOIN} WHERE s.game_date = ?`;
+    FROM slate_player_snapshots s ${CATALOG_JOIN} WHERE s.game_date = ? AND ${inPool('s')}`;
   const params = [slateDate];
   if (slateId) { sql += ' AND s.slate_id = ?'; params.push(String(slateId)); }
   if (site) { sql += ' AND s.site = ?'; params.push(site); }
@@ -238,7 +239,7 @@ async function loadPostedPlayers(source, { filters = {}, includeZero = false, ra
     return rows.map(p => (p.roster_positions ? p : { ...p, roster_positions: rosterPositionsFor(p, source.site) }));
   }
   const rows = await db.all(
-    `SELECT * FROM slate_player_snapshots WHERE game_date = ? AND slate_id = ? AND site = ? ORDER BY id`,
+    `SELECT * FROM slate_player_snapshots WHERE game_date = ? AND slate_id = ? AND site = ? AND ${inPool()} ORDER BY id`,
     source.slateDate, source.slateId, source.site);
   return rows
     .map(row => snapshotToPlayer(row, { ranges }))
@@ -419,7 +420,7 @@ export async function chatSlate({ slateId = null, slateDate = null } = {}) {
  */
 export async function listBacktestSlates({ site = null, now = new Date(), limit = 60 } = {}) {
   let sql = `SELECT s.game_date, s.slate_id, s.site, COUNT(*) AS players, ${IS_MAIN} AS is_main, MAX(c.name) AS name
-    FROM slate_player_snapshots s ${CATALOG_JOIN} WHERE s.game_date < ?`;
+    FROM slate_player_snapshots s ${CATALOG_JOIN} WHERE s.game_date < ? AND ${inPool('s')}`;
   const params = [easternDate(now)];
   if (site) { sql += ' AND s.site = ?'; params.push(site); }
   sql += ` GROUP BY s.game_date, s.slate_id, s.site ORDER BY s.game_date DESC, ${IS_MAIN} DESC, COUNT(*) DESC`;

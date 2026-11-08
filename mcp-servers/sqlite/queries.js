@@ -162,6 +162,12 @@ export function playerHistory(db, name, limit = 10) {
  * (a backtest). Returns { slateId, slateDate, backtest, from, actual }
  * where `from` is a FROM/WHERE clause over alias p.
  */
+// OUT / injured context rows (pool_excluded = 1) are not part of a slate's pool; older databases lack the column
+function snapshotPoolFilter(db, alias) {
+  const cols = db.prepare(`PRAGMA table_info(slate_player_snapshots)`).all().map(c => c.name);
+  return cols.includes('pool_excluded') ? ` AND COALESCE(${alias}pool_excluded, 0) = 0` : '';
+}
+
 function slateRows(db, slateDate) {
   if (!slateDate) {
     const slate = latestSlate(db);
@@ -170,13 +176,13 @@ function slateRows(db, slateDate) {
       from: 'FROM players p WHERE p.slate_id = ?', params: [slate?.slate_id ?? null], name: 'p.name', actual: ''
     };
   }
-  const slate = db.prepare(`SELECT slate_id FROM slate_player_snapshots WHERE game_date = ? AND site = 'draftkings'
+  const slate = db.prepare(`SELECT slate_id FROM slate_player_snapshots WHERE game_date = ? AND site = 'draftkings'${snapshotPoolFilter(db, '')}
     GROUP BY slate_id ORDER BY COUNT(*) DESC LIMIT 1`).get(slateDate);
   return {
     slateId: slate?.slate_id ?? null, slateDate, backtest: true,
     from: `FROM slate_player_snapshots p
       LEFT JOIN historical_games h ON h.player_key = p.player_key AND h.game_date = p.game_date
-      WHERE p.game_date = ? AND p.site = 'draftkings' AND p.slate_id = ?`,
+      WHERE p.game_date = ? AND p.site = 'draftkings' AND p.slate_id = ?${snapshotPoolFilter(db, 'p.')}`,
     params: [slateDate, slate?.slate_id ?? null],
     name: 'p.player_name',
     actual: ', h.dk_fantasy_points AS actual_points'
