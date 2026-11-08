@@ -23,9 +23,9 @@
  *   projection_rotowire   RotoWire after the sanity layer (as read)
  *   projection_ours, projection_blend, ours_minutes, p_play
  *   projection_fade       FADE call or null (fadeCall)
- *   minutes upside (Q2): ours_minutes_p10 / ours_minutes_p90 (our minutes band),
+ *   minutes (Q2): ours_minutes_p10 / ours_minutes_p90 (our minutes band),
  *   rw_minutes_gap (RotoWire's posted minutes - ours, before any correction),
- *   minutes_upside (0-100) and minutes_upside_reasons, minutes_correction
+ *   minutes_correction
  *   ({ factor, bucket, band } when the live correction moved ours, else null)
  * Players RotoWire projects at 0 (ruled out) keep their row: the pool is
  * RotoWire's, as with the sanity layer.
@@ -67,14 +67,18 @@ export function fadeCall(own, { threshold = FADE_THRESHOLD } = {}) {
   };
 }
 
-/** The minutes upside fields of an own-model row (nulls without one). */
-export function minutesUpsideFields(own) {
+/**
+ * The minutes fields of an own-model row (nulls without one). The own model's
+ * 0-100 minutes_upside score stays on its endpoint only: it showed no signal
+ * for minutes spikes once the minutes correction went live (blend calibration
+ * backtest, 18 DK main slates 10/20-11/7: AUC 0.51 vs our minutes, 0.45 vs
+ * RotoWire's).
+ */
+export function minutesRangeFields(own) {
   return {
     ours_minutes_p10: own?.minutes_p10 ?? null,
     ours_minutes_p90: own?.minutes_p90 ?? null,
     rw_minutes_gap: own?.rw_minutes_gap ?? null,
-    minutes_upside: own?.minutes_upside ?? null,
-    minutes_upside_reasons: own?.minutes_upside_reasons ?? [],
     minutes_correction: own?.minutes_correction ?? null
   };
 }
@@ -107,7 +111,7 @@ export function applySource(player, own, source, { reason = null, threshold = FA
     tag_applied: Boolean(own?.tag_applied),
     p_play_model: own ? own.p_play_model ?? own.p_play ?? null : null,
     projection_fade: own ? fadeCall(own, { threshold }) : null,
-    ...minutesUpsideFields(own)
+    ...minutesRangeFields(own)
   };
   // The pool is RotoWire's: a ruled-out player keeps his 0
   if (!(rotowire > 0)) return { ...player, ...fields, projection_source: 'rotowire', projection_fallback: false };
@@ -218,7 +222,7 @@ export function chatInjuryFields(p) {
 export const SOURCE_FIELDS = Object.freeze([
   'projection_source', 'projection_requested', 'projection_fallback', 'projection_fallback_reason',
   'projection_rotowire', 'projection_ours', 'projection_blend', 'ours_minutes', 'p_play', 'p_play_model', 'tag_applied', 'projection_fade',
-  'ours_minutes_p10', 'ours_minutes_p90', 'rw_minutes_gap', 'minutes_upside', 'minutes_upside_reasons', 'minutes_correction'
+  'ours_minutes_p10', 'ours_minutes_p90', 'rw_minutes_gap', 'minutes_correction'
 ]);
 
 /** The layer's fields of a row ({} for a RotoWire read), for rows rebuilt field by field. */
@@ -243,7 +247,7 @@ export function chatSourceFields(p) {
     blendProjection: p.projection_blend,
     oursMinutes: p.ours_minutes,
     pPlay: p.p_play,
-    ...(Number.isFinite(p.minutes_upside) ? { minutesUpside: p.minutes_upside, rwMinutesGap: p.rw_minutes_gap, oursMinutesP90: p.ours_minutes_p90 } : {}),
+    ...(Number.isFinite(p.rw_minutes_gap) ? { rwMinutesGap: p.rw_minutes_gap, oursMinutesP90: p.ours_minutes_p90 } : {}),
     ...(fade ? { fade: { pointsDiff: fade.points_diff, hitRate: fade.hit_rate, calls: fade.n, note: fade.text } } : {}),
     ...chatInjuryFields(p)
   };
@@ -251,5 +255,5 @@ export function chatSourceFields(p) {
 
 export default {
   FADE_THRESHOLD, SOURCE_FIELDS, INJURY_FIELDS, fadeCall, sourceNumbers, applySource, applyInjuryRisk,
-  pickSourceFields, pickInjuryFields, chatSourceFields, chatInjuryFields, minutesUpsideFields
+  pickSourceFields, pickInjuryFields, chatSourceFields, chatInjuryFields, minutesRangeFields
 };

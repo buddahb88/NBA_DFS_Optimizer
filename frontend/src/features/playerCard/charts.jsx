@@ -484,8 +484,8 @@ export function ScoreMeter({ label, value, tone = 'accent' }) {
 // RotoWire's minutes, the actual on a backtest night
 // ---------------------------------------------------------------------------
 
-export function MinutesBand({ upside, actual }) {
-  const u = upside ?? {};
+export function MinutesBand({ range, actual }) {
+  const u = range ?? {};
   const marks = [
     { key: 'ours', label: 'Ours', value: u.ours, className: 'bg-fg', solid: true },
     { key: 'raw', label: 'Before correction', value: isNum(u.ours_raw) && isNum(u.ours) && Math.abs(u.ours_raw - u.ours) >= 0.5 ? u.ours_raw : null, className: 'border-l-2 border-dashed border-fg-muted' },

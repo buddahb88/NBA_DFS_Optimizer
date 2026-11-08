@@ -28,8 +28,8 @@ export const fadeCard = () => ({
     source: 'blend', requested: 'blend', fallback: false, active: 36.2, rotowire: 39.5, ours: 33, blend: 36.2, ours_median: 32.5,
     p10: 20, p90: 47, blend_p10: 22, blend_p90: 50, p_boom: 0.08, blend_p_boom: 0.1, boom_at: 42, p_dd: 0.15,
     ours_minutes: 31.5, rotowire_minutes: 33, p_play: 0.97,
-    minutes_upside: {
-      score: 62, reasons: ['RotoWire +6.5 min', 'teammate out'], ours: 31.5, ours_raw: 26.3, p10: 24.1, p90: 37.8, rotowire: 33, gap: 6.5,
+    minutes_range: {
+      ours: 31.5, ours_raw: 26.3, p10: 24.1, p90: 37.8, rotowire: 33, gap: 6.5,
       correction: { factor: 0.8, bucket: 'rw higher 6+', band: '5K+' },
     },
     fade: { points_diff: -6.5, hit_rate: 0.688, n: 77, text: 'Fade: ours 33.0 vs RotoWire 39.5 (-6.5).' },
@@ -93,7 +93,7 @@ export const rookieCard = () => {
     ...c,
     slate: { ...c.slate, isBacktest: false, slateDate: null, label: 'Live', settingsKey: 's1' },
     player: { ...c.player, name: 'New Rookie', archetype: null, archetype_label: null, secondary_label: null },
-    projection: { ...c.projection, fade: null, minutes_upside: null, ours: null, blend: null, p10: null, p90: null, blend_p10: null, blend_p90: null, ours_diff: null, source: 'rotowire', active: 20, rotowire: 20 },
+    projection: { ...c.projection, fade: null, minutes_range: null, ours: null, blend: null, p10: null, p90: null, blend_p10: null, blend_p90: null, ours_diff: null, source: 'rotowire', active: 20, rotowire: 20 },
     form: { log: [], l5: null, l10: null, season: null, lastSeason: null, consistency: { std_dev: null, hit_rate: null, hit_games: 0, priced_games: 0 }, trend: { minutes_delta_l5: null, baseline: null } },
     role: { ...c.role, current: null, previous: null, archetype_average: null, started_last_game: null, starts_l5: null },
     matchup: null,

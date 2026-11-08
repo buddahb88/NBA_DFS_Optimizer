@@ -25,6 +25,12 @@
  *     blend_point_model keep the untagged numbers, ours_mean_if_plays /
  *     blend_point_if_plays the projection if he plays. options.injuryTag:
  *     false skips it (backtest comparison).
+ *   blend calibration: when blendCalibrationParams.json is `live` (npm run
+ *     backtest:blend-calibration -- --write-params; it beat the raw blend
+ *     leave-one-date-out), blend_point x a global x minutes-band x
+ *     salary-tier factor, blend_p10 / p90 through a PIT map, blend_p_boom
+ *     mapped + Platt (blendCalibration.js); blend_point_raw keeps the blend,
+ *     blend_calibration_factor the factor. options.calibration: false skips it.
  *   minutes correction (Q2): when minutesCorrectionParams.json is `live` (the
  *     corrected model beat own_mean leave-one-slate-out), our conditional
  *     minutes move toward RotoWire's first (minutesCorrection.js) and every
@@ -50,16 +56,17 @@ import { createFeatureStore } from './featureStore.js';
 import { dataSignature, DEFAULT_CACHE_DIR, DEFAULTS, FEATURE_VERSION, loadFeatureData, slateFields } from './modelEvalService.js';
 import { slateDay } from './evaluate.js';
 import { createOwnModelProjector, ownPrediction, prepareOwnMaps } from './ownModel.js';
-import { blendPrediction, leanBucket, recenter } from './blend.js';
+import { blendPrediction, leanBucket, recenter, recenteredQuantiles } from './blend.js';
 import { tagPlayProbability } from '../projections/injuryRisk.js';
 import { tableFor as injuryRiskTableFor } from '../projections/injuryRiskService.js';
 import { WEIGHTS_FILE } from './ownModelBacktest.js';
 import { PARAMS_FILE as CORRECTION_FILE, readCorrectionParams } from './minutesCorrection.js';
 import { projectionSanityConfig } from '../../config/projectionSanity.js';
+import { applyCalibration, PARAMS_FILE as CALIBRATION_FILE, readCalibrationParams } from './blendCalibration.js';
 
 export const MODEL_VERSION = '1';
 /** Bump when the per-player output changes (result cache key). */
-const OUTPUT_VERSION = 'tag-1';
+const OUTPUT_VERSION = 'cal-1';
 const TEAMMATE_OUT_MINUTES = 20;
 const RESULT_CACHE = 8;
 
@@ -148,12 +155,35 @@ export function blendWithTag(x, weights) {
   return { ...b, dk_points: point, ...recenter(own, point), if_plays: own.p_play_model > 0 ? b.dk_points / own.p_play_model : null, untagged: b.dk_points };
 }
 
+/**
+ * The blend after the calibration (blendCalibration.js): point x factor (global
+ * x minutes band x salary tier), p10 / p90 through the PIT map, p_boom mapped +
+ * Platt; if_plays and untagged scale with the point. The blend unchanged
+ * without params.
+ */
+export function calibrated(b, own, salary, params) {
+  if (!b || !params) return b;
+  const c = applyCalibration({ point: b.dk_points, qs: recenteredQuantiles(own, b.dk_points), boomAt: own?.boom_at, minutes: own?.minutes, salary }, params);
+  const scale = (v) => (Number.isFinite(v) ? v * c.factor : v);
+  return {
+    ...b,
+    dk_points: c.point,
+    p10: c.p10 ?? b.p10,
+    p90: c.p90 ?? b.p90,
+    p_boom: c.p_boom ?? b.p_boom,
+    if_plays: scale(b.if_plays),
+    ...(b.untagged !== undefined ? { untagged: scale(b.untagged) } : {}),
+    factor: c.factor
+  };
+}
+
 /** One player's output from ours, RotoWire (adjusted) and the blend weights. */
-export function playerOutput(entry, ownPred, weights) {
+export function playerOutput(entry, ownPred, weights, { withQuantiles = false, calibration = null } = {}) {
   const s = entry.slate;
   const rw = Number.isFinite(s.adjusted) ? { dk_points: s.adjusted, minutes: s.adjustedMinutes } : null;
   const x = { own: ownPred, rw, salary: s.salary, teammateOut: entry.teammateOut };
-  const b = ownPred && weights?.blend ? blendWithTag(x, weights.blend) : null;
+  const blended = ownPred && weights?.blend ? blendWithTag(x, weights.blend) : null;
+  const b = calibrated(blended, ownPred, s.salary, calibration);
   // Disagreement compares ours as its saved-slate history scored it (before the tag)
   const ownModel = ownPred?.tag_applied ? ownPred.untagged : ownPred;
   const pointsDiff = ownModel && rw ? ownModel.dk_points - rw.dk_points : null;
@@ -202,12 +232,16 @@ export function playerOutput(entry, ownPred, weights) {
     minutes_upside: ownPred ? ownPred.minutes_upside ?? null : null,
     minutes_upside_reasons: ownPred?.minutes_upside_reasons ?? [],
     blend_point: round(b?.dk_points),
+    blend_point_raw: round(blended?.dk_points),
+    blend_calibration_factor: round(b?.factor ?? null, 4),
     blend_point_model: round(b ? b.untagged ?? b.dk_points : null),
     blend_point_if_plays: round(b?.if_plays),
     blend_p10: round(b?.p10),
     blend_p90: round(b?.p90),
     blend_p_boom: round(b?.p_boom, 3),
     blend_weight: round(b?.weight, 3),
+    // The uncalibrated blend's grid (the calibration backtest's input)
+    ...(withQuantiles ? { blend_quantiles: blended ? recenteredQuantiles(ownPred, blended.dk_points)?.map(v => round(v)) ?? null : null } : {}),
     disagreement: {
       minutes_diff: round(minutesDiff, 1),
       points_diff: round(pointsDiff),
@@ -217,6 +251,12 @@ export function playerOutput(entry, ownPred, weights) {
       minutes_history: history('minutes', minutesLean)
     }
   };
+}
+
+/** The blend calibration the live service applies: the params file when it is `live`, else none. */
+export function liveCalibration(file = CALIBRATION_FILE) {
+  const p = readCalibrationParams(file);
+  return p?.live ? p : null;
 }
 
 /** The correction the live service applies: the params file when it is `live`, else none. */
@@ -236,7 +276,8 @@ export function liveCorrection(file = CORRECTION_FILE) {
  */
 export async function projectSlateOwnModel(slateId, {
   site = null, slateDate = null, source: resolved = null, refresh = false, weightsFile = WEIGHTS_FILE,
-  correctionFile = CORRECTION_FILE, cacheDir = DEFAULT_CACHE_DIR, now = new Date(), injuryTag = true
+  correctionFile = CORRECTION_FILE, cacheDir = DEFAULT_CACHE_DIR, now = new Date(), injuryTag = true, withQuantiles = false,
+  calibration: useCalibration = true, calibrationFile = CALIBRATION_FILE
 } = {}) {
   const tStart = Date.now();
   const timings = {};
@@ -245,13 +286,14 @@ export async function projectSlateOwnModel(slateId, {
   const siteKey = getSiteConfig(source.site).key;
   const weights = readWeights(weightsFile);
   const correction = liveCorrection(correctionFile);
+  const calibration = useCalibration ? liveCalibration(calibrationFile) : null;
   const signature = await dataSignature();
   // RotoWire "adjusted" (the blend's and the fade's comparison) follows the sanity components
   const sanityKey = JSON.stringify(projectionSanityConfig());
   // P(play | tag, salary band): live slates the committed table, backtests as of the slate's date (no lookahead)
   const tagTable = injuryTag ? await injuryRiskTableFor(source) : null;
   const tagKey = tagTable ? `tag:${tagTable.before ?? tagTable.generated_at ?? (tagTable.missing ? 'fallback' : 'committed')}:${tagTable.rows ?? 0}` : 'no-tag';
-  const cacheKey = [OUTPUT_VERSION, tagKey, source.slateId, source.slateDate, siteKey, signature, await slateSignature(source), weights?.generatedAt ?? 'none', correction?.generatedAt ?? 'no-correction', sanityKey].join('|');
+  const cacheKey = [OUTPUT_VERSION, withQuantiles ? 'q' : '', tagKey, source.slateId, source.slateDate, siteKey, signature, await slateSignature(source), weights?.generatedAt ?? 'none', correction?.generatedAt ?? 'no-correction', calibration?.generatedAt ?? 'no-calibration', sanityKey].join('|');
   if (!refresh && results.has(cacheKey)) {
     return { ...results.get(cacheKey), cached: true, timings: { totalMs: ms(tStart) } };
   }
@@ -295,7 +337,7 @@ export async function projectSlateOwnModel(slateId, {
     const tagPlay = tagTable ? tagPlayProbability(tagTable, p.slate.injuryStatus, p.slate.salary)?.p ?? null : null;
     const own = ownPrediction(ctx, maps, models, { minutesGrid: weights?.blend?.kind === 'minutes' ? undefined : [], correction, tagPlay });
     const teammateOut = contexts[i].teamOut.some(o => o.expectedMinutes >= TEAMMATE_OUT_MINUTES) ? 'teammate out' : 'none out';
-    return playerOutput({ ...p, teammateOut }, own, weights);
+    return playerOutput({ ...p, teammateOut }, own, weights, { withQuantiles, calibration });
   }).sort((a, b) => (b.blend_point ?? b.ours_mean ?? 0) - (a.blend_point ?? a.ours_mean ?? 0));
   timings.projectMs = ms(t0);
   timings.totalMs = ms(tStart);
@@ -311,6 +353,7 @@ export async function projectSlateOwnModel(slateId, {
     signature,
     weights: weights?.blend ? { name: weights.blend.name, kind: weights.blend.kind, scheme: weights.blend.scheme, generatedAt: weights.generatedAt, slates: weights.slates } : null,
     injuryTag: tagTable ? { table: tagTable.before ? `as of ${tagTable.before}` : (tagTable.missing ? 'fallback' : 'committed'), adjusted: out.filter(p => p.tag_applied).length } : null,
+    calibration: calibration ? { generatedAt: calibration.generatedAt, rows: calibration.rows, loo: calibration.loo ?? null } : null,
     minutesCorrection: correction ? { generatedAt: correction.generatedAt, slates: correction.slates, looMae: correction.looMae ?? null } : null,
     timings,
     players: out
@@ -327,4 +370,4 @@ export function clearOwnModelCache() {
   results.clear();
 }
 
-export default { projectSlateOwnModel, playerOutput, blendWithTag, readWeights, liveCorrection, clearOwnModelCache };
+export default { projectSlateOwnModel, playerOutput, blendWithTag, calibrated, readWeights, liveCorrection, liveCalibration, clearOwnModelCache };

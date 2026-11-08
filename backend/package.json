@@ -27,6 +27,7 @@
     "calibrate:injury-risk": "node scripts/calibrate-injury-risk.js",
     "backtest:injury-risk": "node scripts/injuryRiskBacktest.js",
     "backtest:minutes-correction": "node scripts/minutesCorrectionBacktest.js",
+    "backtest:blend-calibration": "node scripts/blendCalibrationBacktest.js",
     "ratings:teams": "node scripts/team-ratings.js",
     "test:accuracy": "vitest run test/projectionBacktest.test.js"
   },

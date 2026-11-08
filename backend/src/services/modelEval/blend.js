@@ -142,15 +142,21 @@ export function exceedance(qs, x) {
   return 0;
 }
 
+/** Our quantile grid re-centered on `point` (scaled by point / our mean; shifted when our mean < 1), or null. */
+export function recenteredQuantiles(own, point) {
+  const qs = own?.dk_quantiles;
+  if (!Array.isArray(qs) || qs.length < 2 || !finite(point)) return null;
+  const mean = own.dk_points;
+  return mean >= 1 ? qs.map(v => v * point / mean) : qs.map(v => Math.max(0, v + point - mean));
+}
+
 /**
  * Our distribution re-centered on `point`: { p10, p90, p_boom, boom_at, p_dd }.
  * Scaled by point / our mean (DNP mass stays at 0), shifted when our mean < 1.
  */
 export function recenter(own, point) {
-  const qs = own?.dk_quantiles;
-  if (!Array.isArray(qs) || qs.length < 2 || !finite(point)) return {};
-  const mean = own.dk_points;
-  const scaled = mean >= 1 ? qs.map(v => v * point / mean) : qs.map(v => Math.max(0, v + point - mean));
+  const scaled = recenteredQuantiles(own, point);
+  if (!scaled) return {};
   return {
     p10: quantileAt(scaled, 0.1),
     p90: quantileAt(scaled, 0.9),

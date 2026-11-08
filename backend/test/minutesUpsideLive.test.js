@@ -69,35 +69,39 @@ describe('live outputs', () => {
     }
   });
 
-  test('source layer carries the minutes upside fields (nulls without an own row)', async () => {
+  test('source layer carries the minutes fields, not the upside score (nulls without an own row)', async () => {
     const layer = await import('../src/services/projections/sourceLayer.js');
     const own = { ours_mean: 22, p10: 10, p90: 35, ours_minutes: 26, minutes_p10: 18, minutes_p90: 33, rw_minutes_gap: 10, minutes_upside: 72,
       minutes_upside_reasons: ['RotoWire +10.0 min'], minutes_correction: { factor: 0.6, bucket: 'rw higher 6+', band: '<5K' }, disagreement: {} };
     const p = layer.applySource({ id: 1, name: 'X', projected_points: 20 }, own, 'ours');
-    assert.equal(p.minutes_upside, 72);
+    assert.equal(p.minutes_upside, undefined);
+    assert.equal(p.minutes_upside_reasons, undefined);
     assert.equal(p.ours_minutes_p90, 33);
     assert.equal(p.ours_minutes_p10, 18);
     assert.equal(p.rw_minutes_gap, 10);
     assert.deepEqual(p.minutes_correction, own.minutes_correction);
-    for (const f of ['ours_minutes_p10', 'ours_minutes_p90', 'rw_minutes_gap', 'minutes_upside', 'minutes_upside_reasons', 'minutes_correction']) {
+    for (const f of ['ours_minutes_p10', 'ours_minutes_p90', 'rw_minutes_gap', 'minutes_correction']) {
       assert.ok(layer.SOURCE_FIELDS.includes(f), f);
     }
-    assert.equal(layer.pickSourceFields(p).minutes_upside, 72);
-    assert.equal(layer.chatSourceFields(p).minutesUpside, 72);
+    assert.ok(!layer.SOURCE_FIELDS.includes('minutes_upside'));
+    assert.equal(layer.pickSourceFields(p).rw_minutes_gap, 10);
+    assert.equal(layer.chatSourceFields(p).minutesUpside, undefined);
+    assert.equal(layer.chatSourceFields(p).rwMinutesGap, 10);
+    assert.equal(layer.chatSourceFields(p).oursMinutesP90, 33);
     const fallback = layer.applySource({ id: 1, name: 'X', projected_points: 20 }, null, 'ours');
-    assert.equal(fallback.minutes_upside, null);
-    assert.deepEqual(fallback.minutes_upside_reasons, []);
-    assert.equal(layer.chatSourceFields(fallback).minutesUpside, undefined);
+    assert.equal(fallback.rw_minutes_gap, null);
+    assert.equal(layer.chatSourceFields(fallback).rwMinutesGap, undefined);
   });
 
   test('player card block', async () => {
-    const { minutesUpsideBlock } = await import('../src/services/playerCard/playerCardService.js');
-    assert.equal(minutesUpsideBlock(null, {}), null);
-    const b = minutesUpsideBlock({ minutes_upside: 72, minutes_upside_reasons: ['x'], ours_minutes: 26, ours_minutes_raw: 20, minutes_p10: 18, minutes_p90: 33, rotowire_minutes_posted: 30, rw_minutes_gap: 10, minutes_correction: null }, {});
-    assert.deepEqual(b, { score: 72, reasons: ['x'], ours: 26, ours_raw: 20, p10: 18, p90: 33, rotowire: 30, gap: 10, correction: null });
+    const { minutesRangeBlock } = await import('../src/services/playerCard/playerCardService.js');
+    assert.equal(minutesRangeBlock(null, {}), null);
+    const b = minutesRangeBlock({ minutes_upside: 72, minutes_upside_reasons: ['x'], ours_minutes: 26, ours_minutes_raw: 20, minutes_p10: 18, minutes_p90: 33, rotowire_minutes_posted: 30, rw_minutes_gap: 10, minutes_correction: null }, {});
+    assert.deepEqual(b, { ours: 26, ours_raw: 20, p10: 18, p90: 33, rotowire: 30, gap: 10, correction: null });
     // From the slate row's source-layer fields
-    const s = minutesUpsideBlock(null, { minutes_upside: 40, ours_minutes: 22, ours_minutes_p10: 15, ours_minutes_p90: 30, projected_minutes: 27, rw_minutes_gap: 5 });
-    assert.equal(s.score, 40);
+    const s = minutesRangeBlock(null, { ours_minutes: 22, ours_minutes_p10: 15, ours_minutes_p90: 30, projected_minutes: 27, rw_minutes_gap: 5 });
+    assert.equal(s.score, undefined);
+    assert.equal(s.p10, 15);
     assert.equal(s.p90, 30);
     assert.equal(s.rotowire, 27);
   });

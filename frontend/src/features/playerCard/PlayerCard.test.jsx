@@ -96,12 +96,11 @@ describe('PlayerCardView', () => {
     expect(screen.queryByTestId('verdict-slate-note')).toBeNull()
   })
 
-  it('shows the minutes upside section: score, reasons, band and the correction', () => {
+  it('shows the minutes section: band, RotoWire gap and the correction (no upside score)', () => {
     render(<MemoryRouter><PlayerCardView card={fadeCard()} onClose={() => {}} /></MemoryRouter>)
-    const section = screen.getByRole('heading', { name: 'Minutes upside' }).closest('section')
-    expect(within(section).getByText('62')).toBeInTheDocument()
-    expect(within(section).getByText('RotoWire +6.5 min')).toBeInTheDocument()
-    expect(within(section).getByText('teammate out')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Minutes upside' })).not.toBeInTheDocument()
+    const section = screen.getByRole('heading', { name: 'Minutes range' }).closest('section')
+    expect(within(section).queryByText('Upside score')).not.toBeInTheDocument()
     expect(within(section).getByText('RotoWire +6.5 min vs ours')).toBeInTheDocument()
     expect(within(section).getByRole('img', { name: 'Minutes: ours 31.5, p10 24.1 to p90 37.8, RotoWire 33.0' })).toBeInTheDocument()
     expect(within(section).getByText('Before correction')).toBeInTheDocument()
@@ -117,7 +116,7 @@ describe('PlayerCardView', () => {
     expect(screen.getByText(/No saved slates with a result/)).toBeInTheDocument()
     expect(screen.queryByText('What actually happened')).not.toBeInTheDocument()
     expect(screen.getByText(/Some data unavailable: own model/)).toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: 'Minutes upside' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Minutes range' })).not.toBeInTheDocument()
   })
 })
 
