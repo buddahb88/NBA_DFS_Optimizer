@@ -1,6 +1,8 @@
 import express from 'express';
-import { createJob, getJob, cancelJob, jobView } from '../services/portfolio/jobs.js';
+import { createJob, createGppSimJob, getJob, cancelJob, jobView } from '../services/portfolio/jobs.js';
 import { CONTEST_PRESETS, LIMITS } from '../services/portfolio/index.js';
+import { GPP_SIM_LIMITS, CHEAP_FLOOR, SMALL_SINGLE_ENTRY, normalizeGppSimOptions } from '../services/portfolio/gppSim.js';
+import { FIELD_RULES } from '../services/portfolio/fieldGenerator.js';
 
 const router = express.Router();
 
@@ -48,6 +50,53 @@ router.post('/build', (req, res) => {
     });
   } catch (error) {
     res.status(error.status || 400).json({ error: 'Invalid portfolio request', message: error.message });
+  }
+});
+
+/**
+ * GET /api/portfolio/gpp-sim/options
+ * GPP sim defaults / limits and the evidence-based rules it applies.
+ */
+router.get('/gpp-sim/options', (req, res) => {
+  res.json({
+    success: true,
+    limits: GPP_SIM_LIMITS,
+    defaults: normalizeGppSimOptions({}),
+    cheapFloor: CHEAP_FLOOR,
+    smallSingleEntry: SMALL_SINGLE_ENTRY,
+    fieldRules: FIELD_RULES.map((r) => ({ ...r, maxGames: Number.isFinite(r.maxGames) ? r.maxGames : null }))
+  });
+});
+
+/**
+ * POST /api/portfolio/gpp-sim
+ * Body: { slateId, slateDate?, contestSize=14000, entries=1, mode='single'|'multi',
+ *         chalkCap=false, cheapMinutesFloor=false, atLock=false, maxOverlap=5,
+ *         excludedPlayers: [id], ruledOut: [id], seed?, refresh=false,
+ *         evalNights=6000, fieldSize=6000, seeds, optNights=100 }
+ * Starts a background GPP sim (services/portfolio/gppSim.js): picks by simulated win rate.
+ * atLock drops players tagged OUT and anyone ruled out since the last sync (live: fresh
+ * RotoWire tags, read-only; past slate: players who did not play). Results are cached by
+ * slate + inputs + projection signature (refresh=true skips the cache). Poll / stream / cancel
+ * like a portfolio build (GET /api/portfolio/:jobId, .../events, DELETE).
+ */
+router.post('/gpp-sim', (req, res) => {
+  const { slateId, slateDate, loadInputs, ...options } = req.body || {};
+  if ((slateId === undefined || slateId === null || slateId === '') && !slateDate) {
+    return res.status(400).json({ error: 'slateId is required' });
+  }
+  try {
+    const job = createGppSimJob(slateId, { slateDate: slateDate || null, ...options });
+    res.status(202).json({
+      success: true,
+      jobId: job.id,
+      kind: job.kind,
+      status: job.status,
+      statusUrl: `/api/portfolio/${job.id}`,
+      eventsUrl: `/api/portfolio/${job.id}/events`
+    });
+  } catch (error) {
+    res.status(error.status || 400).json({ error: 'Invalid GPP sim request', message: error.message });
   }
 });
 

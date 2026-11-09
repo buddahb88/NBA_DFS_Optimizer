@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { exportAPI, lineupsAPI, optimizerAPI, playerSettingsAPI, playersAPI } from '../services/api';
+import { exportAPI, lineupsAPI, optimizerAPI, playerSettingsAPI, playersAPI, portfolioAPI } from '../services/api';
 import { toOptimizerPlayers } from '../features/playerPool/playerPool';
 import { useSlate } from '../context/SlateContext';
 import {
@@ -30,6 +30,7 @@ import { validateDraftRules } from '../features/lineupStudio/stackRules';
 import { buildOptimizerRequest, skippedNotice } from '../features/lineupStudio/request';
 import PortfolioBuilderModal from '../features/portfolio/PortfolioBuilderModal';
 import PortfolioPanel from '../features/portfolio/PortfolioPanel';
+import GppSimPanel from '../features/portfolio/GppSimPanel';
 import usePortfolioJob from '../features/portfolio/usePortfolioJob';
 import { PORTFOLIO_SITE } from '../features/portfolio/portfolioMath';
 import SlateModeSelect from '../features/slate/SlateModeSelect';
@@ -142,6 +143,9 @@ export default function LineupStudioPage() {
   const portfolioJob = usePortfolioJob();
   const { reset: resetPortfolio } = portfolioJob;
   const [portfolioOpen, setPortfolioOpen] = useState(false);
+  // GPP sim mode (win-rate pick, background job)
+  const gppSimJob = usePortfolioJob(portfolioAPI.gppSim);
+  const { reset: resetGppSim } = gppSimJob;
 
   // Manual builder
   const [manualSlots, setManualSlots] = useState(() => emptySlots(siteConfig));
@@ -167,8 +171,9 @@ export default function LineupStudioPage() {
 
   useEffect(() => {
     resetPortfolio();
+    resetGppSim();
     setPortfolioOpen(false);
-  }, [slateKey, resetPortfolio]);
+  }, [slateKey, resetPortfolio, resetGppSim]);
 
   useEffect(() => {
     if (!slateId) {
@@ -547,6 +552,13 @@ export default function LineupStudioPage() {
                   ? `${Math.round((portfolioJob.state.progress || 0) * 100)}%`
                   : portfolioJob.state.result?.portfolio.lineups.length || undefined,
               },
+              {
+                value: 'gppsim',
+                label: 'GPP sim',
+                count: gppSimJob.running
+                  ? `${Math.round((gppSimJob.state.progress || 0) * 100)}%`
+                  : gppSimJob.state.result?.lineups?.length || undefined,
+              },
             ]}
           />
           <div className="pt-3">
@@ -571,6 +583,17 @@ export default function LineupStudioPage() {
                 slateId={slateId}
                 site={site}
                 onNewBuild={openPortfolio}
+                onNotice={setNotice}
+              />
+            )}
+
+            {tab === 'gppsim' && (
+              <GppSimPanel
+                job={gppSimJob}
+                slateId={slateId}
+                slateParams={slateParams}
+                excluded={excluded}
+                disabledReason={portfolioBlocker}
                 onNotice={setNotice}
               />
             )}

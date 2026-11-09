@@ -5,7 +5,7 @@ import LineupStudioPage from './LineupStudioPage'
 import { useSlate } from '../context/SlateContext'
 import { exportAPI, lineupsAPI, optimizerAPI, playerSettingsAPI, playersAPI, portfolioAPI, projectionsAPI } from '../services/api'
 import { FALLBACK_SITE } from '../features/lineupStudio/lineupMath'
-import { LIMITS, PRESETS, makeResult } from '../features/portfolio/fixtures'
+import { LIMITS, PRESETS, makeGppResult, makeResult } from '../features/portfolio/fixtures'
 
 vi.mock('../context/SlateContext', () => ({ useSlate: vi.fn() }))
 vi.mock('../services/api', () => ({
@@ -14,7 +14,7 @@ vi.mock('../services/api', () => ({
   optimizerAPI: { generate: vi.fn(), reviewLineup: vi.fn(), slateBreakdown: vi.fn(), compareSources: vi.fn() },
   lineupsAPI: { create: vi.fn() },
   exportAPI: { lineups: vi.fn() },
-  portfolioAPI: { getPresets: vi.fn(), build: vi.fn(), getJob: vi.fn(), cancel: vi.fn() },
+  portfolioAPI: { getPresets: vi.fn(), build: vi.fn(), getJob: vi.fn(), cancel: vi.fn(), gppSim: vi.fn() },
   projectionsAPI: { getSanity: vi.fn(), setSanity: vi.fn(), getSource: vi.fn(), setSource: vi.fn() },
 }))
 
@@ -277,6 +277,31 @@ describe('LineupStudioPage', () => {
     expect(await screen.findByText(/Exported 1 portfolio lineup/)).toBeInTheDocument()
   })
 
+  it('GPP sim tab: runs a win-rate sim with the options, shows the pick and re-runs at lock', async () => {
+    portfolioAPI.gppSim.mockResolvedValue({ data: { jobId: 'gpp-1', status: 'queued' } })
+    portfolioAPI.getJob.mockResolvedValue({ data: { jobId: 'gpp-1', status: 'completed', finishedAt: 'now', result: makeGppResult() } })
+    portfolioAPI.cancel.mockResolvedValue({ data: {} })
+
+    renderStudio()
+    await screen.findByText('No lineups yet')
+    fireEvent.click(screen.getByRole('tab', { name: /GPP sim/ }))
+    fireEvent.click(screen.getByRole('switch', { name: /Chalk cap/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Run GPP sim' }))
+
+    await waitFor(() => expect(portfolioAPI.gppSim).toHaveBeenCalled())
+    expect(portfolioAPI.gppSim.mock.calls[0][0]).toEqual({
+      slateId: '42', contestSize: 14000, mode: 'single', entries: 1, chalkCap: true, cheapMinutesFloor: false, atLock: false, excludedPlayers: [],
+    })
+    expect(portfolioAPI.build).not.toHaveBeenCalled()
+    expect(await screen.findByText('Win-rate pick', {}, { timeout: 3000 })).toBeInTheDocument()
+    expect(screen.getByText('Max projection (comparison)')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Export 1 for DraftKings' })).toBeEnabled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Re-run at lock' }))
+    await waitFor(() => expect(portfolioAPI.gppSim).toHaveBeenCalledTimes(2))
+    expect(portfolioAPI.gppSim.mock.calls[1][0]).toMatchObject({ atLock: true, chalkCap: true })
+  })
+
   it('only offers portfolio simulation on DraftKings', async () => {
     useSlate.mockReturnValue({
       slate: { slate_id: '42', name: 'Main' },
@@ -370,6 +395,21 @@ describe('LineupStudioPage', () => {
       expect(screen.getByRole('columnheader', { name: /Result/ })).toBeInTheDocument()
       expect(screen.getByText('Inactive')).toBeInTheDocument()
       expect(screen.getAllByText('Played · 31 min').length).toBeGreaterThan(0)
+    })
+
+    it('runs the GPP sim on the saved slate with slateDate', async () => {
+      portfolioAPI.gppSim.mockResolvedValue({ data: { jobId: 'gpp-1', status: 'queued' } })
+      const result = makeGppResult()
+      result.lineups[0].actualPoints = 301.5
+      portfolioAPI.getJob.mockResolvedValue({ data: { jobId: 'gpp-1', status: 'completed', finishedAt: 'now', result } })
+      renderBacktest()
+      await screen.findByText('No lineups yet')
+      fireEvent.click(screen.getByRole('tab', { name: /GPP sim/ }))
+      fireEvent.click(screen.getByRole('button', { name: 'Run GPP sim' }))
+      await waitFor(() => expect(portfolioAPI.gppSim).toHaveBeenCalled())
+      expect(portfolioAPI.gppSim.mock.calls[0][0]).toMatchObject({ slateId: '29805', slateDate: '2026-10-21' })
+      expect(await screen.findByText('301.5', {}, { timeout: 3000 })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Export 1 for DraftKings' })).toBeDisabled()
     })
 
     it('builds a backtest portfolio with slateDate and shows actual points', async () => {

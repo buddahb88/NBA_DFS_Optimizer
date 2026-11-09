@@ -89,6 +89,9 @@ export const portfolioAPI = {
   // Job status; `result` once completed. candidates: how many ranked candidates to include
   getJob: (jobId, candidates = 0) => api.get(`/portfolio/${jobId}`, { params: { candidates } }),
   cancel: (jobId) => api.delete(`/portfolio/${jobId}`),
+  // GPP sim (win-rate pick): { slateId, contestSize, entries, mode, chalkCap, cheapMinutesFloor, atLock, ... }
+  // -> 202 { jobId, status }; poll / cancel with getJob / cancel
+  gppSim: (data) => api.post('/portfolio/gpp-sim', data),
 };
 
 // Chat API

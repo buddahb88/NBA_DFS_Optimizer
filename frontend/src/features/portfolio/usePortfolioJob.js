@@ -7,15 +7,16 @@ const errorMessage = (err) => err.response?.data?.message || err.response?.data?
 const IDLE = { status: 'idle' };
 
 /**
- * Runs one portfolio build at a time: POST /api/portfolio/build, then polls the job
- * until it finishes. Starting a new build or calling reset() cancels the running one,
- * and so does unmounting.
+ * Runs one portfolio job at a time: POST the request (default /api/portfolio/build; pass
+ * portfolioAPI.gppSim for a GPP sim run), then polls the job until it finishes. Starting a
+ * new job or calling reset() cancels the running one, and so does unmounting.
  *
  * state.status: 'idle' | 'starting' | 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
  */
-export default function usePortfolioJob() {
+export default function usePortfolioJob(startJob = portfolioAPI.build) {
   const [state, setState] = useState(IDLE);
   const active = useRef(null); // { jobId, timer, token }
+  const startRef = useRef(startJob); // fixed for the hook's lifetime
 
   const stop = useCallback((cancelJob) => {
     const current = active.current;
@@ -66,7 +67,7 @@ export default function usePortfolioJob() {
       active.current = { token, jobId: null, timer: null, request, startedAt };
       setState({ status: 'starting', stage: 'queued', progress: 0, message: 'Starting', request, startedAt });
       try {
-        const res = await portfolioAPI.build(request);
+        const res = await startRef.current(request);
         if (active.current?.token !== token) {
           // Superseded or reset while the POST was in flight
           portfolioAPI.cancel(res.data.jobId).catch(() => {});

@@ -367,3 +367,109 @@ export function createDupeModel(ownPct, field, fieldSize, contestSize) {
     estimate: (players) => Math.min(contestSize - 1, (contestSize - 1) * scale * modelProb(players))
   };
 }
+
+/**
+ * GPP-sim field rules by slate size (games): an entrant's lineup uses at least `minSalary`
+ * and projects at least `frac` x the slate's max projection. Calibrated on one real 20k
+ * DK GPP (11/4: 280.75 beaten by ~2% real vs 2.4-2.7% simulated).
+ */
+export const FIELD_RULES = [
+  { maxGames: 3, frac: 0.9, minSalary: 49000 },
+  { maxGames: 7, frac: 0.88, minSalary: 49000 },
+  { maxGames: Infinity, frac: 0.86, minSalary: 49200 }
+];
+
+/** { frac, minSalary } for a slate with `games` games. */
+export function fieldRulesFor(games) {
+  const { frac, minSalary } = FIELD_RULES.find((r) => games <= r.maxGames);
+  return { frac, minSalary };
+}
+
+const MIN_FIELD_WEIGHT = 0.2; // ownership % floor: every playable player shows up somewhere
+
+/**
+ * Rule-based field (GPP sim): ownership-weighted random valid lineups, kept only when they
+ * clear the slate-size salary floor and projection threshold (rejection sampling, so the
+ * kept lineups are exactly the ownership-weighted draws that satisfy the rules).
+ * Players drawn with replacement until 8 distinct, weight max(0.2, own%).
+ * @param ctx - solver context over the slate players (salary, mask, salaryCap)
+ * @param opts - { own: ArrayLike (raw ownership %), proj: ArrayLike, eligible?: Uint8Array (0 = never drawn,
+ *   e.g. ruled out), size, rng, minSalary, minProjection, maxTries?, onProgress? }
+ * @returns {{lineups: Uint16Array (count*8), count: number, tries: number, acceptRate: number,
+ *   salaries: Int32Array, projections: Float64Array}}
+ */
+export function generateRuleField(ctx, opts) {
+  const { own, proj, size, rng, minSalary = 0, minProjection = 0, onProgress } = opts;
+  const maxTries = opts.maxTries ?? Math.max(1e6, size * 5000);
+  const { salary, mask, salaryCap } = ctx;
+  const idx = [];
+  for (let i = 0; i < ctx.n; i++) {
+    if ((!opts.eligible || opts.eligible[i]) && mask[i] && salary[i] > 0) idx.push(i);
+  }
+  if (idx.length < ROSTER_SIZE) throw new Error('Not enough eligible players to build a field');
+  const cum = new Float64Array(idx.length);
+  let total = 0;
+  let maxProj = 0;
+  idx.forEach((i, k) => {
+    total += Math.max(MIN_FIELD_WEIGHT, Number(own[i]) || 0);
+    cum[k] = total;
+    maxProj = Math.max(maxProj, Number(proj[i]) || 0);
+  });
+  const draw = () => {
+    const x = rng.uniform() * total;
+    let lo = 0;
+    let hi = idx.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (cum[mid] < x) lo = mid + 1;
+      else hi = mid;
+    }
+    return idx[lo];
+  };
+
+  const lineups = new Uint16Array(size * ROSTER_SIZE);
+  const salaries = new Int32Array(size);
+  const projections = new Float64Array(size);
+  const chosen = new Uint8Array(ctx.n);
+  const picked = new Int32Array(ROSTER_SIZE);
+  const masks = new Uint8Array(ROSTER_SIZE);
+  let count = 0;
+  let tries = 0;
+  while (count < size && tries < maxTries) {
+    tries++;
+    let k = 0;
+    let sal = 0;
+    let pr = 0;
+    let ok = true;
+    while (k < ROSTER_SIZE) {
+      const i = draw();
+      if (chosen[i]) continue;
+      chosen[i] = 1;
+      picked[k++] = i;
+      sal += salary[i];
+      pr += proj[i];
+      // Early rejects only for lineups the final check would reject anyway
+      if (sal > salaryCap || pr + (ROSTER_SIZE - k) * maxProj < minProjection) {
+        ok = false;
+        break;
+      }
+    }
+    for (let s = 0; s < k; s++) chosen[picked[s]] = 0;
+    if (!ok || sal < minSalary || pr < minProjection) continue;
+    for (let s = 0; s < ROSTER_SIZE; s++) masks[s] = mask[picked[s]];
+    if (!canMatch(masks)) continue;
+    lineups.set(picked, count * ROSTER_SIZE);
+    salaries[count] = sal;
+    projections[count] = pr;
+    count++;
+    if (onProgress && count % 500 === 0) onProgress(count / size);
+  }
+  return {
+    lineups: lineups.subarray(0, count * ROSTER_SIZE),
+    count,
+    tries,
+    acceptRate: tries ? count / tries : 0,
+    salaries: salaries.subarray(0, count),
+    projections: projections.subarray(0, count)
+  };
+}

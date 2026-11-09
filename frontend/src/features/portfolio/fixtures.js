@@ -94,3 +94,29 @@ export function makeResult() {
     candidates: [],
   }
 }
+
+/** A completed GPP sim result (POST /api/portfolio/gpp-sim -> job result). */
+export const makeGppResult = ({ entries = 1, contestSize = 14000, atLock = false, caveat = null, ruledOut = [] } = {}) => {
+  const players = makePlayers()
+  const pick = (n, ids, winRate) => ({
+    ...lineup(n, ids, players, {}),
+    totalSalary: 48000,
+    projectedPoints: 260.5 - n,
+    isValid: true,
+    metrics: { winRate, top1Rate: 0.031, cashRate: 0.41, meanScore: 255.2, projection: 260.5 - n, totalOwnership: 98.4, salary: 48000, dupes: 0.2, seeds: 3, rank: n, chalkPlayers: 1 },
+    why: `Best simulated win rate (${(winRate * 100).toFixed(2)}%) of 412 candidates on 6,000 shared nights.`,
+  })
+  const lineups = [pick(1, [1, 2, 3, 4, 5, 6, 7, 8], 0.0042), pick(2, [1, 2, 3, 9, 5, 6, 7, 8], 0.0031)].slice(0, entries)
+  return {
+    kind: 'gpp-sim',
+    settings: { contestSize, entries, mode: entries > 1 ? 'multi' : 'single', chalkCap: false, cheapMinutesFloor: false, atLock, maxOverlap: 5, evalNights: 6000, fieldSize: 6000, seeds: 4 },
+    slate: { games: 8, players: 120, ruledOut, chalk: { cap: null, applied: false, players: [] }, cheapExcluded: [] },
+    lineups,
+    maxProjection: { ...pick(9, [2, 3, 4, 5, 6, 7, 8, 9], 0.0029), why: 'Highest projected lineup (same options), for comparison.' },
+    candidateCount: 412,
+    candidates: [],
+    caveat,
+    warnings: [],
+    cached: false,
+  }
+}
