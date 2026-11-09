@@ -93,6 +93,16 @@ export function poolFor(rows, source) {
  * HiGHS. Returns { players, salary, projected, actual } or null.
  */
 export function bestLineup(pool, field = 'projected_points', { minSalary } = {}) {
+  const players = maxFieldLineup(pool, field, { minSalary });
+  return players ? summarizeLineup(players) : null;
+}
+
+/**
+ * The max-`field` DK lineup's slots ([{ slot, player }], slot order) via the
+ * optimizer's LP pipeline and HiGHS, or null. Pool rows need id, position,
+ * salary and `field` (projected_points must be > 0).
+ */
+export function maxFieldLineupSlots(pool, field = 'projected_points', { minSalary } = {}) {
   const players = pool.filter(p => finite(p[field]) && (field !== 'projected_points' || p[field] > 0));
   if (players.length < ROSTER_SIZE) return null;
   const requestCtx = buildRequestContext({ mode: 'cash', site: 'draftkings', ...(minSalary !== undefined ? { minSalary } : {}) });
@@ -103,7 +113,12 @@ export function bestLineup(pool, field = 'projected_points', { minSalary } = {})
   if (!result?.feasible) return null;
   const lineup = optimizerService.extractLineupFromSolution(result, players, ctx);
   if (!lineup?.isValid) return null;
-  return summarizeLineup(lineup.players.map(s => s.player));
+  return lineup.players.map(s => ({ slot: s.position ?? s.slot ?? null, player: s.player }));
+}
+
+/** maxFieldLineupSlots' players (slot order), or null. */
+export function maxFieldLineup(pool, field = 'projected_points', options = {}) {
+  return maxFieldLineupSlots(pool, field, options)?.map(s => s.player) ?? null;
 }
 
 function summarizeLineup(players) {

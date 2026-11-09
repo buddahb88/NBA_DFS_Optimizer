@@ -138,9 +138,11 @@ export async function runIncrementalSync({
  * Start the scheduled sync: scheduleExpression() from env unless
  * `expression` is given, never from env under tests. runOnStart also runs
  * one catch-up immediately, so days missed while the server was down are
- * loaded at startup. Returns the cron task, or null when off.
+ * loaded at startup. afterRun: called after each run, even a failed or
+ * skipped one (server.js scores the pick log there). Returns the cron task,
+ * or null when off.
  */
-export function startHistoricalSyncScheduler({ expression, run = runIncrementalSync, runOnStart = false } = {}) {
+export function startHistoricalSyncScheduler({ expression, run = runIncrementalSync, runOnStart = false, afterRun = null } = {}) {
   if (expression === undefined && process.env.NODE_ENV !== 'test' && !process.env.VITEST) {
     expression = scheduleExpression();
   }
@@ -155,6 +157,12 @@ export function startHistoricalSyncScheduler({ expression, run = runIncrementalS
       await run();
     } catch (error) {
       console.error('❌ Scheduled historical sync error:', error);
+    }
+    if (!afterRun) return;
+    try {
+      await afterRun();
+    } catch (error) {
+      console.error('❌ After-sync step error:', error);
     }
   };
 

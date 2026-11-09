@@ -26,6 +26,9 @@ import { startHistoricalSyncScheduler } from './services/historicalSyncScheduler
 import { ensureTeamRatings } from './services/teamRatingsService.js';
 import archetypesRouter from './routes/archetypes.js';
 import opportunityRouter from './routes/opportunity.js';
+import pickLogRouter from './routes/pickLog.js';
+import { startPickLogScheduler } from './services/pickLogScheduler.js';
+import { scorePendingPicks } from './services/pickLogService.js';
 
 // Get directory paths for ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -67,6 +70,7 @@ app.use('/api/dashboard', dashboardRouter);
 app.use('/api/results', resultsRouter);
 app.use('/api/archetypes', archetypesRouter);
 app.use('/api/opportunity', opportunityRouter);
+app.use('/api/pick-log', pickLogRouter);
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -106,7 +110,11 @@ async function startServer() {
     }
 
     // ESPN catch-up of historical_games now and on HISTORICAL_SYNC_CRON (hourly by default, 'off' disables)
-    startHistoricalSyncScheduler({ runOnStart: true });
+    // ...then score the pick log's finished nights from the new box scores
+    startHistoricalSyncScheduler({ runOnStart: true, afterRun: () => scorePendingPicks() });
+
+    // Forward-test pick log: log the DK main slate's picks shortly before lock (PICK_LOG_CRON, 'off' disables)
+    startPickLogScheduler({ runOnStart: true });
 
     // Start server
     app.listen(PORT, '0.0.0.0', () => {

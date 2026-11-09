@@ -13,6 +13,7 @@ import ChatPage from './pages/ChatPage';
 import InsightsPage from './pages/InsightsPage';
 import ArchetypesPage from './pages/ArchetypesPage';
 import DataStatusPage from './pages/DataStatusPage';
+import ModelLogPage from './pages/ModelLogPage';
 
 const UIKitPage = lazy(() => import('./pages/UIKitPage'));
 
@@ -28,6 +29,7 @@ function App() {
             <Route path="/insights" element={<InsightsPage />} />
             <Route path="/archetypes" element={<ArchetypesPage />} />
             <Route path="/data-status" element={<DataStatusPage />} />
+            <Route path="/model-log" element={<ModelLogPage />} />
             <Route path="/lineup-builder" element={<Navigate to="/optimizer?mode=manual" replace />} />
             <Route path="/optimizer" element={<LineupStudioPage />} />
             <Route path="/lineups" element={<LegacyPage><LineupsPage /></LegacyPage>} />

@@ -1,6 +1,7 @@
 import {
   IconChart,
   IconChat,
+  IconClipboardCheck,
   IconCpu,
   IconDashboard,
   IconGrid,
@@ -19,6 +20,7 @@ export const NAV_ITEMS = [
   { to: '/insights', label: 'Insights', icon: IconChart },
   { to: '/archetypes', label: 'Archetypes', icon: IconGrid },
   { to: '/chat', label: 'AI Chat', icon: IconChat },
+  { to: '/model-log', label: 'Model Log', icon: IconClipboardCheck },
   { to: '/data-status', label: 'Data Status', icon: IconWrench },
 ];
 

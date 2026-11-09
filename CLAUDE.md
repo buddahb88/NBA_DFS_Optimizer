@@ -69,6 +69,16 @@ Early in a season use the prior season until 20+ defenses have 10+ games (the `a
 
 Join to `historical_games` on player_key + game_date for actual results. Filter `COALESCE(pool_excluded, 0) = 0` for the playable pool; the OUT rows tell you which teammates were out that night.
 
+#### `pick_log` - Forward-Test Lineup Picks
+| Column | Description |
+|--------|-------------|
+| slate_id, game_date, site, source | One row per (site, slate_id, source); source e.g. 'max_projection', '..._backfill' |
+| is_forward | 1 = logged before lock (a true forward test); 0 = backfill built after the fact (may be in-sample) |
+| logged_at, lock_time, lineup_json, meta_json | Pick time, first game start, players (player_key, salary, projection, ownership), projection signature |
+| actual_points, dnp_count, players_json, field_percentile, scored_at | Filled from historical_games after the night; field_percentile is an estimate (ownership-sampled field) |
+
+`pick_log_nights` holds hand-entered real contest numbers per slate (cash_line, winning_score). Service: `backend/src/services/pickLogService.js`; CLI: `npm run pick-log -- log-now | score | backfill | list`.
+
 #### `slates` - Available Slates
 | Column | Description |
 |--------|-------------|

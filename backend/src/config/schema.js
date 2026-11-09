@@ -13,6 +13,7 @@ import { migratePlayerArchetypes } from './archetypeMigrations.js';
 import { migrateTeamArchetypeDefense } from './archetypeDefenseMigrations.js';
 import { migrateAgentValueBacktests } from './agentEvalMigrations.js';
 import { migrateChatSessionSlateFk, migrateChatUiBlocks } from './chatMigrations.js';
+import { migratePickLog } from './pickLogMigrations.js';
 
 /**
  * Create all database tables
@@ -69,6 +70,8 @@ export const createTables = async (db) => {
   await migrateChatUiBlocks(db);
   // chat_sessions.slate_id is plain text (backtest chats use past slates not in slates)
   await migrateChatSessionSlateFk(db);
+  // pick_log / pick_log_nights (forward-test log of lineup picks, services/pickLogService.js)
+  await migratePickLog(db);
 };
 
 /**

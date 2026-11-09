@@ -29,6 +29,7 @@
     "backtest:minutes-correction": "node scripts/minutesCorrectionBacktest.js",
     "backtest:blend-calibration": "node scripts/blendCalibrationBacktest.js",
     "ratings:teams": "node scripts/team-ratings.js",
+    "pick-log": "node scripts/pick-log.js",
     "test:accuracy": "vitest run test/projectionBacktest.test.js"
   },
   "keywords": [],

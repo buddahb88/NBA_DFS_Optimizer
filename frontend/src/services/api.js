@@ -142,6 +142,18 @@ export const historicalAPI = {
     api.post('/historical/missing-players', { players, minGames, minAvgDk, ...params }),
 };
 
+// Model log: forward-test picks logged before lock and scored after (backend routes/pickLog.js)
+export const pickLogAPI = {
+  // params: { from, to, site, source, slateId, forward: true | false } -> { nights, summary, sources }
+  getReport: (params = {}) => api.get('/pick-log', { params }),
+  // Run the registered pickers on the live DK main slate now (409 after lock)
+  logNow: (body = {}) => api.post('/pick-log/log-now', body, { timeout: 120000 }),
+  // Score finished nights from the box scores
+  score: (body = {}) => api.post('/pick-log/score', body, { timeout: 120000 }),
+  // Real contest numbers of a night: { site, slateId, gameDate, cashLine, winningScore, contestName, notes }
+  saveNight: (body) => api.put('/pick-log/nights', body),
+};
+
 // Opportunity Radar (O1-O3 metrics scored for Cash / GPP)
 export const opportunityAPI = {
   // params: slateId, slateDate (backtest), site, mode (cash | gpp)
